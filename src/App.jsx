@@ -5,6 +5,7 @@ import {
   Link2, Phone, Mail, ChevronDown, ChevronUp, Check,
   Baby, HeartHandshake, Megaphone, Cross, Loader2, ImageIcon
 } from "lucide-react";
+import { supabase } from "./supabaseClient";
 
 /* ---------------------------------------------------------
    Design tokens
@@ -67,28 +68,114 @@ function Rosette({ size = 40, color = T.gold, spin = false }) {
 }
 
 /* ---------------------------------------------------------
-   Storage helpers (browser localStorage — works once deployed
-   as a standalone site; each visitor's data is local to their
-   own browser only, not shared with other family members yet.
-   A real shared backend, per the spec document, is the next step.)
+   Data layer — real shared Supabase database. Every visitor
+   reads and writes the same rows, unlike the earlier local-only
+   prototype. Field names are mapped between the DB's snake_case
+   columns and the app's camelCase shape.
 --------------------------------------------------------- */
-async function loadKey(key, fallback) {
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-async function saveKey(key, value) {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch (e) {
-    console.error("storage set failed", key, e);
-  }
+function mapMemberRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    branch: row.branch,
+    relation: row.relation || "",
+    city: row.city || "",
+    job: row.job || "",
+    education: row.education || "",
+    bio: row.bio || "",
+    social: row.social || {},
+    extendedVisible: !!row.extended_visible,
+  };
 }
 
-const uid = () => Math.random().toString(36).slice(2, 10);
+async function fetchMembers() {
+  const { data, error } = await supabase.from("members").select("*").order("created_at", { ascending: true });
+  if (error) {
+    console.error("fetchMembers failed", error);
+    return [];
+  }
+  return data.map(mapMemberRow);
+}
+
+async function insertMember(form) {
+  const { data, error } = await supabase
+    .from("members")
+    .insert({ name: form.name, branch: form.branch, relation: form.relation })
+    .select()
+    .single();
+  if (error) {
+    console.error("insertMember failed", error);
+    return null;
+  }
+  return mapMemberRow(data);
+}
+
+async function updateMember(id, patch) {
+  const { error } = await supabase
+    .from("members")
+    .update({
+      job: patch.job,
+      education: patch.education,
+      city: patch.city,
+      bio: patch.bio,
+      social: patch.social,
+      extended_visible: patch.extendedVisible,
+    })
+    .eq("id", id);
+  if (error) console.error("updateMember failed", error);
+}
+
+async function fetchNews() {
+  const { data, error } = await supabase.from("news").select("*").order("date", { ascending: false });
+  if (error) {
+    console.error("fetchNews failed", error);
+    return [];
+  }
+  return data;
+}
+
+async function insertNews(item) {
+  const { data, error } = await supabase.from("news").insert(item).select().single();
+  if (error) {
+    console.error("insertNews failed", error);
+    return null;
+  }
+  return data;
+}
+
+async function fetchEvents() {
+  const { data, error } = await supabase
+    .from("events")
+    .select("*, event_attendees(member_id)")
+    .order("date", { ascending: true });
+  if (error) {
+    console.error("fetchEvents failed", error);
+    return [];
+  }
+  return data.map((ev) => ({
+    ...ev,
+    attendees: (ev.event_attendees || []).map((a) => a.member_id),
+  }));
+}
+
+async function insertEvent(form) {
+  const { data, error } = await supabase.from("events").insert(form).select().single();
+  if (error) {
+    console.error("insertEvent failed", error);
+    return null;
+  }
+  return { ...data, attendees: [] };
+}
+
+async function setAttendance(eventId, memberId, attending) {
+  if (attending) {
+    const { error } = await supabase.from("event_attendees").delete().eq("event_id", eventId).eq("member_id", memberId);
+    if (error) console.error("removeAttendance failed", error);
+  } else {
+    const { error } = await supabase.from("event_attendees").insert({ event_id: eventId, member_id: memberId });
+    if (error) console.error("addAttendance failed", error);
+  }
+}
 
 const SEED_MEMBERS = [
   { id: "m1", name: "سالم عبدالله", branch: "فرع الجد الأول", relation: "الجد الأكبر", city: "الرياض", job: "", education: "", bio: "", social: {}, extendedVisible: false },
@@ -190,10 +277,8 @@ function NewsTab({ news, setNews }) {
 
   const submit = async () => {
     if (!text.trim()) return;
-    const item = { id: uid(), type, text: text.trim(), date: new Date().toISOString().slice(0, 10) };
-    const updated = [item, ...news];
-    setNews(updated);
-    await saveKey("news-data", updated);
+    const created = await insertNews({ type, text: text.trim(), date: new Date().toISOString().slice(0, 10) });
+    if (created) setNews([created, ...news]);
     setText("");
     setOpen(false);
   };
@@ -412,22 +497,23 @@ function EventsTab({ events, setEvents, members, meId }) {
 
   const submit = async () => {
     if (!form.title.trim() || !form.date) return;
-    const item = { id: uid(), ...form, attendees: [] };
-    const updated = [item, ...events];
-    setEvents(updated);
-    await saveKey("events-data", updated);
+    const created = await insertEvent(form);
+    if (created) setEvents([created, ...events]);
     setForm({ title: "", date: "", location: "", description: "" });
     setOpen(false);
   };
 
   const toggleRSVP = async (eventId) => {
-    const updated = events.map((ev) => {
-      if (ev.id !== eventId) return ev;
-      const attending = ev.attendees.includes(meId);
-      return { ...ev, attendees: attending ? ev.attendees.filter((a) => a !== meId) : [...ev.attendees, meId] };
-    });
+    const ev = events.find((e) => e.id === eventId);
+    if (!ev) return;
+    const attending = ev.attendees.includes(meId);
+    await setAttendance(eventId, meId, attending);
+    const updated = events.map((e) =>
+      e.id !== eventId
+        ? e
+        : { ...e, attendees: attending ? e.attendees.filter((a) => a !== meId) : [...e.attendees, meId] }
+    );
     setEvents(updated);
-    await saveKey("events-data", updated);
   };
 
   return (
@@ -576,10 +662,8 @@ function MembersTab({ members, setMembers }) {
 
   const submit = async () => {
     if (!form.name.trim() || !form.branch.trim()) return;
-    const item = { id: uid(), ...form, city: "", job: "", education: "", bio: "", social: {}, extendedVisible: false };
-    const updated = [item, ...members];
-    setMembers(updated);
-    await saveKey("members-data", updated);
+    const created = await insertMember(form);
+    if (created) setMembers([created, ...members]);
     setForm({ name: "", branch: "", relation: "" });
     setOpen(false);
   };
@@ -631,9 +715,9 @@ function ProfileTab({ members, setMembers, meId, setMeId }) {
   useEffect(() => setForm(me), [meId]);
 
   const save = async () => {
+    await updateMember(form.id, form);
     const updated = members.map((m) => (m.id === form.id ? form : m));
     setMembers(updated);
-    await saveKey("members-data", updated);
   };
 
   if (!me) return <EmptyState text="لا يوجد أعضاء بعد." />;
@@ -716,18 +800,15 @@ export default function FamilyApp() {
   const [members, setMembers] = useState([]);
   const [news, setNews] = useState([]);
   const [events, setEvents] = useState([]);
-  const [meId, setMeId] = useState("m3");
+  const [meId, setMeId] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const [m, n, e] = await Promise.all([
-        loadKey("members-data", SEED_MEMBERS),
-        loadKey("news-data", SEED_NEWS),
-        loadKey("events-data", SEED_EVENTS),
-      ]);
+      const [m, n, e] = await Promise.all([fetchMembers(), fetchNews(), fetchEvents()]);
       setMembers(m);
       setNews(n);
       setEvents(e);
+      if (m.length) setMeId(m[0].id);
       setLoading(false);
     })();
   }, []);
