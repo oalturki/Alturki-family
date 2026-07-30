@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   'https://xvbilckeuihurozfshzg.supabase.co',
-  'YOUR_PUBLISHABLE_KEY' // من Supabase Dashboard → Settings → API
+'sb_publishable_iS95LUZ314blsxh15oP4BA_jxIYhm8l' // من Supabase
 );
 
 // ============================================================
