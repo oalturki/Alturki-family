@@ -2,12 +2,7 @@
 // منطق ربط حساب الدخول (بعد Email OTP) بسجل العضو في members
 // يُستخدم في تطبيق alturki.family (React + Supabase)
 
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  'https://xvbilckeuihurozfshzg.supabase.co',
-'sb_publishable_iS95LUZ314blsxh15oP4BA_jxIYhm8l' // من Supabase
-);
+import { supabase } from './supabaseClient';
 
 // ============================================================
 // 1) إرسال رمز الدخول للإيميل
