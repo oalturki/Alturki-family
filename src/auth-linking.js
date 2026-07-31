@@ -44,12 +44,38 @@ export async function checkPhoneEligibility(phone) {
 }
 
 // ============================================================
+// أداة مساعدة: تحويل رسائل خطأ Supabase الإنجليزية العامة
+// لرسائل عربية دقيقة توضح المشكلة الفعلية للمستخدم
+// ============================================================
+function translateAuthError(error) {
+  const msg = (error?.message || '').toLowerCase();
+
+  if (msg.includes('already registered') || msg.includes('already exists') || error?.code === 'user_already_exists') {
+    return new Error('هذا البريد الإلكتروني مسجّل مسبقًا بحساب آخر. جرّب تسجيل الدخول بدل التسجيل، أو استخدم بريدًا مختلفًا.');
+  }
+  if (msg.includes('password') && (msg.includes('short') || msg.includes('at least') || msg.includes('weak'))) {
+    return new Error('كلمة المرور قصيرة جدًا. لازم تكون 6 أحرف على الأقل.');
+  }
+  if (msg.includes('invalid') && msg.includes('email')) {
+    return new Error('صيغة البريد الإلكتروني غير صحيحة.');
+  }
+  if (msg.includes('rate limit') || msg.includes('too many')) {
+    return new Error('محاولات كثيرة بوقت قصير. انتظر قليلًا وحاول مرة ثانية.');
+  }
+  if (msg.includes('phone') && msg.includes('already')) {
+    return new Error('رقم الجوال هذا مسجّل مسبقًا بحساب آخر.');
+  }
+  // أي خطأ غير متوقع: نعرض رسالة Supabase الأصلية بدل إخفائها بالكامل
+  return new Error(`تعذّر إتمام العملية: ${error?.message || 'خطأ غير معروف'}`);
+}
+
+// ============================================================
 // 2) إنشاء حساب جديد ببريد + كلمة مرور
 //    (الحساب يُنشأ ويُفعّل فورًا لأن Confirm email معطّل عمدًا)
 // ============================================================
 export async function registerAccount(email, password) {
   const { data, error } = await supabase.auth.signUp({ email, password });
-  if (error) throw error;
+  if (error) throw translateAuthError(error);
   return data.user;
 }
 
@@ -64,14 +90,14 @@ export async function requestPhoneVerification(phone) {
     'check_and_increment_phone_attempts',
     { p_phone: normalizedPhone }
   );
-  if (rpcErr) throw rpcErr;
+  if (rpcErr) throw translateAuthError(rpcErr);
   if (!allowed) {
     throw new Error('تجاوزت الحد المسموح لمحاولات إرسال رمز التحقق لهذا الرقم (5 محاولات).');
   }
 
   // ربط رقم الجوال بالحساب الحالي وإرسال رمز تحقق له
   const { error } = await supabase.auth.updateUser({ phone: normalizedPhone });
-  if (error) throw error;
+  if (error) throw translateAuthError(error);
   return true;
 }
 
@@ -86,7 +112,15 @@ export async function confirmPhoneVerification(phone, token) {
     token,
     type: 'phone_change',
   });
-  if (error) throw error;
+  if (error) {
+    if ((error.message || '').toLowerCase().includes('expired')) {
+      throw new Error('رمز التحقق منتهي الصلاحية. اطلب رمزًا جديدًا.');
+    }
+    if ((error.message || '').toLowerCase().includes('invalid')) {
+      throw new Error('رمز التحقق غير صحيح. تأكد منه وحاول مرة ثانية.');
+    }
+    throw translateAuthError(error);
+  }
   return data.user;
 }
 
@@ -134,7 +168,12 @@ export async function getLinkedMember() {
 // ============================================================
 export async function signInWithPassword(email, password) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw error;
+  if (error) {
+    if ((error.message || '').toLowerCase().includes('invalid')) {
+      throw new Error('البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+    }
+    throw translateAuthError(error);
+  }
   return data.user;
 }
 
