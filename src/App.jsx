@@ -296,11 +296,28 @@ function IconButton({ onClick, children, active }) {
 const inputStyle = { width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 10, border: `1px solid ${T.line}`, fontFamily: "inherit", fontSize: 13.5, background: T.sand, color: T.text };
 const primaryBtnStyle = { background: T.ink, color: T.sand, border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" };
 
+function ConfirmModal({ text, onConfirm, onCancel }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onCancel}>
+      <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340, fontFamily: "'Tajawal', sans-serif" }} onClick={(e) => e.stopPropagation()} dir="rtl">
+        <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.7, marginBottom: 16, textAlign: "center" }}>{text}</div>
+        <button onClick={onConfirm} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
+          تأكيد الحذف
+        </button>
+        <button onClick={onCancel} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
+          تراجع
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function NewsTab({ news, setNews, canManageNews }) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState("عام");
   const [text, setText] = useState("");
   const [editingId, setEditingId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const submit = async () => {
     if (!text.trim()) return;
@@ -324,10 +341,12 @@ function NewsTab({ news, setNews, canManageNews }) {
     setOpen(true);
   };
 
-  const remove = async (id) => {
-    if (!window.confirm("متأكد إنك تبين تحذفين هذا الخبر؟ هذا الإجراء لا يمكن التراجع عنه.")) return;
-    const ok = await deleteNews(id);
-    if (ok) setNews(news.filter((n) => n.id !== id));
+  const remove = (id) => setConfirmDeleteId(id);
+
+  const confirmRemove = async () => {
+    const ok = await deleteNews(confirmDeleteId);
+    if (ok) setNews(news.filter((n) => n.id !== confirmDeleteId));
+    setConfirmDeleteId(null);
   };
 
   return (
@@ -381,6 +400,14 @@ function NewsTab({ news, setNews, canManageNews }) {
           </div>
         );
       })}
+
+      {confirmDeleteId && (
+        <ConfirmModal
+          text="متأكد إنك تبي تحذف هذا الخبر؟ هذا الإجراء لا يمكن التراجع عنه."
+          onConfirm={confirmRemove}
+          onCancel={() => setConfirmDeleteId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -441,6 +468,7 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ title: "", date: "", location: "", description: "" });
   const [editingId, setEditingId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const submit = async () => {
     if (!form.title.trim() || !form.date) return;
@@ -465,10 +493,12 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
     setOpen(true);
   };
 
-  const remove = async (id) => {
-    if (!window.confirm("متأكد إنك تبين تحذفين هذي المناسبة؟ هذا الإجراء لا يمكن التراجع عنه.")) return;
-    const ok = await deleteEvent(id);
-    if (ok) setEvents(events.filter((e) => e.id !== id));
+  const remove = (id) => setConfirmDeleteId(id);
+
+  const confirmRemove = async () => {
+    const ok = await deleteEvent(confirmDeleteId);
+    if (ok) setEvents(events.filter((e) => e.id !== confirmDeleteId));
+    setConfirmDeleteId(null);
   };
 
   const toggleRSVP = async (eventId) => {
@@ -529,6 +559,14 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
           </div>
         );
       })}
+
+      {confirmDeleteId && (
+        <ConfirmModal
+          text="متأكد إنك تبي تحذف هذي المناسبة؟ هذا الإجراء لا يمكن التراجع عنه."
+          onConfirm={confirmRemove}
+          onCancel={() => setConfirmDeleteId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -757,6 +795,7 @@ function AdminsTab() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [confirmRemoveAdmin, setConfirmRemoveAdmin] = useState(null);
 
   const loadAdmins = async () => {
     setLoading(true);
@@ -804,10 +843,12 @@ function AdminsTab() {
     if (!error) setAdmins((prev) => prev.map((a) => (a.id === adminRow.id ? { ...a, permissions: updated } : a)));
   };
 
-  const handleRemoveAdmin = async (adminRow) => {
-    if (!window.confirm(`متأكد إنك تبين تشيلين إشراف ${adminRow.memberName}؟`)) return;
-    const { error } = await supabase.from("member_roles").delete().eq("id", adminRow.id);
-    if (!error) setAdmins((prev) => prev.filter((a) => a.id !== adminRow.id));
+  const handleRemoveAdmin = (adminRow) => setConfirmRemoveAdmin(adminRow);
+
+  const doRemoveAdmin = async () => {
+    const { error } = await supabase.from("member_roles").delete().eq("id", confirmRemoveAdmin.id);
+    if (!error) setAdmins((prev) => prev.filter((a) => a.id !== confirmRemoveAdmin.id));
+    setConfirmRemoveAdmin(null);
   };
 
   return (
@@ -850,6 +891,14 @@ function AdminsTab() {
             ))}
           </div>
         ))
+      )}
+
+      {confirmRemoveAdmin && (
+        <ConfirmModal
+          text={`متأكد إنك تبي تشيل إشراف ${confirmRemoveAdmin.memberName}؟`}
+          onConfirm={doRemoveAdmin}
+          onCancel={() => setConfirmRemoveAdmin(null)}
+        />
       )}
     </div>
   );
