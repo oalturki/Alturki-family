@@ -1,18 +1,27 @@
 import React, { useState, useEffect } from "react";
-import { Loader2, Mail, Phone, ShieldCheck, Send } from "lucide-react";
+import { Loader2, Phone, ShieldCheck, Mail, Fingerprint, UserPlus, LogIn } from "lucide-react";
 import {
-  sendLoginCode,
-  verifyLoginCode,
+  checkPhoneEligibility,
+  registerAccount,
+  requestPhoneVerification,
+  confirmPhoneVerification,
+  linkAccountToMember,
   getLinkedMember,
-  tryAutoLinkByPhone,
-  submitJoinRequest,
+  signInWithPassword,
+  requestPasswordReset,
+  registerPasskey,
+  signInWithPasskey,
 } from "./auth-linking";
+import { supabase } from "./supabaseClient";
 
 /* ---------------------------------------------------------
-   بوابة الدخول — تدير تدفق: بريد → رمز OTP → ربط تلقائي
-   برقم الجوال → طلب انضمام (لو ما فيه تطابق). بعد نجاح
-   الربط تُظهر التطبيق فعليًا عبر render-prop:
-     <AuthGate>{(me) => <App meId={me.id} />}</AuthGate>
+   بوابة الدخول — تدفقان رئيسيان:
+   1) تسجيل عضو جديد: جوال+بريد+كلمة مرور → تحقق جوال (مرة واحدة،
+      حد 5 محاولات) → ربط الحساب بملف العضو → عرض اختياري لتفعيل
+      دخول سريع بالبصمة (Passkey).
+   2) دخول عضو سابق: بصمة (Passkey) كطريقة افتراضية، أو بريد+كلمة
+      مرور كبديل دائم.
+   بعد نجاح أي مسار: <AuthGate>{(me) => <App meId={me.id} />}</AuthGate>
 --------------------------------------------------------- */
 
 const T = {
@@ -20,7 +29,6 @@ const T = {
   sand: "#F4EFE3",
   card: "#FFFDF8",
   gold: "#B4894A",
-  goldLight: "#D9B876",
   clay: "#A24936",
   text: "#1F2A28",
   muted: "#6B7370",
@@ -90,6 +98,24 @@ const ghostBtnStyle = {
   marginTop: 8,
 };
 
+const goldBtnStyle = {
+  ...btnStyle,
+  background: T.gold,
+  color: T.ink,
+};
+
+const linkTextStyle = {
+  color: T.gold,
+  fontSize: 12.5,
+  textAlign: "center",
+  marginTop: 12,
+  cursor: "pointer",
+  background: "none",
+  border: "none",
+  width: "100%",
+  fontFamily: "inherit",
+};
+
 function Spinner() {
   return <Loader2 size={15} style={{ animation: "authgate-spin 1s linear infinite" }} />;
 }
@@ -99,94 +125,173 @@ function ErrorMsg({ msg }) {
   return <div style={{ color: T.clay, fontSize: 12.5, marginTop: 10, lineHeight: 1.6 }}>{msg}</div>;
 }
 
+function SuccessMsg({ msg }) {
+  if (!msg) return null;
+  return <div style={{ color: "#3A7D5C", fontSize: 12.5, marginTop: 10, lineHeight: 1.6 }}>{msg}</div>;
+}
+
 export default function AuthGate({ children }) {
   const [checking, setChecking] = useState(true);
   const [member, setMember] = useState(null);
 
-  const [step, setStep] = useState("email"); // email | code | phone | join | pending
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
+  // mode: landing | register | login
+  const [mode, setMode] = useState("landing");
+  // registerStep: info | phone | passkey-offer
+  const [registerStep, setRegisterStep] = useState("info");
+
   const [phone, setPhone] = useState("");
-  const [joinForm, setJoinForm] = useState({ fullName: "", region: "" });
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [pendingMember, setPendingMember] = useState(null);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  // عند فتح التطبيق: تحقق هل توجد جلسة دخول سابقة مربوطة بعضو
+  // عند فتح التطبيق: تحقق هل توجد جلسة سابقة مربوطة بعضو
   useEffect(() => {
     (async () => {
       try {
         const m = await getLinkedMember();
-        if (m) setMember(m);
+        if (m) {
+          setMember(m);
+        } else {
+          // جلسة موجودة لكن غير مربوطة (تسجيل لم يكتمل) — نظّف واعرض البداية
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) await supabase.auth.signOut();
+        }
       } catch (e) {
-        // لا توجد جلسة سابقة — يبقى على شاشة الدخول
+        // لا توجد جلسة سابقة
       }
       setChecking(false);
     })();
   }, []);
 
-  const handleSendCode = async () => {
+  const resetMessages = () => {
     setError("");
-    if (!email.trim()) return setError("الرجاء إدخال بريد إلكتروني صحيح.");
+    setSuccess("");
+  };
+
+  /* ---------------- تسجيل عضو جديد ---------------- */
+
+  const handleCheckPhoneAndRegister = async () => {
+    resetMessages();
+    if (!phone.trim() || !email.trim() || !password.trim()) {
+      return setError("الرجاء تعبئة رقم الجوال والبريد وكلمة المرور.");
+    }
+    if (password.length < 6) {
+      return setError("كلمة المرور يجب أن تكون 6 أحرف على الأقل.");
+    }
     setBusy(true);
     try {
-      await sendLoginCode(email.trim());
-      setStep("code");
+      const result = await checkPhoneEligibility(phone.trim());
+      if (result.status === "not_found") {
+        setError("رقم الجوال غير موجود بقائمة العائلة المسجّلة. تأكد من الرقم أو تواصل مع أحد أفراد العائلة.");
+        setBusy(false);
+        return;
+      }
+      if (result.status === "already_claimed") {
+        setError("هذا الرقم مرتبط بحساب مسبقًا. جرّب تسجيل الدخول بدلًا من ذلك.");
+        setBusy(false);
+        return;
+      }
+
+      setPendingMember(result.member);
+      await registerAccount(email.trim(), password);
+      await requestPhoneVerification(phone.trim());
+      setRegisterStep("phone");
+      setSuccess("تم إرسال رمز التحقق إلى جوالك.");
     } catch (e) {
-      setError("تعذّر إرسال الرمز. تأكد من البريد وحاول مجددًا.");
+      setError(e.message?.includes("تجاوزت") ? e.message : "تعذّر إتمام التسجيل. تحقق من البيانات وحاول مجددًا.");
     }
     setBusy(false);
   };
 
-  const handleVerifyCode = async () => {
-    setError("");
-    if (!code.trim()) return setError("الرجاء إدخال الرمز المرسل لبريدك.");
+  const handleResendPhoneCode = async () => {
+    resetMessages();
     setBusy(true);
     try {
-      await verifyLoginCode(email.trim(), code.trim());
-      const m = await getLinkedMember();
-      if (m) {
-        setMember(m);
-      } else {
-        setStep("phone");
-      }
+      await requestPhoneVerification(phone.trim());
+      setSuccess("تم إرسال رمز جديد إلى جوالك.");
+    } catch (e) {
+      setError(e.message || "تعذّر إرسال الرمز.");
+    }
+    setBusy(false);
+  };
+
+  const handleConfirmPhone = async () => {
+    resetMessages();
+    if (!code.trim()) return setError("الرجاء إدخال رمز التحقق.");
+    setBusy(true);
+    try {
+      await confirmPhoneVerification(phone.trim(), code.trim());
+      await linkAccountToMember(pendingMember.id);
+      setRegisterStep("passkey-offer");
     } catch (e) {
       setError("الرمز غير صحيح أو منتهي الصلاحية. حاول مرة أخرى.");
     }
     setBusy(false);
   };
 
-  const handlePhoneMatch = async () => {
-    setError("");
-    if (!phone.trim()) return setError("الرجاء إدخال رقم الجوال المسجل بقائمة العائلة.");
+  const finishRegistration = async () => {
+    const m = await getLinkedMember();
+    setMember(m);
+  };
+
+  const handleEnablePasskey = async () => {
+    resetMessages();
     setBusy(true);
     try {
-      const result = await tryAutoLinkByPhone(phone.trim());
-      if (result.status === "linked") {
-        const m = await getLinkedMember();
-        setMember(m);
-      } else {
-        setStep("join");
-      }
+      await registerPasskey();
+      setSuccess("تم تفعيل الدخول السريع بالبصمة.");
+      setTimeout(finishRegistration, 800);
     } catch (e) {
-      setError("حدث خطأ أثناء البحث. حاول مرة أخرى.");
+      setError("تعذّر تفعيل البصمة على هذا الجهاز. يمكنك تفعيلها لاحقًا من إعدادات حسابك.");
     }
     setBusy(false);
   };
 
-  const handleJoinRequest = async () => {
-    setError("");
-    if (!joinForm.fullName.trim()) return setError("الرجاء إدخال الاسم الكامل.");
+  /* ---------------- تسجيل الدخول ---------------- */
+
+  const handlePasskeyLogin = async () => {
+    resetMessages();
     setBusy(true);
     try {
-      await submitJoinRequest({
-        phone: phone.trim(),
-        email: email.trim(),
-        fullName: joinForm.fullName.trim(),
-        region: joinForm.region.trim(),
-      });
-      setStep("pending");
+      await signInWithPasskey();
+      const m = await getLinkedMember();
+      if (m) setMember(m);
+      else setError("تم الدخول لكن الحساب غير مرتبط بملف عائلي. تواصل للمساعدة.");
     } catch (e) {
-      setError("تعذّر إرسال الطلب. حاول مرة أخرى.");
+      setError("تعذّر الدخول بالبصمة. جرّب البريد وكلمة المرور.");
+    }
+    setBusy(false);
+  };
+
+  const handlePasswordLogin = async () => {
+    resetMessages();
+    if (!email.trim() || !password.trim()) return setError("الرجاء إدخال البريد وكلمة المرور.");
+    setBusy(true);
+    try {
+      await signInWithPassword(email.trim(), password);
+      const m = await getLinkedMember();
+      if (m) setMember(m);
+      else setError("تم الدخول لكن الحساب غير مرتبط بملف عائلي. تواصل للمساعدة.");
+    } catch (e) {
+      setError("البريد أو كلمة المرور غير صحيحة.");
+    }
+    setBusy(false);
+  };
+
+  const handleForgotPassword = async () => {
+    resetMessages();
+    if (!email.trim()) return setError("أدخل بريدك أولًا لإرسال رابط الاستعادة.");
+    setBusy(true);
+    try {
+      await requestPasswordReset(email.trim());
+      setSuccess("إذا كان البريد مسجّلاً ومؤكدًا، ستصلك رسالة استعادة كلمة المرور.");
+    } catch (e) {
+      setError("تعذّر إرسال رابط الاستعادة.");
     }
     setBusy(false);
   };
@@ -200,7 +305,6 @@ export default function AuthGate({ children }) {
     );
   }
 
-  // نجح الدخول والربط — سلّم التحكم للتطبيق الفعلي
   if (member) {
     return children(member);
   }
@@ -217,106 +321,79 @@ export default function AuthGate({ children }) {
       </div>
 
       <div style={cardStyle}>
-        {step === "email" && (
+        {mode === "landing" && (
           <>
-            <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, display: "flex", alignItems: "center", gap: 8 }}>
-              <Mail size={16} color={T.gold} /> سجّل الدخول ببريدك الإلكتروني
-            </div>
-            <input
-              type="email"
-              placeholder="example@email.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={inputStyle}
-            />
-            <button onClick={handleSendCode} disabled={busy} style={btnStyle}>
-              {busy ? <Spinner /> : <Send size={15} />}
-              إرسال رمز الدخول
+            <button style={btnStyle} onClick={() => { resetMessages(); setMode("register"); setRegisterStep("info"); }}>
+              <UserPlus size={16} /> تسجيل عضو جديد
+            </button>
+            <button style={ghostBtnStyle} onClick={() => { resetMessages(); setMode("login"); }}>
+              <LogIn size={16} /> لديّ حساب بالفعل
             </button>
           </>
         )}
 
-        {step === "code" && (
+        {mode === "register" && registerStep === "info" && (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>تسجيل عضو جديد</div>
+            <div style={{ fontSize: 12, color: T.muted, marginTop: 6, lineHeight: 1.6 }}>
+              أدخل رقم جوالك المسجّل بقائمة العائلة، وبريدك، وكلمة مرور تختارها.
+            </div>
+            <input type="tel" placeholder="رقم الجوال" value={phone} onChange={(e) => setPhone(e.target.value)} style={inputStyle} />
+            <input type="email" placeholder="البريد الإلكتروني" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
+            <input type="password" placeholder="كلمة المرور (6 أحرف فأكثر)" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
+            <button style={btnStyle} onClick={handleCheckPhoneAndRegister} disabled={busy}>
+              {busy && <Spinner />} متابعة
+            </button>
+            <button style={ghostBtnStyle} onClick={() => { resetMessages(); setMode("landing"); }}>رجوع</button>
+          </>
+        )}
+
+        {mode === "register" && registerStep === "phone" && (
           <>
             <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, display: "flex", alignItems: "center", gap: 8 }}>
-              <ShieldCheck size={16} color={T.gold} /> أدخل الرمز المرسل إلى {email}
+              <Phone size={16} color={T.gold} /> أدخل رمز التحقق المرسل إلى {phone}
             </div>
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="رمز التحقق"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              style={inputStyle}
-            />
-            <button onClick={handleVerifyCode} disabled={busy} style={btnStyle}>
+            <input type="text" inputMode="numeric" placeholder="رمز التحقق" value={code} onChange={(e) => setCode(e.target.value)} style={inputStyle} />
+            <button style={btnStyle} onClick={handleConfirmPhone} disabled={busy}>
               {busy && <Spinner />} تأكيد الرمز
             </button>
-            <button
-              onClick={() => { setStep("email"); setCode(""); setError(""); }}
-              style={ghostBtnStyle}
-            >
-              تغيير البريد
-            </button>
+            <button style={linkTextStyle} onClick={handleResendPhoneCode} disabled={busy}>إعادة إرسال الرمز</button>
           </>
         )}
 
-        {step === "phone" && (
-          <>
-            <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, display: "flex", alignItems: "center", gap: 8 }}>
-              <Phone size={16} color={T.gold} /> أدخل رقم جوالك لربط ملفك العائلي
-            </div>
-            <div style={{ fontSize: 12, color: T.muted, marginTop: 6, lineHeight: 1.6 }}>
-              نستخدم رقم الجوال المسجل بقائمة العائلة لإيجاد ملفك تلقائيًا.
-            </div>
-            <input
-              type="tel"
-              placeholder="05xxxxxxxx"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              style={inputStyle}
-            />
-            <button onClick={handlePhoneMatch} disabled={busy} style={btnStyle}>
-              {busy && <Spinner />} بحث وربط
-            </button>
-          </>
-        )}
-
-        {step === "join" && (
-          <>
-            <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>ما لقينا تطابقًا تلقائيًا</div>
-            <div style={{ fontSize: 12, color: T.muted, marginTop: 6, lineHeight: 1.6 }}>
-              قدّم طلب انضمام وسيراجعه أحد مشرفي العائلة قريبًا.
-            </div>
-            <input
-              placeholder="الاسم الكامل"
-              value={joinForm.fullName}
-              onChange={(e) => setJoinForm({ ...joinForm, fullName: e.target.value })}
-              style={inputStyle}
-            />
-            <input
-              placeholder="المنطقة (اختياري)"
-              value={joinForm.region}
-              onChange={(e) => setJoinForm({ ...joinForm, region: e.target.value })}
-              style={inputStyle}
-            />
-            <button onClick={handleJoinRequest} disabled={busy} style={btnStyle}>
-              {busy && <Spinner />} إرسال طلب الانضمام
-            </button>
-          </>
-        )}
-
-        {step === "pending" && (
-          <div style={{ textAlign: "center", padding: "10px 0" }}>
+        {mode === "register" && registerStep === "passkey-offer" && (
+          <div style={{ textAlign: "center" }}>
             <ShieldCheck size={30} color={T.gold} />
-            <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, marginTop: 10 }}>طلبك قيد المراجعة</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, marginTop: 10 }}>تم تفعيل ملفك بنجاح!</div>
             <div style={{ fontSize: 12.5, color: T.muted, marginTop: 6, lineHeight: 1.7 }}>
-              سيتواصل معك أحد مشرفي العائلة بعد مراجعة طلبك. يمكنك إغلاق الصفحة والعودة لاحقًا.
+              فعّل الدخول السريع بالبصمة أو الوجه لهذا الجهاز، بدل كتابة كلمة المرور كل مرة.
             </div>
+            <button style={goldBtnStyle} onClick={handleEnablePasskey} disabled={busy}>
+              {busy ? <Spinner /> : <Fingerprint size={16} />} تفعيل الدخول بالبصمة
+            </button>
+            <button style={ghostBtnStyle} onClick={finishRegistration}>تخطّي الآن</button>
           </div>
         )}
 
+        {mode === "login" && (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>تسجيل الدخول</div>
+            <button style={goldBtnStyle} onClick={handlePasskeyLogin} disabled={busy}>
+              {busy ? <Spinner /> : <Fingerprint size={16} />} دخول سريع بالبصمة
+            </button>
+            <div style={{ textAlign: "center", fontSize: 11.5, color: T.muted, margin: "14px 0" }}>— أو —</div>
+            <input type="email" placeholder="البريد الإلكتروني" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
+            <input type="password" placeholder="كلمة المرور" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
+            <button style={btnStyle} onClick={handlePasswordLogin} disabled={busy}>
+              {busy && <Spinner />} <Mail size={15} /> دخول بالبريد وكلمة المرور
+            </button>
+            <button style={linkTextStyle} onClick={handleForgotPassword}>نسيت كلمة المرور؟</button>
+            <button style={ghostBtnStyle} onClick={() => { resetMessages(); setMode("landing"); }}>رجوع</button>
+          </>
+        )}
+
         <ErrorMsg msg={error} />
+        <SuccessMsg msg={success} />
       </div>
     </div>
   );
