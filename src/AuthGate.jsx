@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Loader2, Phone, ShieldCheck, Mail, Fingerprint, UserPlus, LogIn } from "lucide-react";
 import {
   checkPhoneEligibility,
@@ -9,6 +9,7 @@ import {
   getLinkedMember,
   signInWithPassword,
   requestPasswordReset,
+  updatePassword,
   registerPasskey,
   signInWithPasskey,
 } from "./auth-linking";
@@ -149,23 +150,42 @@ export default function AuthGate({ children }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const [isRecovery, setIsRecovery] = useState(false);
+  const isRecoveryRef = useRef(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [newPassword2, setNewPassword2] = useState("");
+
   // عند فتح التطبيق: تحقق هل توجد جلسة سابقة مربوطة بعضو
+  // أو هل هذه جلسة "استعادة كلمة مرور" مؤقتة (من رابط البريد)
   useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        isRecoveryRef.current = true;
+        setIsRecovery(true);
+        setChecking(false);
+      }
+    });
+
     (async () => {
       try {
         const m = await getLinkedMember();
-        if (m) {
+        if (m && !isRecoveryRef.current) {
           setMember(m);
-        } else {
+        } else if (!isRecoveryRef.current) {
           // جلسة موجودة لكن غير مربوطة (تسجيل لم يكتمل) — نظّف واعرض البداية
+          // إلا إذا كانت هذه جلسة استعادة كلمة مرور
           const { data: { user } } = await supabase.auth.getUser();
           if (user) await supabase.auth.signOut();
         }
       } catch (e) {
         // لا توجد جلسة سابقة
       }
-      setChecking(false);
+      if (!isRecoveryRef.current) setChecking(false);
     })();
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
   }, []);
 
   const resetMessages = () => {
@@ -293,7 +313,29 @@ export default function AuthGate({ children }) {
       await requestPasswordReset(email.trim());
       setSuccess("إذا كان البريد مسجّلاً ومؤكدًا، ستصلك رسالة استعادة كلمة المرور.");
     } catch (e) {
-      setError("تعذّر إرسال رابط الاستعادة.");
+      setError(e.message || "تعذّر إرسال رابط الاستعادة.");
+    }
+    setBusy(false);
+  };
+
+  const handleSetNewPassword = async () => {
+    resetMessages();
+    if (!newPassword.trim() || !newPassword2.trim()) {
+      return setError("الرجاء تعبئة كلمة المرور الجديدة مرتين للتأكيد.");
+    }
+    if (newPassword !== newPassword2) {
+      return setError("كلمتا المرور غير متطابقتين.");
+    }
+    setBusy(true);
+    try {
+      await updatePassword(newPassword);
+      setSuccess("تم تغيير كلمة المرور بنجاح.");
+      isRecoveryRef.current = false;
+      setIsRecovery(false);
+      const m = await getLinkedMember();
+      if (m) setMember(m);
+    } catch (e) {
+      setError(e.message || "تعذّر تغيير كلمة المرور.");
     }
     setBusy(false);
   };
@@ -309,6 +351,45 @@ export default function AuthGate({ children }) {
 
   if (member) {
     return children(member);
+  }
+
+  if (isRecovery) {
+    return (
+      <div dir="rtl" style={box}>
+        <style>{`${FONTS} @keyframes authgate-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }`}</style>
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
+          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 26, color: T.ink, fontWeight: 700 }}>
+            عائلة آل تركي
+          </div>
+          <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>alturki.family</div>
+        </div>
+        <div style={cardStyle}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>تعيين كلمة مرور جديدة</div>
+          <div style={{ fontSize: 12, color: T.muted, marginTop: 6, lineHeight: 1.6 }}>
+            أدخل كلمة المرور الجديدة لحسابك.
+          </div>
+          <input
+            type="password"
+            placeholder="كلمة المرور الجديدة (6 أحرف فأكثر)"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            style={inputStyle}
+          />
+          <input
+            type="password"
+            placeholder="تأكيد كلمة المرور الجديدة"
+            value={newPassword2}
+            onChange={(e) => setNewPassword2(e.target.value)}
+            style={inputStyle}
+          />
+          <button style={btnStyle} onClick={handleSetNewPassword} disabled={busy}>
+            {busy && <Spinner />} تغيير كلمة المرور
+          </button>
+          <ErrorMsg msg={error} />
+          <SuccessMsg msg={success} />
+        </div>
+      </div>
+    );
   }
 
   return (
