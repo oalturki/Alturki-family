@@ -179,12 +179,39 @@ export async function signInWithPassword(email, password) {
 
 // ============================================================
 // 8) استعادة كلمة المرور
+//    (يتحقق أولًا من أن البريد مؤكَّد فعليًا عبر email_confirmed_at،
+//     لأن الاعتماد على بريد غير مؤكد لعملية حساسة كهذه غير آمن)
 // ============================================================
 export async function requestPasswordReset(email) {
+  const { data: confirmed, error: checkErr } = await supabase.rpc(
+    'is_email_confirmed',
+    { p_email: email }
+  );
+  if (checkErr) throw translateAuthError(checkErr);
+
+  if (!confirmed) {
+    throw new Error(
+      'بريدك الإلكتروني غير مؤكد بعد. تحقق من صندوق بريدك عن رسالة التأكيد التي أُرسلت عند التسجيل، أو تواصل مع أحد أفراد العائلة للمساعدة.'
+    );
+  }
+
   const { error } = await supabase.auth.resetPasswordForEmail(email);
-  // ملاحظة: Supabase لا يفصح إن كان البريد موجودًا أو مؤكدًا لأسباب أمنية،
+  // ملاحظة: Supabase لا يفصح إن كان البريد موجودًا لأسباب أمنية،
   // فالرسالة العامة "تحقق من بريدك" تظهر دائمًا بغض النظر عن الحالة الفعلية.
   if (error) throw error;
+  return true;
+}
+
+// ============================================================
+// 8ب) تعيين كلمة مرور جديدة (يُستدعى من شاشة استعادة كلمة المرور
+//      بعد الدخول عبر رابط البريد — جلسة "recovery" مؤقتة)
+// ============================================================
+export async function updatePassword(newPassword) {
+  if (newPassword.length < 6) {
+    throw new Error('كلمة المرور يجب أن تكون 6 أحرف على الأقل.');
+  }
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw translateAuthError(error);
   return true;
 }
 
