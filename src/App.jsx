@@ -296,11 +296,13 @@ function IconButton({ onClick, children, active }) {
 const inputStyle = { width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 10, border: `1px solid ${T.line}`, fontFamily: "inherit", fontSize: 13.5, background: T.sand, color: T.text };
 const primaryBtnStyle = { background: T.ink, color: T.sand, border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" };
 
-function ConfirmModal({ text, onConfirm, onCancel }) {
+function ConfirmModal({ onConfirm, onCancel }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onCancel}>
       <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340, fontFamily: "'Tajawal', sans-serif" }} onClick={(e) => e.stopPropagation()} dir="rtl">
-        <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.7, marginBottom: 16, textAlign: "center" }}>{text}</div>
+        <div style={{ fontSize: 12.5, color: T.muted, lineHeight: 1.7, marginBottom: 16, textAlign: "center" }}>
+          الحذف سيكون نهائيًا، ولا يمكن استرجاع المحذوف.
+        </div>
         <button onClick={onConfirm} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
           تأكيد الحذف
         </button>
@@ -403,7 +405,6 @@ function NewsTab({ news, setNews, canManageNews }) {
 
       {confirmDeleteId && (
         <ConfirmModal
-          text="متأكد إنك تبي تحذف هذا الخبر؟ هذا الإجراء لا يمكن التراجع عنه."
           onConfirm={confirmRemove}
           onCancel={() => setConfirmDeleteId(null)}
         />
@@ -562,7 +563,6 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
 
       {confirmDeleteId && (
         <ConfirmModal
-          text="متأكد إنك تبي تحذف هذي المناسبة؟ هذا الإجراء لا يمكن التراجع عنه."
           onConfirm={confirmRemove}
           onCancel={() => setConfirmDeleteId(null)}
         />
@@ -895,7 +895,6 @@ function AdminsTab() {
 
       {confirmRemoveAdmin && (
         <ConfirmModal
-          text={`متأكد إنك تبي تشيل إشراف ${confirmRemoveAdmin.memberName}؟`}
           onConfirm={doRemoveAdmin}
           onCancel={() => setConfirmRemoveAdmin(null)}
         />
