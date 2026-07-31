@@ -8,18 +8,24 @@ import { supabase } from './supabaseClient';
 
 // ============================================================
 // 1) التحقق: هل رقم الجوال موجود بقائمة العائلة وغير مربوط بعد؟
+//    (يستخدم دالة RPC آمنة بدل قراءة جدول members مباشرة،
+//     لأن الزائر غير المسجّل (anon) ما له صلاحية قراءة من members)
 // ============================================================
 export async function checkPhoneEligibility(phone) {
-  const { data, error } = await supabase
-    .from('members')
-    .select('id, first_name, phone, user_account_id')
-    .eq('phone', phone)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc('find_member_by_phone', {
+    p_phone: phone,
+  });
 
   if (error) throw error;
-  if (!data) return { status: 'not_found' };
-  if (data.user_account_id) return { status: 'already_claimed' };
-  return { status: 'eligible', member: data };
+  if (!data || data.length === 0) return { status: 'not_found' };
+
+  const member = data[0];
+  if (member.is_claimed) return { status: 'already_claimed' };
+
+  return {
+    status: 'eligible',
+    member: { id: member.member_id, first_name: member.first_name },
+  };
 }
 
 // ============================================================
