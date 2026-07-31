@@ -325,6 +325,7 @@ function NewsTab({ news, setNews, canManageNews }) {
   };
 
   const remove = async (id) => {
+    if (!window.confirm("متأكد إنك تبين تحذفين هذا الخبر؟ هذا الإجراء لا يمكن التراجع عنه.")) return;
     const ok = await deleteNews(id);
     if (ok) setNews(news.filter((n) => n.id !== id));
   };
@@ -465,6 +466,7 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
   };
 
   const remove = async (id) => {
+    if (!window.confirm("متأكد إنك تبين تحذفين هذي المناسبة؟ هذا الإجراء لا يمكن التراجع عنه.")) return;
     const ok = await deleteEvent(id);
     if (ok) setEvents(events.filter((e) => e.id !== id));
   };
@@ -803,6 +805,7 @@ function AdminsTab() {
   };
 
   const handleRemoveAdmin = async (adminRow) => {
+    if (!window.confirm(`متأكد إنك تبين تشيلين إشراف ${adminRow.memberName}؟`)) return;
     const { error } = await supabase.from("member_roles").delete().eq("id", adminRow.id);
     if (!error) setAdmins((prev) => prev.filter((a) => a.id !== adminRow.id));
   };
