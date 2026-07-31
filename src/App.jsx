@@ -47,7 +47,16 @@ function Rosette({ size = 40, color = T.gold, spin = false }) {
   );
 }
 
-function mapMemberRow(row) {
+function Logo({ size = 44 }) {
+  return (
+    <img
+      src="/logo.jpg"
+      alt="شعار عائلة آل تركي"
+      style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: `1.5px solid ${T.goldLight}` }}
+    />
+  );
+}
+
   return {
     id: row.id,
     legacyId: row.legacy_id,
@@ -837,7 +846,7 @@ function FamilyAppInner({ meId }) {
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: T.sand, position: "relative", paddingBottom: 78 }}>
         <div style={{ background: `linear-gradient(160deg, ${T.ink}, ${T.inkSoft})`, padding: "22px 18px 20px", borderBottomLeftRadius: 22, borderBottomRightRadius: 22 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <Rosette size={44} color={T.goldLight} spin />
+            <Logo size={44} />
             <div>
               <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 22, color: T.goldLight, fontWeight: 700 }}>عائلتنا</div>
               <div style={{ fontSize: 11, color: "#CFE0DC" }}>{me ? `مرحبًا، ${me.name}` : "alturki.family"}</div>
