@@ -57,6 +57,7 @@ function Logo({ size = 44 }) {
   );
 }
 
+function mapMemberRow(row) {
   return {
     id: row.id,
     legacyId: row.legacy_id,
