@@ -145,6 +145,18 @@ async function insertNews(item) {
   return data;
 }
 
+async function updateNews(id, patch) {
+  const { data, error } = await supabase.from("news").update(patch).eq("id", id).select().single();
+  if (error) { console.error("updateNews failed", error); return null; }
+  return data;
+}
+
+async function deleteNews(id) {
+  const { error } = await supabase.from("news").delete().eq("id", id);
+  if (error) { console.error("deleteNews failed", error); return false; }
+  return true;
+}
+
 async function fetchEvents() {
   const { data, error } = await supabase.from("events").select("*, event_attendees(member_id)").order("date", { ascending: true });
   if (error) { console.error("fetchEvents failed", error); return []; }
@@ -155,6 +167,18 @@ async function insertEvent(form) {
   const { data, error } = await supabase.from("events").insert(form).select().single();
   if (error) { console.error("insertEvent failed", error); return null; }
   return { ...data, attendees: [] };
+}
+
+async function updateEvent(id, patch) {
+  const { data, error } = await supabase.from("events").update(patch).eq("id", id).select().single();
+  if (error) { console.error("updateEvent failed", error); return null; }
+  return data;
+}
+
+async function deleteEvent(id) {
+  const { error } = await supabase.from("events").delete().eq("id", id);
+  if (error) { console.error("deleteEvent failed", error); return false; }
+  return true;
 }
 
 async function setAttendance(eventId, memberId, attending) {
@@ -271,23 +295,50 @@ function IconButton({ onClick, children, active }) {
 const inputStyle = { width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 10, border: `1px solid ${T.line}`, fontFamily: "inherit", fontSize: 13.5, background: T.sand, color: T.text };
 const primaryBtnStyle = { background: T.ink, color: T.sand, border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" };
 
-function NewsTab({ news, setNews }) {
+function NewsTab({ news, setNews, canManageNews }) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState("عام");
   const [text, setText] = useState("");
+  const [editingId, setEditingId] = useState(null);
 
   const submit = async () => {
     if (!text.trim()) return;
-    const created = await insertNews({ type, text: text.trim(), date: new Date().toISOString().slice(0, 10) });
-    if (created) setNews([created, ...news]);
+    if (editingId) {
+      const updated = await updateNews(editingId, { type, text: text.trim() });
+      if (updated) setNews(news.map((n) => (n.id === editingId ? updated : n)));
+    } else {
+      const created = await insertNews({ type, text: text.trim(), date: new Date().toISOString().slice(0, 10) });
+      if (created) setNews([created, ...news]);
+    }
     setText("");
+    setType("عام");
+    setEditingId(null);
     setOpen(false);
+  };
+
+  const startEdit = (n) => {
+    setEditingId(n.id);
+    setType(n.type);
+    setText(n.text);
+    setOpen(true);
+  };
+
+  const remove = async (id) => {
+    const ok = await deleteNews(id);
+    if (ok) setNews(news.filter((n) => n.id !== id));
   };
 
   return (
     <div>
-      <SectionTitle action={<IconButton onClick={() => setOpen((v) => !v)} active={open}><Plus size={14} /> إضافة خبر</IconButton>}>الأخبار</SectionTitle>
-      {open && (
+      <SectionTitle action={canManageNews && (
+        <IconButton onClick={() => { setOpen((v) => !v); setEditingId(null); setText(""); setType("عام"); }} active={open}>
+          <Plus size={14} /> إضافة خبر
+        </IconButton>
+      )}>
+        الأخبار
+      </SectionTitle>
+
+      {open && canManageNews && (
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
             {Object.keys(NEWS_TYPES).map((t) => (
@@ -297,10 +348,12 @@ function NewsTab({ news, setNews }) {
             ))}
           </div>
           <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="اكتب نص الخبر هنا..." rows={3} style={{ ...inputStyle, resize: "none" }} />
-          <button onClick={submit} style={{ ...primaryBtnStyle, marginTop: 8 }}>نشر الخبر</button>
+          <button onClick={submit} style={{ ...primaryBtnStyle, marginTop: 8 }}>{editingId ? "حفظ التعديل" : "نشر الخبر"}</button>
         </div>
       )}
+
       {news.length === 0 && <EmptyState text="لا توجد أخبار بعد. كونوا أول من ينشر خبرًا للعائلة." />}
+
       {news.map((n) => {
         const meta = NEWS_TYPES[n.type] || NEWS_TYPES["عام"];
         const Icon = meta.icon;
@@ -313,6 +366,16 @@ function NewsTab({ news, setNews }) {
               <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.6 }}>{n.text}</div>
               <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{n.type} · {n.date}</div>
             </div>
+            {canManageNews && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+                <button onClick={() => startEdit(n)} title="تعديل" style={{ background: "none", border: "none", color: T.gold, cursor: "pointer", padding: 2, fontFamily: "inherit" }}>
+                  <span style={{ fontSize: 11 }}>تعديل</span>
+                </button>
+                <button onClick={() => remove(n.id)} title="حذف" style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", padding: 2 }}>
+                  <span style={{ fontSize: 11 }}>حذف</span>
+                </button>
+              </div>
+            )}
           </div>
         );
       })}
@@ -372,16 +435,37 @@ function TreeTab({ members }) {
   );
 }
 
-function EventsTab({ events, setEvents, meId }) {
+function EventsTab({ events, setEvents, meId, canManageEvents }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ title: "", date: "", location: "", description: "" });
+  const [editingId, setEditingId] = useState(null);
 
   const submit = async () => {
     if (!form.title.trim() || !form.date) return;
-    const created = await insertEvent(form);
-    if (created) setEvents([created, ...events]);
+    if (editingId) {
+      const updated = await updateEvent(editingId, form);
+      if (updated) {
+        const old = events.find((e) => e.id === editingId);
+        setEvents(events.map((e) => (e.id === editingId ? { ...updated, attendees: old.attendees } : e)));
+      }
+    } else {
+      const created = await insertEvent(form);
+      if (created) setEvents([created, ...events]);
+    }
     setForm({ title: "", date: "", location: "", description: "" });
+    setEditingId(null);
     setOpen(false);
+  };
+
+  const startEdit = (ev) => {
+    setEditingId(ev.id);
+    setForm({ title: ev.title, date: ev.date, location: ev.location || "", description: ev.description || "" });
+    setOpen(true);
+  };
+
+  const remove = async (id) => {
+    const ok = await deleteEvent(id);
+    if (ok) setEvents(events.filter((e) => e.id !== id));
   };
 
   const toggleRSVP = async (eventId) => {
@@ -395,22 +479,39 @@ function EventsTab({ events, setEvents, meId }) {
 
   return (
     <div>
-      <SectionTitle action={<IconButton onClick={() => setOpen((v) => !v)} active={open}><Plus size={14} /> مناسبة جديدة</IconButton>}>المناسبات</SectionTitle>
-      {open && (
+      <SectionTitle action={canManageEvents && (
+        <IconButton onClick={() => { setOpen((v) => !v); setEditingId(null); setForm({ title: "", date: "", location: "", description: "" }); }} active={open}>
+          <Plus size={14} /> مناسبة جديدة
+        </IconButton>
+      )}>
+        المناسبات
+      </SectionTitle>
+
+      {open && canManageEvents && (
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14, display: "grid", gap: 8 }}>
           <input placeholder="عنوان المناسبة" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} style={inputStyle} />
           <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} style={inputStyle} />
           <input placeholder="المكان" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} style={inputStyle} />
           <textarea placeholder="تفاصيل مختصرة" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} style={{ ...inputStyle, resize: "none" }} />
-          <button onClick={submit} style={primaryBtnStyle}>إضافة المناسبة</button>
+          <button onClick={submit} style={primaryBtnStyle}>{editingId ? "حفظ التعديل" : "إضافة المناسبة"}</button>
         </div>
       )}
+
       {events.length === 0 && <EmptyState text="لا توجد مناسبات مجدولة حاليًا." />}
+
       {events.map((ev) => {
         const attending = ev.attendees.includes(meId);
         return (
           <div key={ev.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 800, color: T.ink }}>{ev.title}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div style={{ fontSize: 14.5, fontWeight: 800, color: T.ink }}>{ev.title}</div>
+              {canManageEvents && (
+                <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+                  <button onClick={() => startEdit(ev)} style={{ background: "none", border: "none", color: T.gold, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>تعديل</button>
+                  <button onClick={() => remove(ev.id)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>حذف</button>
+                </div>
+              )}
+            </div>
             <div style={{ fontSize: 12, color: T.muted, marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
               <span style={{ display: "flex", alignItems: "center", gap: 4 }}><CalendarDays size={13} /> {ev.date}</span>
               {ev.location && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><MapPin size={13} /> {ev.location}</span>}
@@ -813,12 +914,15 @@ function FamilyAppInner({ meId }) {
   const [events, setEvents] = useState([]);
   const [canManageTree, setCanManageTree] = useState(false);
   const [canManageAdmins, setCanManageAdmins] = useState(false);
+  const [canManageNews, setCanManageNews] = useState(false);
+  const [canManageEvents, setCanManageEvents] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const [rawMembers, profiles, n, e, treePerm, adminsPerm] = await Promise.all([
+      const [rawMembers, profiles, n, e, treePerm, adminsPerm, newsPerm, eventsPerm] = await Promise.all([
         fetchMembers(), fetchMemberProfiles(), fetchNews(), fetchEvents(),
         checkPermission("manage_tree_profiles"), checkPermission("manage_admins"),
+        checkPermission("manage_news"), checkPermission("manage_events"),
       ]);
       setProfilesMap(profiles);
       setMembers(enrichMembers(rawMembers, profiles));
@@ -826,6 +930,8 @@ function FamilyAppInner({ meId }) {
       setEvents(e);
       setCanManageTree(treePerm);
       setCanManageAdmins(adminsPerm);
+      setCanManageNews(newsPerm);
+      setCanManageEvents(eventsPerm);
       setLoading(false);
     })();
   }, []);
@@ -861,9 +967,9 @@ function FamilyAppInner({ meId }) {
             </div>
           ) : (
             <>
-              {tab === "news" && <NewsTab news={news} setNews={setNews} />}
+              {tab === "news" && <NewsTab news={news} setNews={setNews} canManageNews={canManageNews} />}
               {tab === "tree" && <TreeTab members={members} />}
-              {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} />}
+              {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
               {tab === "members" && <MembersTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
               {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} />}
               {tab === "admins" && canManageAdmins && <AdminsTab />}
