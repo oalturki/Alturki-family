@@ -7,13 +7,28 @@
 import { supabase } from './supabaseClient';
 
 // ============================================================
+// أداة مساعدة: تحويل رقم جوال سعودي لصيغة +966 القياسية
+// تقبل: 0555466973 أو 555466973 أو +966555466973 وتُرجع دائمًا +966555466973
+// ============================================================
+function normalizeSaudiPhone(phone) {
+  if (!phone) return phone;
+  const digits = phone.replace(/\D/g, ''); // إزالة أي رموز غير أرقام
+  if (phone.startsWith('+966')) return '+966' + digits.slice(3);
+  if (digits.startsWith('966')) return '+' + digits;
+  if (digits.startsWith('0')) return '+966' + digits.slice(1);
+  return '+966' + digits; // بدون صفر ولا رمز دولة
+}
+
+// ============================================================
 // 1) التحقق: هل رقم الجوال موجود بقائمة العائلة وغير مربوط بعد؟
 //    (يستخدم دالة RPC آمنة بدل قراءة جدول members مباشرة،
 //     لأن الزائر غير المسجّل (anon) ما له صلاحية قراءة من members)
 // ============================================================
 export async function checkPhoneEligibility(phone) {
+  const normalizedPhone = normalizeSaudiPhone(phone);
+
   const { data, error } = await supabase.rpc('find_member_by_phone', {
-    p_phone: phone,
+    p_phone: normalizedPhone,
   });
 
   if (error) throw error;
@@ -42,10 +57,12 @@ export async function registerAccount(email, password) {
 // 3) طلب إرسال رمز تحقق للجوال (بحد أقصى 5 محاولات لكل رقم)
 // ============================================================
 export async function requestPhoneVerification(phone) {
+  const normalizedPhone = normalizeSaudiPhone(phone);
+
   // تحقق من الحد عبر دالة آمنة بقاعدة البيانات (RPC)
   const { data: allowed, error: rpcErr } = await supabase.rpc(
     'check_and_increment_phone_attempts',
-    { p_phone: phone }
+    { p_phone: normalizedPhone }
   );
   if (rpcErr) throw rpcErr;
   if (!allowed) {
@@ -53,7 +70,7 @@ export async function requestPhoneVerification(phone) {
   }
 
   // ربط رقم الجوال بالحساب الحالي وإرسال رمز تحقق له
-  const { error } = await supabase.auth.updateUser({ phone });
+  const { error } = await supabase.auth.updateUser({ phone: normalizedPhone });
   if (error) throw error;
   return true;
 }
@@ -62,8 +79,10 @@ export async function requestPhoneVerification(phone) {
 // 4) تأكيد رمز التحقق المرسل للجوال
 // ============================================================
 export async function confirmPhoneVerification(phone, token) {
+  const normalizedPhone = normalizeSaudiPhone(phone);
+
   const { data, error } = await supabase.auth.verifyOtp({
-    phone,
+    phone: normalizedPhone,
     token,
     type: 'phone_change',
   });
