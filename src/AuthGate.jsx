@@ -203,7 +203,9 @@ export default function AuthGate({ children }) {
       setRegisterStep("phone");
       setSuccess("تم إرسال رمز التحقق إلى جوالك.");
     } catch (e) {
-      setError(e.message?.includes("تجاوزت") ? e.message : "تعذّر إتمام التسجيل. تحقق من البيانات وحاول مجددًا.");
+      // نعرض رسالة الخطأ الفعلية القادمة من auth-linking.js بدل إخفائها
+      // برسالة عامة — هذا هو ما يسمح لنا برؤية السبب الحقيقي لأي فشل.
+      setError(e.message || "تعذّر إتمام التسجيل. تحقق من البيانات وحاول مجددًا.");
     }
     setBusy(false);
   };
@@ -229,7 +231,7 @@ export default function AuthGate({ children }) {
       await linkAccountToMember(pendingMember.id);
       setRegisterStep("passkey-offer");
     } catch (e) {
-      setError("الرمز غير صحيح أو منتهي الصلاحية. حاول مرة أخرى.");
+      setError(e.message || "الرمز غير صحيح أو منتهي الصلاحية. حاول مرة أخرى.");
     }
     setBusy(false);
   };
@@ -278,7 +280,7 @@ export default function AuthGate({ children }) {
       if (m) setMember(m);
       else setError("تم الدخول لكن الحساب غير مرتبط بملف عائلي. تواصل للمساعدة.");
     } catch (e) {
-      setError("البريد أو كلمة المرور غير صحيحة.");
+      setError(e.message || "البريد أو كلمة المرور غير صحيحة.");
     }
     setBusy(false);
   };
