@@ -524,6 +524,25 @@ function TreeTab({ members }) {
   return (
     <div>
       <SectionTitle>شجرة العائلة</SectionTitle>
+      <a
+        href="/Tree.html"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          display: "inline-block",
+          margin: "0 0 14px",
+          padding: "8px 16px",
+          background: T.gold,
+          color: T.sand,
+          borderRadius: 8,
+          textDecoration: "none",
+          fontWeight: 700,
+          fontSize: 12.5,
+          fontFamily: "inherit",
+        }}
+      >
+        عرض الشجرة الكاملة (تفاعلية)
+      </a>
 
       <div style={{ position: "relative", marginBottom: 14 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
