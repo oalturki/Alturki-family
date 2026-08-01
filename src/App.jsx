@@ -52,7 +52,7 @@ function Logo({ size = 44 }) {
     <img
       src="/logo.jpg"
       alt="شعار عائلة آل تركي"
-      style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: `1.5px solid ${T.goldLight}` }}
+      style={{ width: size, height: size, borderRadius: 12, objectFit: "contain", border: `1.5px solid ${T.goldLight}` }}
     />
   );
 }
@@ -1354,7 +1354,7 @@ function FamilyAppInner({ meId }) {
       `}</style>
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: T.sand, position: "relative", paddingBottom: 78 }}>
         <div style={{ background: `linear-gradient(160deg, ${T.ink}, ${T.inkSoft})`, padding: "18px 18px", borderBottomLeftRadius: 22, borderBottomRightRadius: 22, display: "flex", justifyContent: "flex-start" }}>
-          <Logo size={56} />
+          <Logo size={73} />
         </div>
         <div style={{ padding: "16px 16px 0" }}>
           {loading ? (
