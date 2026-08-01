@@ -782,25 +782,25 @@ function TreeTab({ members }) {
           ) : (
             searchResults.map(({ member: rm, label }) => (
               <div key={rm.id} style={{ padding: "10px 12px", borderBottom: `1px solid ${T.line}` }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text, marginBottom: 6, wordBreak: "break-word" }}>{label}</div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: T.text, wordBreak: "break-word" }}>{label}</span>
                   {rm.fullNasab && rm.fullNasab !== label && (
                     <button
                       onClick={() => setExpandedResults((prev) => { const n = new Set(prev); n.has(rm.id) ? n.delete(rm.id) : n.add(rm.id); return n; })}
                       title="إظهار النسب كامل"
-                      style={{ border: `1px solid ${T.line}`, background: "transparent", borderRadius: 8, padding: "4px 7px", cursor: "pointer", color: T.muted }}
+                      style={{ border: `1px solid ${T.line}`, background: "transparent", borderRadius: 8, padding: "2px 5px", cursor: "pointer", color: T.muted, display: "flex", alignItems: "center" }}
                     >
-                      <ChevronDown size={13} />
+                      <ChevronDown size={13} style={{ transform: expandedResults.has(rm.id) ? "rotate(180deg)" : "none" }} />
                     </button>
                   )}
-                  <button
-                    onClick={() => goToMember(rm.id)}
-                    title="الذهاب لمكانه بالشجرة"
-                    style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
-                  >
-                    <MapPin size={12} /> الموقع بالشجرة
-                  </button>
                 </div>
+                <button
+                  onClick={() => goToMember(rm.id)}
+                  title="الذهاب لمكانه بالشجرة"
+                  style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
+                >
+                  <MapPin size={12} /> الموقع بالشجرة
+                </button>
                 {expandedResults.has(rm.id) && (
                   <div style={{ fontSize: 11, color: T.muted, marginTop: 4, wordBreak: "break-word" }}>{rm.fullNasab}</div>
                 )}
@@ -1761,7 +1761,7 @@ function FamilyAppInner({ meId }) {
           style={{
             height: 88,
             background: T.sand,
-            backgroundImage: "url(/Header-Final.jpg)",
+            backgroundImage: "url(/Header-Final.jpeg)",
             backgroundSize: "contain",
             backgroundRepeat: "no-repeat",
             backgroundPosition: "center",
