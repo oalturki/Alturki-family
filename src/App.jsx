@@ -1353,9 +1353,16 @@ function FamilyAppInner({ meId }) {
         button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid ${T.gold}; outline-offset: 1px; }
       `}</style>
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: T.sand, position: "relative", paddingBottom: 78 }}>
-        <div style={{ background: `linear-gradient(160deg, ${T.ink}, ${T.inkSoft})`, padding: "18px 18px", borderBottomLeftRadius: 22, borderBottomRightRadius: 22, display: "flex", justifyContent: "flex-start" }}>
-          <Logo size={73} />
-        </div>
+        <div
+          style={{
+            height: 118,
+            backgroundImage: "url(/Header-Banner.jpg)",
+            backgroundSize: "cover",
+            backgroundPosition: "85% center",
+            borderBottomLeftRadius: 22,
+            borderBottomRightRadius: 22,
+          }}
+        />
         <div style={{ padding: "16px 16px 0" }}>
           {loading ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "70px 0", color: T.muted }}>
