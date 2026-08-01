@@ -1357,7 +1357,7 @@ function FamilyAppInner({ meId }) {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <Logo size={44} />
             <div>
-              <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 22, color: T.goldLight, fontWeight: 700 }}>عائلتنا</div>
+              <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 22, color: T.goldLight, fontWeight: 700 }}>عائلة آل تركي</div>
               <div style={{ fontSize: 11, color: "#CFE0DC" }}>{me ? `مرحبًا، ${me.name}` : "alturki.family"}</div>
             </div>
           </div>
