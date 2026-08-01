@@ -101,6 +101,15 @@ async function fetchMemberProfiles() {
   return map;
 }
 
+async function sendFamilyEmail(payload) {
+  try {
+    const { error } = await supabase.functions.invoke("send-family-email", { body: payload });
+    if (error) console.error("sendFamilyEmail failed", error);
+  } catch (e) {
+    console.error("sendFamilyEmail failed", e);
+  }
+}
+
 async function insertMember(form) {
   const { data, error } = await supabase
     .from("members")
@@ -225,22 +234,28 @@ async function checkPermission(key) {
   return !!data;
 }
 
-async function submitBirthRequest({ name, gender, birthDate, fatherId }) {
+async function submitBirthRequest({ name, gender, birthDate, birthPlace, fatherId }) {
   const { data: userData } = await supabase.auth.getUser();
   const uid = userData?.user?.id;
   if (!uid) return false;
   const { error } = await supabase.from("edit_requests").insert({
     requested_by: uid,
     status: "pending",
-    proposed_changes: { name, gender, birth_date: birthDate || null, father_id: fatherId },
+    proposed_changes: { name, gender, birth_date: birthDate || null, birth_place: birthPlace || null, father_id: fatherId },
   });
   if (error) { console.error("submitBirthRequest failed", error); return false; }
   return true;
 }
 
 async function fetchPendingBirthRequests() {
-  const { data, error } = await supabase.from("edit_requests").select("id, proposed_changes, created_at, member_id").eq("status", "pending").is("member_id", null);
+  const { data, error } = await supabase.from("edit_requests").select("id, proposed_changes, created_at, member_id, requested_by").eq("status", "pending").is("member_id", null);
   if (error) { console.error("fetchPendingBirthRequests failed", error); return []; }
+  return data;
+}
+
+async function fetchMyBirthRequests() {
+  const { data, error } = await supabase.from("edit_requests").select("id, proposed_changes, status, created_at, member_id").is("member_id", null).order("created_at", { ascending: false });
+  if (error) { console.error("fetchMyBirthRequests failed", error); return []; }
   return data;
 }
 
@@ -249,7 +264,7 @@ async function approveBirthRequest(request) {
   const { data: userData } = await supabase.auth.getUser();
   const { data: memberData, error: insertErr } = await supabase
     .from("members")
-    .insert({ first_name: c.name, father_id: c.father_id, gender: c.gender, birth_date: c.birth_date || null })
+    .insert({ first_name: c.name, father_id: c.father_id, gender: c.gender, birth_date: c.birth_date || null, birth_place: c.birth_place || null })
     .select()
     .single();
   if (insertErr) { console.error("approveBirthRequest insert failed", insertErr); return null; }
@@ -1368,6 +1383,14 @@ function AdminsTab() {
   const handleApproveBirth = async (req) => {
     setBirthBusyId(req.id);
     await approveBirthRequest(req);
+    if (req.requested_by) {
+      sendFamilyEmail({
+        type: "congrats",
+        requestedByUserId: req.requested_by,
+        childName: req.proposed_changes?.name,
+        gender: req.proposed_changes?.gender,
+      });
+    }
     setPendingBirths((prev) => prev.filter((r) => r.id !== req.id));
     setBirthBusyId(null);
   };
@@ -1522,10 +1545,20 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
   const [birthName, setBirthName] = useState("");
   const [birthGender, setBirthGender] = useState("male");
   const [birthDate, setBirthDate] = useState("");
+  const [birthPlace, setBirthPlace] = useState("");
   const [addingBirth, setAddingBirth] = useState(false);
   const [birthMsg, setBirthMsg] = useState("");
+  const [myRequests, setMyRequests] = useState([]);
+  const [editingRel, setEditingRel] = useState(null); // { id, name, prefilledEmail, birthDate, birthPlace }
+  const [savingRel, setSavingRel] = useState(false);
+
+  const loadMyRequests = async () => {
+    const rows = await fetchMyBirthRequests();
+    setMyRequests(rows);
+  };
 
   useEffect(() => setForm(me), [meId, members.length]);
+  useEffect(() => { loadMyRequests(); }, []);
 
   const save = async () => {
     await updateMemberCore(form.id, form);
@@ -1566,6 +1599,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
     if (created) {
       setMembers(enrichMembers([...members, created], profilesMap));
       setRelSuccess(`تمت إضافة ${created.name} بنجاح.`);
+      sendFamilyEmail({ type: "welcome", email: daughterEmail.trim(), name: daughterName.trim() });
       setDaughterName("");
       setDaughterEmail("");
       setShowAddDaughter(false);
@@ -1583,6 +1617,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
     if (created) {
       setMembers(enrichMembers([...members, created], profilesMap));
       setRelSuccess(`تمت إضافة ${created.name} بنجاح.`);
+      sendFamilyEmail({ type: "welcome", email: wifeEmail.trim(), name: wifeName.trim() });
       setWifeName("");
       setWifeEmail("");
       setShowAddWife(false);
@@ -1609,10 +1644,32 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
     if (!birthName.trim()) return;
     setAddingBirth(true);
     setBirthMsg("");
-    const ok = await submitBirthRequest({ name: birthName.trim(), gender: birthGender, birthDate, fatherId: meId });
+    const ok = await submitBirthRequest({ name: birthName.trim(), gender: birthGender, birthDate, birthPlace, fatherId: meId });
     setBirthMsg(ok ? "أُرسل طلب تسجيل المولود لاعتماد المشرف." : "تعذّر إرسال الطلب، حاول مرة أخرى.");
-    if (ok) { setBirthName(""); setBirthDate(""); setShowAddBirth(false); }
+    if (ok) {
+      setBirthName(""); setBirthDate(""); setBirthPlace(""); setShowAddBirth(false);
+      loadMyRequests();
+    }
     setAddingBirth(false);
+  };
+
+  const saveRelEdit = async () => {
+    if (!editingRel) return;
+    setSavingRel(true);
+    const before = members.find((m) => m.id === editingRel.id);
+    await supabase.from("members").update({
+      first_name: editingRel.name,
+      prefilled_email: editingRel.prefilledEmail || null,
+      birth_date: editingRel.birthDate || null,
+      birth_place: editingRel.birthPlace || null,
+    }).eq("id", editingRel.id);
+    const rawUpdated = members.map((m) => (m.id === editingRel.id ? { ...m, name: editingRel.name, prefilledEmail: editingRel.prefilledEmail, birthDate: editingRel.birthDate, birthPlace: editingRel.birthPlace } : m));
+    setMembers(enrichMembers(rawUpdated, profilesMap));
+    if (!before?.prefilledEmail && editingRel.prefilledEmail?.trim()) {
+      sendFamilyEmail({ type: "welcome", email: editingRel.prefilledEmail.trim(), name: editingRel.name });
+    }
+    setSavingRel(false);
+    setEditingRel(null);
   };
 
   if (!form) return <EmptyState text="جارِ تحميل ملفك الشخصي..." />;
@@ -1728,12 +1785,28 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         <div style={{ marginTop: 14 }}>
           <SectionTitle action={<IconButton onClick={() => setShowAddBirth((v) => !v)} active={showAddBirth}><Plus size={13} /> إضافة مولود</IconButton>}>تسجيل مولود جديد</SectionTitle>
           <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
-            {!showAddBirth && !birthMsg && (
+            {!showAddBirth && !birthMsg && myRequests.length === 0 && (
               <div style={{ fontSize: 11.5, color: T.muted, textAlign: "center", padding: "4px 0" }}>
                 كل مولود (ذكر أو أنثى) يُرسل لاعتماد المشرف قبل إضافته للشجرة.
               </div>
             )}
             {birthMsg && <div style={{ fontSize: 12, color: T.gold, fontWeight: 700, marginBottom: showAddBirth ? 10 : 0 }}>{birthMsg}</div>}
+            {myRequests.length > 0 && (
+              <div style={{ marginBottom: showAddBirth ? 10 : 0 }}>
+                {myRequests.map((r) => (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.line}` }}>
+                    <span style={{ fontSize: 12.5, color: T.text }}>{r.proposed_changes?.name}</span>
+                    <span style={{
+                      fontSize: 10.5, fontWeight: 700, borderRadius: 999, padding: "2px 9px",
+                      color: r.status === "approved" ? "#2F7D4F" : r.status === "rejected" ? T.clay : T.gold,
+                      background: r.status === "approved" ? "#E8F3EC" : r.status === "rejected" ? "#FBEAEA" : T.sandDark,
+                    }}>
+                      {r.status === "approved" ? "اعتُمد" : r.status === "rejected" ? "رُفض" : "بانتظار الاعتماد"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             {showAddBirth && (
               <div style={{ display: "grid", gap: 6 }}>
                 <input placeholder="اسم المولود" value={birthName} onChange={(e) => setBirthName(e.target.value)} style={inputStyle} />
@@ -1742,6 +1815,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                   <button onClick={() => setBirthGender("female")} style={{ ...inputStyle, cursor: "pointer", background: birthGender === "female" ? T.sandDark : T.sand, textAlign: "center" }}>أنثى</button>
                 </div>
                 <input type="date" placeholder="تاريخ الميلاد (اختياري)" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} style={{ ...inputStyle, minWidth: 0, maxWidth: "100%" }} />
+                <input placeholder="مكان الميلاد (اختياري)" value={birthPlace} onChange={(e) => setBirthPlace(e.target.value)} style={inputStyle} />
                 <button onClick={addBirth} disabled={addingBirth || !birthName.trim()} style={primaryBtnStyle}>
                   {addingBirth ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إرسال لاعتماد المشرف"}
                 </button>
@@ -1765,9 +1839,14 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                     الحساب: {d.userAccountId ? "مفعّل" : "غير مفعّل"}
                   </div>
                 </div>
-                <button onClick={() => setConfirmRemove({ type: "daughter", id: d.id, name: d.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف">
-                  <Trash2 size={15} />
-                </button>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => setEditingRel({ id: d.id, name: d.name, prefilledEmail: d.prefilledEmail || "", birthDate: d.birthDate || "", birthPlace: d.birthPlace || "" })} style={{ background: "none", border: "none", color: T.gold, cursor: "pointer" }} title="تعديل">
+                    <Pencil size={15} />
+                  </button>
+                  <button onClick={() => setConfirmRemove({ type: "daughter", id: d.id, name: d.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
             ))}
             {showAddDaughter && (
@@ -1798,9 +1877,14 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                     الحساب: {w.userAccountId ? "مفعّل" : "غير مفعّل"}
                   </div>
                 </div>
-                <button onClick={() => setConfirmRemove({ type: "wife", id: w.id, name: w.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="إزالة الارتباط">
-                  <Trash2 size={15} />
-                </button>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => setEditingRel({ id: w.id, name: w.name, prefilledEmail: w.prefilledEmail || "", birthDate: w.birthDate || "", birthPlace: w.birthPlace || "" })} style={{ background: "none", border: "none", color: T.gold, cursor: "pointer" }} title="تعديل">
+                    <Pencil size={15} />
+                  </button>
+                  <button onClick={() => setConfirmRemove({ type: "wife", id: w.id, name: w.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="إزالة الارتباط">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
             ))}
             {showAddWife && (
@@ -1819,6 +1903,24 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
       {confirmRemove && (
         <ConfirmModal onConfirm={confirmRemoveAction} onCancel={() => setConfirmRemove(null)} />
+      )}
+
+      {editingRel && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }} onClick={() => setEditingRel(null)}>
+          <div style={{ background: T.card, borderRadius: "18px 18px 0 0", padding: 20, width: "100%", maxWidth: 430 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 10 }}>تعديل بيانات {editingRel.name}</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <input placeholder="الاسم" value={editingRel.name} onChange={(e) => setEditingRel({ ...editingRel, name: e.target.value })} style={inputStyle} />
+              <input type="email" placeholder="البريد الإلكتروني (لتفعيل حسابها)" value={editingRel.prefilledEmail} onChange={(e) => setEditingRel({ ...editingRel, prefilledEmail: e.target.value })} style={inputStyle} />
+              <input type="date" placeholder="تاريخ الميلاد" value={editingRel.birthDate} onChange={(e) => setEditingRel({ ...editingRel, birthDate: e.target.value })} style={{ ...inputStyle, minWidth: 0, maxWidth: "100%" }} />
+              <input placeholder="مكان الميلاد" value={editingRel.birthPlace} onChange={(e) => setEditingRel({ ...editingRel, birthPlace: e.target.value })} style={inputStyle} />
+              <button onClick={saveRelEdit} disabled={savingRel} style={primaryBtnStyle}>
+                {savingRel ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "حفظ"}
+              </button>
+              <button onClick={() => setEditingRel(null)} style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>إلغاء</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
