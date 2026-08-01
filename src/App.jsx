@@ -478,6 +478,7 @@ function TreeTab({ members }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
   const [selectedNode, setSelectedNode] = useState(null);
+  const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [pdfOpen, setPdfOpen] = useState(false);
   const [showInteractive, setShowInteractive] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -565,26 +566,55 @@ function TreeTab({ members }) {
 
   const svgWrapRef = useRef(null);
 
-  // البحث: يفتح تلقائيًا مسار الأجداد لأول عضو مطابق ويمرّر الشاشة له
-  useEffect(() => {
-    if (!query.trim() || !rootId) return;
-    const match = members.find((m) => m.gender !== "female" && (m.name.includes(query.trim()) || m.nasab?.includes(query.trim())));
-    if (!match) return;
+  const nasabAtDepth = (member, depth) => {
+    const parts = [];
+    let cur = member;
+    let n = 0;
+    while (cur && n < depth) {
+      parts.push(cur.name);
+      cur = cur.fatherId ? byId[cur.fatherId] : null;
+      n++;
+    }
+    return parts.join(" بن ");
+  };
+
+  const goToMember = (id) => {
+    const target = byId[id];
+    if (!target) return;
     setExpanded((prev) => {
       const next = new Set(prev);
-      let cur = match;
+      let cur = target;
       while (cur) {
         next.add(cur.id);
         cur = cur.fatherId ? byId[cur.fatherId] : null;
       }
       return next;
     });
-    setSelectedNode(match.id);
+    setSelectedNode(id);
     setTimeout(() => {
-      const el = svgWrapRef.current?.querySelector(`[data-node-id="${match.id}"]`);
+      const el = svgWrapRef.current?.querySelector(`[data-node-id="${id}"]`);
       if (el) el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
     }, 60);
-  }, [query]);
+  };
+
+  // نتائج البحث: مطابقة الاسم الأول/الثنائي/الثلاثي مع تجاهل "بن"، عرض رباعي (خماسي عند التطابق)، ترتيب أبجدي مع أولوية للاسم الأول المطابق تمامًا
+  const norm = (s) => (s || "").replace(/بن/g, " ").replace(/\s+/g, " ").trim();
+  const searchResults = useMemo(() => {
+    const nq = norm(query);
+    if (!nq) return [];
+    const matched = members.filter((m) => m.gender !== "female" && norm(m.nasab).includes(nq));
+    let display = matched.map((m) => ({ member: m, label: nasabAtDepth(m, 4) }));
+    const counts = {};
+    display.forEach((d) => { counts[d.label] = (counts[d.label] || 0) + 1; });
+    display = display.map((d) => (counts[d.label] > 1 ? { ...d, label: nasabAtDepth(d.member, 5) } : d));
+    display.sort((a, b) => {
+      const aExact = norm(a.member.name) === nq;
+      const bExact = norm(b.member.name) === nq;
+      if (aExact !== bExact) return aExact ? -1 : 1;
+      return a.label.localeCompare(b.label, "ar");
+    });
+    return display.slice(0, 25);
+  }, [query, members, byId]);
 
   const toggle = (id) => {
     setExpanded((prev) => {
@@ -737,6 +767,43 @@ function TreeTab({ members }) {
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث عن فرد بالاسم..." style={{ ...inputStyle, padding: "9px 38px 9px 12px" }} />
       </div>
+
+      {query.trim() && (
+        <div style={{ border: `1px solid ${TT.gold500}`, borderRadius: 14, background: T.card, marginBottom: 14, overflow: "hidden" }}>
+          {searchResults.length === 0 ? (
+            <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: T.muted }}>لا نتائج مطابقة.</div>
+          ) : (
+            searchResults.map(({ member: rm, label }) => (
+              <div key={rm.id} style={{ padding: "10px 12px", borderBottom: `1px solid ${T.line}` }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>{label}</span>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    {rm.fullNasab && rm.fullNasab !== label && (
+                      <button
+                        onClick={() => setExpandedResults((prev) => { const n = new Set(prev); n.has(rm.id) ? n.delete(rm.id) : n.add(rm.id); return n; })}
+                        title="إظهار النسب كامل"
+                        style={{ border: `1px solid ${T.line}`, background: "transparent", borderRadius: 8, padding: "4px 7px", cursor: "pointer", color: T.muted }}
+                      >
+                        <ChevronDown size={13} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => goToMember(rm.id)}
+                      title="الذهاب لمكانه بالشجرة"
+                      style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
+                    >
+                      <MapPin size={12} /> الموقع بالشجرة
+                    </button>
+                  </div>
+                </div>
+                {expandedResults.has(rm.id) && (
+                  <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{rm.fullNasab}</div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* شريط زخرفي أعلى الشجرة */}
       <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 10, opacity: 0.8 }}>
@@ -1627,7 +1694,6 @@ const BASE_TABS = [
   { key: "news", label: "الأخبار", icon: Newspaper },
   { key: "tree", label: "الشجرة", icon: GitBranch },
   { key: "events", label: "المناسبات", icon: CalendarDays },
-  { key: "members", label: "الأعضاء", icon: Users },
   { key: "profile", label: "ملفي", icon: UserCircle2 },
 ];
 const ADMINS_TAB = { key: "admins", label: "المشرفون", icon: Shield };
@@ -1635,7 +1701,7 @@ const ADMINS_TAB = { key: "admins", label: "المشرفون", icon: Shield };
 function FamilyAppInner({ meId }) {
   const [tab, setTab] = useState(() => {
     const h = window.location.hash.replace("#", "");
-    return ["news", "tree", "events", "members", "profile", "admins"].includes(h) ? h : "news";
+    return ["news", "tree", "events", "profile", "admins"].includes(h) ? h : "news";
   });
 
   useEffect(() => {
@@ -1710,7 +1776,6 @@ function FamilyAppInner({ meId }) {
               {tab === "news" && <NewsTab news={news} setNews={setNews} canManageNews={canManageNews} />}
               {tab === "tree" && <TreeTab members={members} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
-              {tab === "members" && <MembersTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
               {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} />}
               {tab === "admins" && canManageAdmins && <AdminsTab />}
             </>
