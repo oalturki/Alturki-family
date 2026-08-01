@@ -563,7 +563,9 @@ function TreeTab({ members }) {
     if (rootId) setExpanded(new Set([rootId]));
   }, [rootId]);
 
-  // البحث: يفتح تلقائيًا مسار الأجداد لأول عضو مطابق
+  const svgWrapRef = useRef(null);
+
+  // البحث: يفتح تلقائيًا مسار الأجداد لأول عضو مطابق ويمرّر الشاشة له
   useEffect(() => {
     if (!query.trim() || !rootId) return;
     const match = members.find((m) => m.gender !== "female" && (m.name.includes(query.trim()) || m.nasab?.includes(query.trim())));
@@ -578,6 +580,10 @@ function TreeTab({ members }) {
       return next;
     });
     setSelectedNode(match.id);
+    setTimeout(() => {
+      const el = svgWrapRef.current?.querySelector(`[data-node-id="${match.id}"]`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    }, 60);
   }, [query]);
 
   const toggle = (id) => {
@@ -740,7 +746,7 @@ function TreeTab({ members }) {
       {!rootId ? (
         <EmptyState text="تعذّر تحديد جذر الشجرة." />
       ) : (
-        <div style={{ overflow: "auto", border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, padding: 16 }}>
+        <div ref={svgWrapRef} style={{ overflow: "auto", border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, padding: 16, maxHeight: "60vh" }}>
           <svg width={Math.max(layout.width, 260)} height={layout.height + 20} style={{ display: "block", margin: "0 auto" }}>
             {layout.edges.map((e, i) => (
               <path
@@ -784,6 +790,7 @@ function TreeTab({ members }) {
               return (
                 <g
                   key={n.id}
+                  data-node-id={n.id}
                   transform={`translate(${n.x - w / 2}, ${n.y})`}
                   onClick={() => { setSelectedNode(n.id); if (n.hasChildren) toggle(n.id); }}
                   style={{ cursor: n.hasChildren ? "pointer" : "default" }}
@@ -958,6 +965,7 @@ function MemberDetailModal({ member, members, canManageTree, onClose, onSaved })
   const [deathDate, setDeathDate] = useState(member.deathDate || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [showFullNasab, setShowFullNasab] = useState(false);
 
   const daughters = members.filter((m) => m.fatherId === member.id && m.gender === "female");
   const wives = members.filter((m) => m.spouseOf === member.id);
@@ -985,8 +993,13 @@ function MemberDetailModal({ member, members, canManageTree, onClose, onSaved })
             <Avatar name={member.name} photoUrl={member.photoUrl} gender={member.gender} size={84} />
           </div>
           <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 19, color: T.ink, fontWeight: 700, marginTop: 10 }}>
-            {member.fullNasab || member.name}
+            {(showFullNasab ? member.fullNasab : member.nasab) || member.name}
           </div>
+          {member.fullNasab && member.fullNasab !== member.nasab && (
+            <button onClick={() => setShowFullNasab((v) => !v)} style={{ background: "none", border: "none", color: T.gold, fontSize: 11, fontFamily: "inherit", cursor: "pointer", marginTop: 2 }}>
+              {showFullNasab ? "إخفاء سلسلة النسب" : "إظهار سلسلة النسب كاملة"}
+            </button>
+          )}
           {member.memberNumber && (
             <div style={{ fontSize: 11, color: T.gold, fontWeight: 700, marginTop: 4 }}>
               رقم العضوية: {member.memberNumber}
@@ -1378,26 +1391,41 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
     setMode("view");
   };
 
+  const [relError, setRelError] = useState("");
+  const [relSuccess, setRelSuccess] = useState("");
+
   const addDaughter = async () => {
     if (!daughterName.trim() || !daughterEmail.trim()) return;
     setAddingDaughter(true);
+    setRelError(""); setRelSuccess("");
     const created = await insertMember({ name: daughterName.trim(), fatherId: meId, gender: "female", prefilledEmail: daughterEmail.trim() });
-    if (created) setMembers(enrichMembers([...members, created], profilesMap));
-    setDaughterName("");
-    setDaughterEmail("");
+    if (created) {
+      setMembers(enrichMembers([...members, created], profilesMap));
+      setRelSuccess(`تمت إضافة ${created.name} بنجاح.`);
+      setDaughterName("");
+      setDaughterEmail("");
+      setShowAddDaughter(false);
+    } else {
+      setRelError("تعذّرت الإضافة، حاول مرة أخرى.");
+    }
     setAddingDaughter(false);
-    setShowAddDaughter(false);
   };
 
   const addWife = async () => {
     if (!wifeName.trim() || !wifeEmail.trim()) return;
     setAddingWife(true);
+    setRelError(""); setRelSuccess("");
     const created = await insertMember({ name: wifeName.trim(), spouseOf: meId, gender: "female", prefilledEmail: wifeEmail.trim() });
-    if (created) setMembers(enrichMembers([...members, created], profilesMap));
-    setWifeName("");
-    setWifeEmail("");
+    if (created) {
+      setMembers(enrichMembers([...members, created], profilesMap));
+      setRelSuccess(`تمت إضافة ${created.name} بنجاح.`);
+      setWifeName("");
+      setWifeEmail("");
+      setShowAddWife(false);
+    } else {
+      setRelError("تعذّرت الإضافة، حاول مرة أخرى.");
+    }
     setAddingWife(false);
-    setShowAddWife(false);
   };
 
   const confirmRemoveAction = async () => {
@@ -1457,7 +1485,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
       {mode === "view" ? (
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
           <InfoRow icon={Briefcase} text={form.job} />
-          <InfoRow icon={MapPin} text={[form.region, form.birthPlace && `مسقط الرأس: ${form.birthPlace}`].filter(Boolean).join(" · ")} />
+          <InfoRow icon={MapPin} text={[form.region, form.birthPlace && `مكان الميلاد: ${form.birthPlace}`].filter(Boolean).join(" · ")} />
           <InfoRow icon={Cake} text={form.birthDate && formatDate(form.birthDate, form.birthDatePrecision)} />
           <InfoRow icon={Phone} text={form.phone} />
           <InfoRow icon={Link2} text={form.prefilledEmail} />
@@ -1484,7 +1512,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
           <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>البيانات الأساسية</div>
             {form.gender !== "female" && <input placeholder="رابط الصورة الشخصية (اختياري)" value={form.photoUrl || ""} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} style={inputStyle} />}
-            <input type="date" placeholder="تاريخ الميلاد" value={form.birthDate || ""} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} style={inputStyle} />
+            <input type="date" placeholder="تاريخ الميلاد" value={form.birthDate || ""} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} style={{ ...inputStyle, minWidth: 0, maxWidth: "100%" }} />
             <input placeholder="مكان الميلاد" value={form.birthPlace || ""} onChange={(e) => setForm({ ...form, birthPlace: e.target.value })} style={inputStyle} />
             <input placeholder="مدينة الإقامة الحالية" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} style={inputStyle} />
             <input type="tel" placeholder="رقم الجوال (اختياري)" value={form.phone || ""} onChange={(e) => setForm({ ...form, phone: e.target.value })} style={inputStyle} />
@@ -1516,6 +1544,12 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         </>
       )}
 
+      {(relSuccess || relError) && (
+        <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700, background: relSuccess ? "#E8F3EC" : "#FBEAEA", color: relSuccess ? "#2F7D4F" : T.clay }}>
+          {relSuccess || relError}
+        </div>
+      )}
+
       {form.gender !== "female" && (
         <div style={{ marginTop: 14 }}>
           <SectionTitle action={<IconButton onClick={() => setShowAddDaughter((v) => !v)} active={showAddDaughter}><Plus size={13} /> إضافة</IconButton>}>البنات</SectionTitle>
@@ -1526,6 +1560,9 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                 <div>
                   <div style={{ fontSize: 12.5, color: T.text, fontWeight: 700 }}>{d.name}</div>
                   <div style={{ fontSize: 10.5, color: T.muted }}>{d.prefilledEmail}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: d.userAccountId ? "#2F7D4F" : T.muted, marginTop: 2 }}>
+                    الحساب: {d.userAccountId ? "مفعّل" : "غير مفعّل"}
+                  </div>
                 </div>
                 <button onClick={() => setConfirmRemove({ type: "daughter", id: d.id, name: d.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف">
                   <Trash2 size={15} />
@@ -1556,6 +1593,9 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                 <div>
                   <div style={{ fontSize: 12.5, color: T.text, fontWeight: 700 }}>{w.name}</div>
                   <div style={{ fontSize: 10.5, color: T.muted }}>{w.prefilledEmail}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: w.userAccountId ? "#2F7D4F" : T.muted, marginTop: 2 }}>
+                    الحساب: {w.userAccountId ? "مفعّل" : "غير مفعّل"}
+                  </div>
                 </div>
                 <button onClick={() => setConfirmRemove({ type: "wife", id: w.id, name: w.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="إزالة الارتباط">
                   <Trash2 size={15} />
@@ -1645,15 +1685,20 @@ function FamilyAppInner({ meId }) {
       `}</style>
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: T.sand, position: "relative", paddingBottom: 78 }}>
         <div
+          onClick={() => setTab("news")}
           style={{
-            height: 118,
-            backgroundImage: "url(/Header-Banner.jpg)",
-            backgroundSize: "cover",
-            backgroundPosition: "85% center",
+            background: `linear-gradient(160deg, ${T.ink}, ${T.inkSoft})`,
+            padding: "16px 18px",
             borderBottomLeftRadius: 22,
             borderBottomRightRadius: 22,
+            display: "flex",
+            justifyContent: "flex-start",
+            cursor: "pointer",
           }}
-        />
+          title="الرجوع للرئيسية"
+        >
+          <Logo size={64} />
+        </div>
         <div style={{ padding: "16px 16px 0" }}>
           {loading ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "70px 0", color: T.muted }}>
