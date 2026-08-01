@@ -61,8 +61,10 @@ function mapMemberRow(row) {
   return {
     id: row.id,
     legacyId: row.legacy_id,
+    memberNumber: row.member_number,
     name: row.first_name,
     fatherId: row.father_id,
+    spouseOf: row.spouse_of || null,
     gender: row.gender,
     isAlive: row.is_alive !== false,
     birthDate: row.birth_date || "",
@@ -81,7 +83,7 @@ function mapMemberRow(row) {
 async function fetchMembers() {
   const { data, error } = await supabase
     .from("members")
-    .select("id, legacy_id, first_name, father_id, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, occupation, bio, photo_url, phone, user_account_id")
+    .select("id, legacy_id, member_number, first_name, father_id, spouse_of, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, occupation, bio, photo_url, phone, user_account_id")
     .order("created_at", { ascending: true });
   if (error) { console.error("fetchMembers failed", error); return []; }
   return data.map(mapMemberRow);
@@ -100,7 +102,7 @@ async function fetchMemberProfiles() {
 async function insertMember(form) {
   const { data, error } = await supabase
     .from("members")
-    .insert({ first_name: form.name, father_id: form.fatherId || null, gender: form.gender, region: form.region || null, phone: form.phone || null })
+    .insert({ first_name: form.name, father_id: form.fatherId || null, spouse_of: form.spouseOf || null, gender: form.gender, region: form.region || null, phone: form.phone || null })
     .select()
     .single();
   if (error) { console.error("insertMember failed", error); return null; }
@@ -518,6 +520,7 @@ function TreeTab({ members }) {
     members.forEach((m) => { byId[m.id] = m; });
     const childrenMap = {};
     members.forEach((m) => {
+      if (m.gender === "female") return; // البنات عضوات كاملات بالتطبيق، لكن لا يظهرن بالشجرة المرسومة حفاظًا على شكل اللوحة التقليدية
       if (m.fatherId) {
         childrenMap[m.fatherId] = childrenMap[m.fatherId] || [];
         childrenMap[m.fatherId].push(m.id);
@@ -535,7 +538,7 @@ function TreeTab({ members }) {
   // البحث: يفتح تلقائيًا مسار الأجداد لأول عضو مطابق
   useEffect(() => {
     if (!query.trim() || !rootId) return;
-    const match = members.find((m) => m.name.includes(query.trim()) || m.nasab?.includes(query.trim()));
+    const match = members.find((m) => m.gender !== "female" && (m.name.includes(query.trim()) || m.nasab?.includes(query.trim())));
     if (!match) return;
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -922,11 +925,14 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
   );
 }
 
-function MemberDetailModal({ member, canManageTree, onClose, onSaved }) {
+function MemberDetailModal({ member, members, canManageTree, onClose, onSaved }) {
   const [isAlive, setIsAlive] = useState(member.isAlive);
   const [deathDate, setDeathDate] = useState(member.deathDate || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const daughters = members.filter((m) => m.fatherId === member.id && m.gender === "female");
+  const wives = members.filter((m) => m.spouseOf === member.id);
 
   const handleSave = async () => {
     setSaving(true);
@@ -953,6 +959,11 @@ function MemberDetailModal({ member, canManageTree, onClose, onSaved }) {
           <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 19, color: T.ink, fontWeight: 700, marginTop: 10 }}>
             {member.fullNasab || member.name}
           </div>
+          {member.memberNumber && (
+            <div style={{ fontSize: 11, color: T.gold, fontWeight: 700, marginTop: 4 }}>
+              رقم العضوية: {member.memberNumber}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13, color: T.text }}>
           {member.region && <div style={{ display: "flex", alignItems: "center", gap: 8 }}><MapPin size={15} color={T.gold} /> {member.region}</div>}
@@ -982,6 +993,26 @@ function MemberDetailModal({ member, canManageTree, onClose, onSaved }) {
             الملف الموسّع (السيرة والتواصل) مخفي — العضو لم يفعّل عرضه للعائلة.
           </div>
         )}
+        {(wives.length > 0 || daughters.length > 0) && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px dashed ${T.line}` }}>
+            {wives.length > 0 && (
+              <div style={{ marginBottom: daughters.length > 0 ? 10 : 0 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: T.gold, marginBottom: 6 }}>{wives.length > 1 ? "الزوجات" : "الزوجة"}</div>
+                {wives.map((w) => (
+                  <div key={w.id} style={{ fontSize: 12.5, color: T.text, marginBottom: 3 }}>{w.name}</div>
+                ))}
+              </div>
+            )}
+            {daughters.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: T.gold, marginBottom: 6 }}>{daughters.length > 1 ? "البنات" : "الابنة"}</div>
+                {daughters.map((d) => (
+                  <div key={d.id} style={{ fontSize: 12.5, color: T.text, marginBottom: 3 }}>{d.name}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {canManageTree && (
           <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${T.line}` }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 8 }}>تعديل حالة الوفاة</div>
@@ -1000,7 +1031,7 @@ function MemberDetailModal({ member, canManageTree, onClose, onSaved }) {
   );
 }
 
-function FatherPicker({ members, fatherId, onSelect }) {
+function FatherPicker({ members, fatherId, onSelect, label = "الأب", placeholder = "ابحث عن اسم الأب لربط العضو الجديد..." }) {
   const [q, setQ] = useState("");
   const father = members.find((m) => m.id === fatherId);
   const matches = q.trim().length >= 2 ? members.filter((m) => m.name.includes(q)).slice(0, 6) : [];
@@ -1008,12 +1039,12 @@ function FatherPicker({ members, fatherId, onSelect }) {
     <div>
       {father ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", ...inputStyle }}>
-          <span>الأب: {father.name} ({father.nasab})</span>
+          <span>{label}: {father.name} ({father.nasab})</span>
           <button onClick={() => onSelect(null)} style={{ border: "none", background: "none", cursor: "pointer", color: T.clay }}><X size={14} /></button>
         </div>
       ) : (
         <>
-          <input placeholder="ابحث عن اسم الأب لربط العضو الجديد..." value={q} onChange={(e) => setQ(e.target.value)} style={inputStyle} />
+          <input placeholder={placeholder} value={q} onChange={(e) => setQ(e.target.value)} style={inputStyle} />
           {matches.length > 0 && (
             <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, marginTop: 4, overflow: "hidden" }}>
               {matches.map((m) => (
@@ -1065,10 +1096,11 @@ function MemberCard({ m, onOpen }) {
 function MembersTab({ members, setMembers, profilesMap, canManageTree }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", fatherId: null, gender: "male", region: "", phone: "" });
+  const [form, setForm] = useState({ name: "", fatherId: null, spouseOf: null, gender: "male", region: "", phone: "" });
   const [selected, setSelected] = useState(null);
 
-  const filtered = members.filter((m) => !query || m.name.includes(query) || m.branch.includes(query));
+  const visibleMembers = members.filter((m) => m.gender !== "female");
+  const filtered = visibleMembers.filter((m) => !query || m.name.includes(query) || m.branch.includes(query) || (m.memberNumber && m.memberNumber.includes(query)));
 
   const submit = async () => {
     if (!form.name.trim()) return;
@@ -1077,19 +1109,26 @@ function MembersTab({ members, setMembers, profilesMap, canManageTree }) {
       const enrichedAll = enrichMembers([...members, created], profilesMap);
       setMembers(enrichedAll);
     }
-    setForm({ name: "", fatherId: null, gender: "male", region: "", phone: "" });
+    setForm({ name: "", fatherId: null, spouseOf: null, gender: "male", region: "", phone: "" });
     setOpen(false);
   };
 
   return (
     <div>
       <SectionTitle action={<IconButton onClick={() => setOpen((v) => !v)} active={open}><Plus size={14} /> عضو جديد</IconButton>}>
-        الأعضاء ({members.length})
+        الأعضاء ({visibleMembers.length})
       </SectionTitle>
       {open && (
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14, display: "grid", gap: 8 }}>
           <input placeholder="الاسم الأول" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={inputStyle} />
           <FatherPicker members={members} fatherId={form.fatherId} onSelect={(id) => setForm({ ...form, fatherId: id })} />
+          <FatherPicker
+            members={members}
+            fatherId={form.spouseOf}
+            onSelect={(id) => setForm({ ...form, spouseOf: id, gender: id ? "female" : form.gender })}
+            label="زوجة لـ"
+            placeholder="اختياري: ابحث عن اسم الزوج لو العضو زوجة قادمة من خارج العائلة..."
+          />
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => setForm({ ...form, gender: "male" })} style={{ ...inputStyle, cursor: "pointer", background: form.gender === "male" ? T.sandDark : T.sand, textAlign: "center" }}>ذكر</button>
             <button onClick={() => setForm({ ...form, gender: "female" })} style={{ ...inputStyle, cursor: "pointer", background: form.gender === "female" ? T.sandDark : T.sand, textAlign: "center" }}>أنثى</button>
@@ -1108,6 +1147,7 @@ function MembersTab({ members, setMembers, profilesMap, canManageTree }) {
       {selected && (
         <MemberDetailModal
           member={selected}
+          members={members}
           canManageTree={canManageTree}
           onClose={() => setSelected(null)}
           onSaved={(updated) => {
@@ -1257,6 +1297,10 @@ function AdminsTab() {
 function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) {
   const me = members.find((m) => m.id === meId);
   const [form, setForm] = useState(me);
+  const [daughterName, setDaughterName] = useState("");
+  const [wifeName, setWifeName] = useState("");
+  const [addingDaughter, setAddingDaughter] = useState(false);
+  const [addingWife, setAddingWife] = useState(false);
 
   useEffect(() => setForm(me), [meId, members.length]);
 
@@ -1269,7 +1313,28 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
     setMembers(enrichMembers(rawUpdated, newProfilesMap));
   };
 
+  const addDaughter = async () => {
+    if (!daughterName.trim()) return;
+    setAddingDaughter(true);
+    const created = await insertMember({ name: daughterName.trim(), fatherId: meId, gender: "female" });
+    if (created) setMembers(enrichMembers([...members, created], profilesMap));
+    setDaughterName("");
+    setAddingDaughter(false);
+  };
+
+  const addWife = async () => {
+    if (!wifeName.trim()) return;
+    setAddingWife(true);
+    const created = await insertMember({ name: wifeName.trim(), spouseOf: meId, gender: "female" });
+    if (created) setMembers(enrichMembers([...members, created], profilesMap));
+    setWifeName("");
+    setAddingWife(false);
+  };
+
   if (!form) return <EmptyState text="جارِ تحميل ملفك الشخصي..." />;
+
+  const myDaughters = members.filter((m) => m.fatherId === meId && m.gender === "female");
+  const myWives = members.filter((m) => m.spouseOf === meId);
 
   return (
     <div>
@@ -1279,6 +1344,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         <div>
           <div style={{ fontSize: 16, fontWeight: 800, color: T.ink }}>{form.name}</div>
           <div style={{ fontSize: 12, color: T.muted }}>{form.branch} · {form.nasab}</div>
+          {form.memberNumber && <div style={{ fontSize: 11, color: T.gold, fontWeight: 700, marginTop: 3 }}>رقم العضوية: {form.memberNumber}</div>}
         </div>
       </div>
       <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10 }}>
@@ -1295,6 +1361,37 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         <button onClick={save} style={primaryBtnStyle}>حفظ التغييرات</button>
         <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6 }}>هذه البيانات لا تظهر لأحد إلا إذا فعّلتَ "مرئية للعائلة" أعلاه — تحكّمك بها كامل.</div>
       </div>
+
+      {form.gender !== "female" && (
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginTop: 14, display: "grid", gap: 14 }}>
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>البنات</div>
+            {myDaughters.map((d) => (
+              <div key={d.id} style={{ fontSize: 12.5, color: T.text, marginBottom: 4 }}>{d.name}</div>
+            ))}
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <input placeholder="اسم الابنة" value={daughterName} onChange={(e) => setDaughterName(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+              <button onClick={addDaughter} disabled={addingDaughter} style={{ ...primaryBtnStyle, padding: "9px 14px" }}>
+                {addingDaughter ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
+              </button>
+            </div>
+            <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>تُربط الاسم تلقائيًا بك كأب، بدون حاجة لجوالها.</div>
+          </div>
+          <div style={{ borderTop: `1px dashed ${T.line}`, paddingTop: 14 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>{myWives.length > 1 ? "الزوجات" : "الزوجة"}</div>
+            {myWives.map((w) => (
+              <div key={w.id} style={{ fontSize: 12.5, color: T.text, marginBottom: 4 }}>{w.name}</div>
+            ))}
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <input placeholder="الاسم الكامل للزوجة" value={wifeName} onChange={(e) => setWifeName(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+              <button onClick={addWife} disabled={addingWife} style={{ ...primaryBtnStyle, padding: "9px 14px" }}>
+                {addingWife ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
+              </button>
+            </div>
+            <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>تُكتب اسمها كامل بما إنها من خارج شجرة العائلة.</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
