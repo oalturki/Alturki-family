@@ -1758,7 +1758,7 @@ function FamilyAppInner({ meId }) {
         <div
           onClick={() => setTab("news")}
           style={{
-            height: 118,
+            height: 88,
             background: T.sand,
             backgroundImage: "url(/Header-Final.jpg)",
             backgroundSize: "contain",
@@ -1767,6 +1767,10 @@ function FamilyAppInner({ meId }) {
             borderBottomLeftRadius: 22,
             borderBottomRightRadius: 22,
             cursor: "pointer",
+            position: "sticky",
+            top: 0,
+            zIndex: 40,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
           }}
           title="الرجوع للرئيسية"
         />
