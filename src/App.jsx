@@ -608,42 +608,23 @@ function TreeTab({ members }) {
           <FileText size={16} color="#dab94a" />
           <span style={{ color: "#F4EFE3", fontSize: 13.5, fontWeight: 700 }}>الشجرة المصورة (الطبعة الثالثة، ١٤٤٧هـ)</span>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={() => setPdfOpen(true)}
-            style={{
-              flex: 1,
-              padding: "9px 0",
-              background: "#c9a227",
-              color: "#0d2b2b",
-              border: "none",
-              borderRadius: 8,
-              fontWeight: 800,
-              fontSize: 12.5,
-              fontFamily: "inherit",
-              cursor: "pointer",
-            }}
-          >
-            عرض
-          </button>
-          <button
-            onClick={handleDownloadPdf}
-            style={{
-              flex: 1,
-              padding: "9px 0",
-              background: "rgba(244,239,227,0.1)",
-              color: "#F4EFE3",
-              border: "1px solid rgba(244,239,227,0.3)",
-              borderRadius: 8,
-              fontWeight: 700,
-              fontSize: 12.5,
-              fontFamily: "inherit",
-              cursor: "pointer",
-            }}
-          >
-            تحميل
-          </button>
-        </div>
+        <button
+          onClick={() => setPdfOpen(true)}
+          style={{
+            width: "100%",
+            padding: "9px 0",
+            background: "#c9a227",
+            color: "#0d2b2b",
+            border: "none",
+            borderRadius: 8,
+            fontWeight: 800,
+            fontSize: 12.5,
+            fontFamily: "inherit",
+            cursor: "pointer",
+          }}
+        >
+          عرض
+        </button>
       </div>
 
       {pdfOpen && (
