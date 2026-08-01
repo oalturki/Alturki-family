@@ -125,6 +125,18 @@ async function updateMemberPhone(id, phone) {
   return true;
 }
 
+async function deleteMember(id) {
+  const { error } = await supabase.from("members").delete().eq("id", id);
+  if (error) { console.error("deleteMember failed", error); return false; }
+  return true;
+}
+
+async function unlinkSpouse(id) {
+  const { error } = await supabase.from("members").update({ spouse_of: null }).eq("id", id);
+  if (error) { console.error("unlinkSpouse failed", error); return false; }
+  return true;
+}
+
 async function updateMemberDeathStatus(id, isAlive, deathDate) {
   const { error } = await supabase
     .from("members")
@@ -278,8 +290,8 @@ const NEWS_TYPES = {
   "عام": { icon: Megaphone, color: T.inkSoft },
 };
 
-function Avatar({ name, photoUrl, size = 44 }) {
-  if (photoUrl) {
+function Avatar({ name, photoUrl, gender, size = 44 }) {
+  if (photoUrl && gender !== "female") {
     return <img src={photoUrl} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: `1.5px solid ${T.gold}`, flexShrink: 0 }} />;
   }
   const initials = (name || "").trim().split(" ").slice(0, 2).map((w) => w[0]).join("");
@@ -970,7 +982,7 @@ function MemberDetailModal({ member, members, canManageTree, onClose, onSaved })
         </div>
         <div style={{ textAlign: "center", marginBottom: 14 }}>
           <div style={{ display: "flex", justifyContent: "center" }}>
-            <Avatar name={member.name} photoUrl={member.photoUrl} size={84} />
+            <Avatar name={member.name} photoUrl={member.photoUrl} gender={member.gender} size={84} />
           </div>
           <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 19, color: T.ink, fontWeight: 700, marginTop: 10 }}>
             {member.fullNasab || member.name}
@@ -1095,7 +1107,7 @@ function MemberCard({ m, onOpen }) {
         <FileText size={13} />
       </button>
       <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-        <Avatar name={m.name} photoUrl={m.photoUrl} />
+        <Avatar name={m.name} photoUrl={m.photoUrl} gender={m.gender} />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{m.name}</div>
           <div style={{ fontSize: 11.5, color: T.muted }}>{m.branch} · {m.nasab}</div>
@@ -1324,20 +1336,23 @@ function AdminsTab() {
 
 function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) {
   const me = members.find((m) => m.id === meId);
+  const [mode, setMode] = useState("view");
   const [form, setForm] = useState(me);
   const [daughterName, setDaughterName] = useState("");
   const [daughterEmail, setDaughterEmail] = useState("");
-  const [daughterPhone, setDaughterPhone] = useState("");
   const [wifeName, setWifeName] = useState("");
   const [wifeEmail, setWifeEmail] = useState("");
-  const [wifePhone, setWifePhone] = useState("");
   const [addingDaughter, setAddingDaughter] = useState(false);
   const [addingWife, setAddingWife] = useState(false);
+  const [showAddDaughter, setShowAddDaughter] = useState(false);
+  const [showAddWife, setShowAddWife] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(null); // { type: 'daughter'|'wife', id, name }
 
   useEffect(() => setForm(me), [meId, members.length]);
 
   const save = async () => {
     await updateMemberCore(form.id, form);
+    await updateMemberPhone(form.id, form.phone);
     await upsertMemberProfile(form.id, {
       socialLinks: form.socialLinks,
       extendedVisible: form.extendedVisible,
@@ -1360,28 +1375,42 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
     setProfilesMap(newProfilesMap);
     const rawUpdated = members.map((m) => (m.id === form.id ? { ...m, ...form } : m));
     setMembers(enrichMembers(rawUpdated, newProfilesMap));
+    setMode("view");
   };
 
   const addDaughter = async () => {
     if (!daughterName.trim() || !daughterEmail.trim()) return;
     setAddingDaughter(true);
-    const created = await insertMember({ name: daughterName.trim(), fatherId: meId, gender: "female", prefilledEmail: daughterEmail.trim(), phone: daughterPhone.trim() });
+    const created = await insertMember({ name: daughterName.trim(), fatherId: meId, gender: "female", prefilledEmail: daughterEmail.trim() });
     if (created) setMembers(enrichMembers([...members, created], profilesMap));
     setDaughterName("");
     setDaughterEmail("");
-    setDaughterPhone("");
     setAddingDaughter(false);
+    setShowAddDaughter(false);
   };
 
   const addWife = async () => {
     if (!wifeName.trim() || !wifeEmail.trim()) return;
     setAddingWife(true);
-    const created = await insertMember({ name: wifeName.trim(), spouseOf: meId, gender: "female", prefilledEmail: wifeEmail.trim(), phone: wifePhone.trim() });
+    const created = await insertMember({ name: wifeName.trim(), spouseOf: meId, gender: "female", prefilledEmail: wifeEmail.trim() });
     if (created) setMembers(enrichMembers([...members, created], profilesMap));
     setWifeName("");
     setWifeEmail("");
-    setWifePhone("");
     setAddingWife(false);
+    setShowAddWife(false);
+  };
+
+  const confirmRemoveAction = async () => {
+    const { type, id } = confirmRemove;
+    if (type === "daughter") {
+      await deleteMember(id);
+      setMembers(members.filter((m) => m.id !== id));
+    } else {
+      await unlinkSpouse(id);
+      const rawUpdated = members.map((m) => (m.id === id ? { ...m, spouseOf: null } : m));
+      setMembers(enrichMembers(rawUpdated, profilesMap));
+    }
+    setConfirmRemove(null);
   };
 
   if (!form) return <EmptyState text="جارِ تحميل ملفك الشخصي..." />;
@@ -1398,11 +1427,26 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
     </div>
   );
 
+  const InfoRow = ({ icon: Icon, text }) => text ? (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: T.text, marginBottom: 8 }}>
+      <Icon size={15} color={T.gold} /> {text}
+    </div>
+  ) : null;
+
   return (
     <div>
-      <SectionTitle>ملفي الشخصي</SectionTitle>
+      <SectionTitle
+        action={
+          <IconButton onClick={() => setMode(mode === "view" ? "edit" : "view")} active={mode === "edit"}>
+            {mode === "view" ? <><Pencil size={13} /> تعديل</> : "عرض"}
+          </IconButton>
+        }
+      >
+        ملفي الشخصي
+      </SectionTitle>
+
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <Avatar name={form.name} photoUrl={form.photoUrl} size={56} />
+        <Avatar name={form.name} photoUrl={form.photoUrl} gender={form.gender} size={56} />
         <div>
           <div style={{ fontSize: 16, fontWeight: 800, color: T.ink }}>{form.name}</div>
           <div style={{ fontSize: 12, color: T.muted }}>{form.branch} · {form.nasab}</div>
@@ -1410,79 +1454,130 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         </div>
       </div>
 
-      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>الصورة الشخصية والبيانات الأساسية</div>
-        <input placeholder="رابط الصورة الشخصية (اختياري)" value={form.photoUrl || ""} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} style={inputStyle} />
-        <input type="date" placeholder="تاريخ الميلاد" value={form.birthDate || ""} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} style={inputStyle} />
-        <input placeholder="مكان الميلاد" value={form.birthPlace || ""} onChange={(e) => setForm({ ...form, birthPlace: e.target.value })} style={inputStyle} />
-        <input placeholder="مدينة الإقامة الحالية" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} style={inputStyle} />
-      </div>
-
-      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>البيانات الموسّعة (سيرة، وظيفة)</span>
-          <button onClick={() => setForm({ ...form, extendedVisible: !form.extendedVisible })} style={{ border: `1px solid ${form.extendedVisible ? T.gold : T.line}`, background: form.extendedVisible ? T.sandDark : "transparent", borderRadius: 999, padding: "4px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", color: T.text }}>
-            {form.extendedVisible ? "مرئية للعائلة" : "مخفية"}
-          </button>
+      {mode === "view" ? (
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
+          <InfoRow icon={Briefcase} text={form.job} />
+          <InfoRow icon={MapPin} text={[form.region, form.birthPlace && `مسقط الرأس: ${form.birthPlace}`].filter(Boolean).join(" · ")} />
+          <InfoRow icon={Cake} text={form.birthDate && formatDate(form.birthDate, form.birthDatePrecision)} />
+          <InfoRow icon={Phone} text={form.phone} />
+          <InfoRow icon={Link2} text={form.prefilledEmail} />
+          {form.bio && <div style={{ fontSize: 12.5, color: T.text, lineHeight: 1.7, marginTop: 6, paddingTop: 10, borderTop: `1px dashed ${T.line}` }}>{form.bio}</div>}
+          {form.socialLinks && Object.values(form.socialLinks).some(Boolean) && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              {Object.entries(form.socialLinks).map(([k, v]) => v && (
+                <span key={k} style={{ fontSize: 11.5, color: T.gold, display: "flex", alignItems: "center", gap: 3 }}><Link2 size={11} /> {v}</span>
+              ))}
+            </div>
+          )}
+          {form.cvUrl && (
+            <a href={form.cvUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, padding: "7px 14px", background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 999, color: T.ink, textDecoration: "none", fontSize: 11.5, fontWeight: 700 }}>
+              <FileText size={13} /> السيرة الذاتية
+            </a>
+          )}
+          <div style={{ display: "flex", gap: 16, marginTop: 12, paddingTop: 12, borderTop: `1px dashed ${T.line}`, fontSize: 10.5, color: T.muted }}>
+            <span>الجوال: {form.phoneVisible ? "ظاهر للعائلة" : "مخفي"}</span>
+            <span>البريد: {form.emailVisible ? "ظاهر للعائلة" : "مخفي"}</span>
+          </div>
         </div>
-        <input placeholder="المسمى الوظيفي" value={form.job} onChange={(e) => setForm({ ...form, job: e.target.value })} style={inputStyle} />
-        <textarea placeholder="نبذة مختصرة" rows={2} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} style={{ ...inputStyle, resize: "none" }} />
-        <div style={{ fontSize: 11, color: T.muted }}>وسائل التواصل الاجتماعي (اختياري، أضف اللي يخصّك بس):</div>
-        <input placeholder="حساب تويتر/X" value={form.socialLinks?.twitter || ""} onChange={(e) => setForm({ ...form, socialLinks: { ...form.socialLinks, twitter: e.target.value } })} style={inputStyle} />
-        <input placeholder="حساب انستقرام" value={form.socialLinks?.instagram || ""} onChange={(e) => setForm({ ...form, socialLinks: { ...form.socialLinks, instagram: e.target.value } })} style={inputStyle} />
-        <input placeholder="لينكدإن" value={form.socialLinks?.linkedin || ""} onChange={(e) => setForm({ ...form, socialLinks: { ...form.socialLinks, linkedin: e.target.value } })} style={inputStyle} />
-        <input placeholder="رابط السيرة الذاتية (PDF من Google Drive مثلًا)" value={form.cvUrl || ""} onChange={(e) => setForm({ ...form, cvUrl: e.target.value })} style={inputStyle} />
-        <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6 }}>هذه البيانات لا تظهر لأحد إلا إذا فعّلتَ "مرئية للعائلة" أعلاه.</div>
-      </div>
+      ) : (
+        <>
+          <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>البيانات الأساسية</div>
+            {form.gender !== "female" && <input placeholder="رابط الصورة الشخصية (اختياري)" value={form.photoUrl || ""} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} style={inputStyle} />}
+            <input type="date" placeholder="تاريخ الميلاد" value={form.birthDate || ""} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} style={inputStyle} />
+            <input placeholder="مكان الميلاد" value={form.birthPlace || ""} onChange={(e) => setForm({ ...form, birthPlace: e.target.value })} style={inputStyle} />
+            <input placeholder="مدينة الإقامة الحالية" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} style={inputStyle} />
+            <input type="tel" placeholder="رقم الجوال (اختياري)" value={form.phone || ""} onChange={(e) => setForm({ ...form, phone: e.target.value })} style={inputStyle} />
+          </div>
 
-      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>خصوصية معلومات التواصل</div>
-        <PrivacyToggle label={`رقم الجوال${form.phone ? ` (${form.phone})` : " (غير مسجّل)"}`} checked={!!form.phoneVisible} onToggle={() => setForm({ ...form, phoneVisible: !form.phoneVisible })} />
-        <PrivacyToggle label={`البريد الإلكتروني${form.prefilledEmail ? ` (${form.prefilledEmail})` : ""}`} checked={!!form.emailVisible} onToggle={() => setForm({ ...form, emailVisible: !form.emailVisible })} />
-        <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6 }}>لك الخيار الكامل — إظهار أي منهما للعائلة أو إبقاؤه خاصًا.</div>
-      </div>
+          <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>البيانات الموسّعة (سيرة، وظيفة)</span>
+              <button onClick={() => setForm({ ...form, extendedVisible: !form.extendedVisible })} style={{ border: `1px solid ${form.extendedVisible ? T.gold : T.line}`, background: form.extendedVisible ? T.sandDark : "transparent", borderRadius: 999, padding: "4px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", color: T.text }}>
+                {form.extendedVisible ? "مرئية للعائلة" : "مخفية"}
+              </button>
+            </div>
+            <input placeholder="المسمى الوظيفي" value={form.job} onChange={(e) => setForm({ ...form, job: e.target.value })} style={inputStyle} />
+            <textarea placeholder="نبذة مختصرة" rows={2} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} style={{ ...inputStyle, resize: "none" }} />
+            <div style={{ fontSize: 11, color: T.muted }}>وسائل التواصل الاجتماعي (اختياري):</div>
+            <input placeholder="حساب تويتر/X" value={form.socialLinks?.twitter || ""} onChange={(e) => setForm({ ...form, socialLinks: { ...form.socialLinks, twitter: e.target.value } })} style={inputStyle} />
+            <input placeholder="حساب انستقرام" value={form.socialLinks?.instagram || ""} onChange={(e) => setForm({ ...form, socialLinks: { ...form.socialLinks, instagram: e.target.value } })} style={inputStyle} />
+            <input placeholder="لينكدإن" value={form.socialLinks?.linkedin || ""} onChange={(e) => setForm({ ...form, socialLinks: { ...form.socialLinks, linkedin: e.target.value } })} style={inputStyle} />
+            <input placeholder="رابط السيرة الذاتية (PDF من Google Drive مثلًا)" value={form.cvUrl || ""} onChange={(e) => setForm({ ...form, cvUrl: e.target.value })} style={inputStyle} />
+          </div>
 
-      <button onClick={save} style={{ ...primaryBtnStyle, width: "100%" }}>حفظ كل التغييرات</button>
+          <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>خصوصية معلومات التواصل</div>
+            <PrivacyToggle label="رقم الجوال" checked={!!form.phoneVisible} onToggle={() => setForm({ ...form, phoneVisible: !form.phoneVisible })} />
+            <PrivacyToggle label="البريد الإلكتروني" checked={!!form.emailVisible} onToggle={() => setForm({ ...form, emailVisible: !form.emailVisible })} />
+          </div>
+
+          <button onClick={save} style={{ ...primaryBtnStyle, width: "100%" }}>حفظ كل التغييرات</button>
+        </>
+      )}
 
       {form.gender !== "female" && (
-        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginTop: 14, display: "grid", gap: 14 }}>
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>البنات</div>
+        <div style={{ marginTop: 14 }}>
+          <SectionTitle action={<IconButton onClick={() => setShowAddDaughter((v) => !v)} active={showAddDaughter}><Plus size={13} /> إضافة</IconButton>}>البنات</SectionTitle>
+          <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
+            {myDaughters.length === 0 && !showAddDaughter && <div style={{ fontSize: 12, color: T.muted, textAlign: "center", padding: "8px 0" }}>لا يوجد بنات مضافات بعد.</div>}
             {myDaughters.map((d) => (
-              <div key={d.id} style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 12.5, color: T.text }}>{d.name}</div>
-                <div style={{ fontSize: 10.5, color: T.muted }}>{d.prefilledEmail}{d.phone ? ` · ${d.phone}` : ""}</div>
+              <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
+                <div>
+                  <div style={{ fontSize: 12.5, color: T.text, fontWeight: 700 }}>{d.name}</div>
+                  <div style={{ fontSize: 10.5, color: T.muted }}>{d.prefilledEmail}</div>
+                </div>
+                <button onClick={() => setConfirmRemove({ type: "daughter", id: d.id, name: d.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف">
+                  <Trash2 size={15} />
+                </button>
               </div>
             ))}
-            <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
-              <input placeholder="اسم الابنة" value={daughterName} onChange={(e) => setDaughterName(e.target.value)} style={inputStyle} />
-              <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={daughterEmail} onChange={(e) => setDaughterEmail(e.target.value)} style={inputStyle} />
-              <input type="tel" placeholder="رقم جوالها (اختياري، مفيد للرسائل الجماعية)" value={daughterPhone} onChange={(e) => setDaughterPhone(e.target.value)} style={inputStyle} />
-              <button onClick={addDaughter} disabled={addingDaughter || !daughterName.trim() || !daughterEmail.trim()} style={primaryBtnStyle}>
-                {addingDaughter ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
-              </button>
-            </div>
-            <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>تُربط تلقائيًا بك كأب. البريد يُستخدم لتفعيل حسابها برسالة تحقق.</div>
-          </div>
-          <div style={{ borderTop: `1px dashed ${T.line}`, paddingTop: 14 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>{myWives.length > 1 ? "الزوجات" : "الزوجة"}</div>
-            {myWives.map((w) => (
-              <div key={w.id} style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 12.5, color: T.text }}>{w.name}</div>
-                <div style={{ fontSize: 10.5, color: T.muted }}>{w.prefilledEmail}{w.phone ? ` · ${w.phone}` : ""}</div>
+            {showAddDaughter && (
+              <div style={{ display: "grid", gap: 6, marginTop: 10, paddingTop: 10, borderTop: myDaughters.length ? `1px dashed ${T.line}` : "none" }}>
+                <input placeholder="اسم الابنة" value={daughterName} onChange={(e) => setDaughterName(e.target.value)} style={inputStyle} />
+                <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={daughterEmail} onChange={(e) => setDaughterEmail(e.target.value)} style={inputStyle} />
+                <button onClick={addDaughter} disabled={addingDaughter || !daughterName.trim() || !daughterEmail.trim()} style={primaryBtnStyle}>
+                  {addingDaughter ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
+                </button>
+                <div style={{ fontSize: 10.5, color: T.muted }}>تُربط تلقائيًا بك كأب. الجوال تقدر تضيفه هي بنفسها لاحقًا من ملفها.</div>
               </div>
-            ))}
-            <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
-              <input placeholder="الاسم الكامل للزوجة" value={wifeName} onChange={(e) => setWifeName(e.target.value)} style={inputStyle} />
-              <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={wifeEmail} onChange={(e) => setWifeEmail(e.target.value)} style={inputStyle} />
-              <input type="tel" placeholder="رقم جوالها (اختياري، مفيد للرسائل الجماعية)" value={wifePhone} onChange={(e) => setWifePhone(e.target.value)} style={inputStyle} />
-              <button onClick={addWife} disabled={addingWife || !wifeName.trim() || !wifeEmail.trim()} style={primaryBtnStyle}>
-                {addingWife ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
-              </button>
-            </div>
-            <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>اسمها كامل بما إنها من خارج شجرة العائلة. البريد يُستخدم لتفعيل حسابها.</div>
+            )}
           </div>
         </div>
+      )}
+
+      {form.gender !== "female" && (
+        <div style={{ marginTop: 14, marginBottom: 14 }}>
+          <SectionTitle action={<IconButton onClick={() => setShowAddWife((v) => !v)} active={showAddWife}><Plus size={13} /> إضافة</IconButton>}>الزوجة</SectionTitle>
+          <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
+            {myWives.length === 0 && !showAddWife && <div style={{ fontSize: 12, color: T.muted, textAlign: "center", padding: "8px 0" }}>لا توجد زوجة مضافة بعد.</div>}
+            {myWives.map((w) => (
+              <div key={w.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
+                <div>
+                  <div style={{ fontSize: 12.5, color: T.text, fontWeight: 700 }}>{w.name}</div>
+                  <div style={{ fontSize: 10.5, color: T.muted }}>{w.prefilledEmail}</div>
+                </div>
+                <button onClick={() => setConfirmRemove({ type: "wife", id: w.id, name: w.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="إزالة الارتباط">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+            {showAddWife && (
+              <div style={{ display: "grid", gap: 6, marginTop: 10, paddingTop: 10, borderTop: myWives.length ? `1px dashed ${T.line}` : "none" }}>
+                <input placeholder="الاسم الكامل للزوجة" value={wifeName} onChange={(e) => setWifeName(e.target.value)} style={inputStyle} />
+                <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={wifeEmail} onChange={(e) => setWifeEmail(e.target.value)} style={inputStyle} />
+                <button onClick={addWife} disabled={addingWife || !wifeName.trim() || !wifeEmail.trim()} style={primaryBtnStyle}>
+                  {addingWife ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
+                </button>
+                <div style={{ fontSize: 10.5, color: T.muted }}>اسمها كامل بما إنها من خارج شجرة العائلة. الجوال تقدر تضيفه هي بنفسها لاحقًا. يدعم إضافة أكثر من زوجة.</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {confirmRemove && (
+        <ConfirmModal onConfirm={confirmRemoveAction} onCancel={() => setConfirmRemove(null)} />
       )}
     </div>
   );
@@ -1498,7 +1593,14 @@ const BASE_TABS = [
 const ADMINS_TAB = { key: "admins", label: "المشرفون", icon: Shield };
 
 function FamilyAppInner({ meId }) {
-  const [tab, setTab] = useState("news");
+  const [tab, setTab] = useState(() => {
+    const h = window.location.hash.replace("#", "");
+    return ["news", "tree", "events", "members", "profile", "admins"].includes(h) ? h : "news";
+  });
+
+  useEffect(() => {
+    window.location.hash = tab;
+  }, [tab]);
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState([]);
   const [profilesMap, setProfilesMap] = useState({});
