@@ -225,6 +225,46 @@ async function checkPermission(key) {
   return !!data;
 }
 
+async function submitBirthRequest({ name, gender, birthDate, fatherId }) {
+  const { data: userData } = await supabase.auth.getUser();
+  const uid = userData?.user?.id;
+  if (!uid) return false;
+  const { error } = await supabase.from("edit_requests").insert({
+    requested_by: uid,
+    status: "pending",
+    proposed_changes: { name, gender, birth_date: birthDate || null, father_id: fatherId },
+  });
+  if (error) { console.error("submitBirthRequest failed", error); return false; }
+  return true;
+}
+
+async function fetchPendingBirthRequests() {
+  const { data, error } = await supabase.from("edit_requests").select("id, proposed_changes, created_at, member_id").eq("status", "pending").is("member_id", null);
+  if (error) { console.error("fetchPendingBirthRequests failed", error); return []; }
+  return data;
+}
+
+async function approveBirthRequest(request) {
+  const c = request.proposed_changes;
+  const { data: userData } = await supabase.auth.getUser();
+  const { data: memberData, error: insertErr } = await supabase
+    .from("members")
+    .insert({ first_name: c.name, father_id: c.father_id, gender: c.gender, birth_date: c.birth_date || null })
+    .select()
+    .single();
+  if (insertErr) { console.error("approveBirthRequest insert failed", insertErr); return null; }
+  const { error: updateErr } = await supabase.from("edit_requests").update({ status: "approved", reviewed_by: userData?.user?.id }).eq("id", request.id);
+  if (updateErr) console.error("approveBirthRequest update failed", updateErr);
+  return mapMemberRow(memberData);
+}
+
+async function rejectBirthRequest(requestId) {
+  const { data: userData } = await supabase.auth.getUser();
+  const { error } = await supabase.from("edit_requests").update({ status: "rejected", reviewed_by: userData?.user?.id }).eq("id", requestId);
+  if (error) { console.error("rejectBirthRequest failed", error); return false; }
+  return true;
+}
+
 function buildAncestryHelper(members) {
   const byId = {};
   members.forEach((m) => { byId[m.id] = m; });
@@ -1312,6 +1352,32 @@ function AdminsTab() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [confirmRemoveAdmin, setConfirmRemoveAdmin] = useState(null);
+  const [pendingBirths, setPendingBirths] = useState([]);
+  const [loadingBirths, setLoadingBirths] = useState(true);
+  const [birthBusyId, setBirthBusyId] = useState(null);
+
+  const loadPendingBirths = async () => {
+    setLoadingBirths(true);
+    const rows = await fetchPendingBirthRequests();
+    setPendingBirths(rows);
+    setLoadingBirths(false);
+  };
+
+  useEffect(() => { loadPendingBirths(); }, []);
+
+  const handleApproveBirth = async (req) => {
+    setBirthBusyId(req.id);
+    await approveBirthRequest(req);
+    setPendingBirths((prev) => prev.filter((r) => r.id !== req.id));
+    setBirthBusyId(null);
+  };
+
+  const handleRejectBirth = async (req) => {
+    setBirthBusyId(req.id);
+    await rejectBirthRequest(req.id);
+    setPendingBirths((prev) => prev.filter((r) => r.id !== req.id));
+    setBirthBusyId(null);
+  };
 
   const loadAdmins = async () => {
     setLoading(true);
@@ -1369,6 +1435,26 @@ function AdminsTab() {
 
   return (
     <div>
+      <SectionTitle>طلبات تسجيل مواليد بانتظار الاعتماد</SectionTitle>
+      {loadingBirths ? (
+        <Loader2 size={18} style={{ animation: "rosette-spin 1s linear infinite" }} />
+      ) : pendingBirths.length === 0 ? (
+        <EmptyState text="لا توجد طلبات معلّقة حاليًا." />
+      ) : (
+        pendingBirths.map((req) => (
+          <div key={req.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink }}>{req.proposed_changes?.name}</div>
+            <div style={{ fontSize: 11.5, color: T.muted, marginTop: 2 }}>
+              مولود {req.proposed_changes?.gender === "female" ? "أنثى" : "ذكر"}{req.proposed_changes?.birth_date ? ` · ${req.proposed_changes.birth_date}` : ""}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button onClick={() => handleApproveBirth(req)} disabled={birthBusyId === req.id} style={{ ...primaryBtnStyle, flex: 1 }}>اعتماد</button>
+              <button onClick={() => handleRejectBirth(req)} disabled={birthBusyId === req.id} style={{ background: "transparent", color: T.clay, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", flex: 1 }}>رفض</button>
+            </div>
+          </div>
+        ))
+      )}
+
       <SectionTitle>إدارة المشرفين</SectionTitle>
       <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}><UserPlus size={15} /> إضافة مشرف جديد</div>
@@ -1432,6 +1518,12 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
   const [showAddDaughter, setShowAddDaughter] = useState(false);
   const [showAddWife, setShowAddWife] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(null); // { type: 'daughter'|'wife', id, name }
+  const [showAddBirth, setShowAddBirth] = useState(false);
+  const [birthName, setBirthName] = useState("");
+  const [birthGender, setBirthGender] = useState("male");
+  const [birthDate, setBirthDate] = useState("");
+  const [addingBirth, setAddingBirth] = useState(false);
+  const [birthMsg, setBirthMsg] = useState("");
 
   useEffect(() => setForm(me), [meId, members.length]);
 
@@ -1511,6 +1603,16 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
       setMembers(enrichMembers(rawUpdated, profilesMap));
     }
     setConfirmRemove(null);
+  };
+
+  const addBirth = async () => {
+    if (!birthName.trim()) return;
+    setAddingBirth(true);
+    setBirthMsg("");
+    const ok = await submitBirthRequest({ name: birthName.trim(), gender: birthGender, birthDate, fatherId: meId });
+    setBirthMsg(ok ? "أُرسل طلب تسجيل المولود لاعتماد المشرف." : "تعذّر إرسال الطلب، حاول مرة أخرى.");
+    if (ok) { setBirthName(""); setBirthDate(""); setShowAddBirth(false); }
+    setAddingBirth(false);
   };
 
   if (!form) return <EmptyState text="جارِ تحميل ملفك الشخصي..." />;
@@ -1619,6 +1721,33 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
       {(relSuccess || relError) && (
         <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700, background: relSuccess ? "#E8F3EC" : "#FBEAEA", color: relSuccess ? "#2F7D4F" : T.clay }}>
           {relSuccess || relError}
+        </div>
+      )}
+
+      {form.gender !== "female" && (
+        <div style={{ marginTop: 14 }}>
+          <SectionTitle action={<IconButton onClick={() => setShowAddBirth((v) => !v)} active={showAddBirth}><Plus size={13} /> إضافة مولود</IconButton>}>تسجيل مولود جديد</SectionTitle>
+          <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
+            {!showAddBirth && !birthMsg && (
+              <div style={{ fontSize: 11.5, color: T.muted, textAlign: "center", padding: "4px 0" }}>
+                كل مولود (ذكر أو أنثى) يُرسل لاعتماد المشرف قبل إضافته للشجرة.
+              </div>
+            )}
+            {birthMsg && <div style={{ fontSize: 12, color: T.gold, fontWeight: 700, marginBottom: showAddBirth ? 10 : 0 }}>{birthMsg}</div>}
+            {showAddBirth && (
+              <div style={{ display: "grid", gap: 6 }}>
+                <input placeholder="اسم المولود" value={birthName} onChange={(e) => setBirthName(e.target.value)} style={inputStyle} />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setBirthGender("male")} style={{ ...inputStyle, cursor: "pointer", background: birthGender === "male" ? T.sandDark : T.sand, textAlign: "center" }}>ذكر</button>
+                  <button onClick={() => setBirthGender("female")} style={{ ...inputStyle, cursor: "pointer", background: birthGender === "female" ? T.sandDark : T.sand, textAlign: "center" }}>أنثى</button>
+                </div>
+                <input type="date" placeholder="تاريخ الميلاد (اختياري)" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} style={{ ...inputStyle, minWidth: 0, maxWidth: "100%" }} />
+                <button onClick={addBirth} disabled={addingBirth || !birthName.trim()} style={primaryBtnStyle}>
+                  {addingBirth ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إرسال لاعتماد المشرف"}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
