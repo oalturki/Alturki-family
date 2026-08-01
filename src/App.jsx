@@ -1760,11 +1760,11 @@ function FamilyAppInner({ meId }) {
           onClick={() => setTab("news")}
           style={{
             height: 88,
-            background: T.sand,
+            background: "#fff",
             backgroundImage: "url(/Header-Final.jpeg)",
             backgroundSize: "contain",
             backgroundRepeat: "no-repeat",
-            backgroundPosition: "center",
+            backgroundPosition: "right center",
             borderBottomLeftRadius: 22,
             borderBottomRightRadius: 22,
             cursor: "pointer",
