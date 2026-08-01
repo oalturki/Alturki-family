@@ -428,6 +428,22 @@ const TREE_NODE_H = 58;
 const TREE_H_GAP = 16;
 const TREE_V_GAP = 54;
 
+// نظام ألوان الشجرة الموثقة (Tree.html) — يطبَّق هنا على البيانات الحية
+const TT = {
+  tealDark: "#0d2b2b",
+  teal900: "#123838",
+  teal800: "#1a4d4d",
+  teal700: "#1f6161",
+  sand100: "#f6f1e6",
+  sand200: "#efe6d2",
+  gold500: "#c9a227",
+  gold400: "#dab94a",
+  line: "#8fae9f",
+  hasPhoneFill: "#dff0e4",
+  deceasedLine: "#a24936",
+  text: "#16241f",
+};
+
 function TreeTab({ members }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
@@ -532,8 +548,9 @@ function TreeTab({ members }) {
           display: "inline-block",
           margin: "0 0 14px",
           padding: "8px 16px",
-          background: T.gold,
-          color: T.sand,
+          background: "#123838",
+          color: "#dab94a",
+          border: "1.5px solid #c9a227",
           borderRadius: 8,
           textDecoration: "none",
           fontWeight: 700,
@@ -557,23 +574,47 @@ function TreeTab({ members }) {
       {!rootId ? (
         <EmptyState text="تعذّر تحديد جذر الشجرة." />
       ) : (
-        <div style={{ overflow: "auto", border: `1px solid ${T.line}`, borderRadius: 14, background: T.card, padding: 16 }}>
+        <div style={{ overflow: "auto", border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, padding: 16 }}>
           <svg width={Math.max(layout.width, 260)} height={layout.height + 20} style={{ display: "block", margin: "0 auto" }}>
             {layout.edges.map((e, i) => (
               <path
                 key={i}
                 d={`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1 + e.y2) / 2}, ${e.x2} ${(e.y1 + e.y2) / 2}, ${e.x2} ${e.y2}`}
-                stroke={T.line}
-                strokeWidth={1.5}
+                stroke={TT.line}
+                strokeWidth={1.6}
                 fill="none"
               />
             ))}
             {layout.nodes.map((n) => {
               const m = byId[n.id];
               const isRoot = n.id === rootId;
+              const hasPhone = m?.isAlive !== false && !!m?.phone;
+              const isDeceased = m?.isAlive === false;
               const w = isRoot ? TREE_NODE_W + 20 : TREE_NODE_W;
               const h = isRoot ? TREE_NODE_H + 14 : TREE_NODE_H;
               const isSelected = selectedNode === n.id;
+
+              let fill = TT.sand100;
+              let stroke = TT.teal800;
+              let strokeWidth = 1.6;
+              let dash = "0";
+              if (isRoot) {
+                fill = TT.teal900;
+                stroke = TT.gold500;
+                strokeWidth = 2;
+              } else if (hasPhone) {
+                fill = TT.hasPhoneFill;
+                stroke = TT.teal700;
+              }
+              if (isDeceased) {
+                stroke = TT.deceasedLine;
+                dash = "4 3";
+              }
+              if (isSelected) {
+                stroke = TT.gold500;
+                strokeWidth = 2.4;
+              }
+
               return (
                 <g
                   key={n.id}
@@ -585,10 +626,10 @@ function TreeTab({ members }) {
                     width={w}
                     height={h}
                     rx={12}
-                    fill={isRoot ? T.ink : T.sand}
-                    stroke={isSelected ? T.gold : (m?.isAlive === false ? T.clay : T.gold)}
-                    strokeWidth={isRoot ? 2 : 1.4}
-                    strokeDasharray={m?.isAlive === false ? "4 3" : "0"}
+                    fill={fill}
+                    stroke={stroke}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={dash}
                   />
                   <text
                     x={w / 2}
@@ -596,13 +637,13 @@ function TreeTab({ members }) {
                     textAnchor="middle"
                     fontSize={isRoot ? 13.5 : 11.5}
                     fontWeight={isRoot ? 800 : 600}
-                    fill={isRoot ? T.goldLight : T.text}
+                    fill={isRoot ? TT.gold400 : TT.text}
                     fontFamily="'Tajawal', sans-serif"
                   >
                     {(m?.name || "").length > 12 ? m.name.slice(0, 11) + "…" : m?.name}
                   </text>
                   {n.hasChildren && !expanded.has(n.id) && (
-                    <text x={w / 2} y={h - 6} textAnchor="middle" fontSize={9} fill={T.muted} fontFamily="'Tajawal', sans-serif">
+                    <text x={w / 2} y={h - 6} textAnchor="middle" fontSize={9} fill={TT.teal700} fontFamily="'Tajawal', sans-serif">
                       اضغط للتوسيع
                     </text>
                   )}
@@ -613,12 +654,15 @@ function TreeTab({ members }) {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 10, fontSize: 11, color: T.muted }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, justifyContent: "center", marginTop: 10, fontSize: 11, color: T.muted }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.4px solid ${T.gold}` }} /> على قيد الحياة
+          <span style={{ width: 14, height: 14, borderRadius: 4, background: TT.hasPhoneFill, border: `1.4px solid ${TT.teal700}` }} /> جوال مسجّل
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.4px dashed ${T.clay}` }} /> متوفى رحمه الله
+          <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.4px solid ${TT.teal800}` }} /> على قيد الحياة
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.4px dashed ${TT.deceasedLine}` }} /> متوفى رحمه الله
         </span>
       </div>
     </div>
