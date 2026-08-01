@@ -449,6 +449,7 @@ function TreeTab({ members }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [selectedNode, setSelectedNode] = useState(null);
   const [pdfOpen, setPdfOpen] = useState(false);
+  const [showInteractive, setShowInteractive] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState(false);
   const canvasRef = useRef(null);
@@ -603,27 +604,87 @@ function TreeTab({ members }) {
   return (
     <div>
       <SectionTitle>شجرة العائلة</SectionTitle>
-      <div style={{ background: "linear-gradient(160deg, #123838, #0d2b2b)", border: "1px solid #c9a227", borderRadius: 14, padding: 14, marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <FileText size={16} color="#dab94a" />
-          <span style={{ color: "#F4EFE3", fontSize: 13.5, fontWeight: 700 }}>الشجرة المصورة (الطبعة الثالثة، ١٤٤٧هـ)</span>
+
+      {/* رأسية نسب العائلة — بإطار مزخرف يستلهم لوحة النسب */}
+      <div
+        style={{
+          position: "relative",
+          border: `3px solid ${TT.teal800}`,
+          borderRadius: 14,
+          padding: 5,
+          marginBottom: 16,
+          background: `linear-gradient(160deg, ${TT.gold500}, ${TT.teal800})`,
+        }}
+      >
+        <div
+          style={{
+            border: `1.5px solid ${TT.gold500}`,
+            borderRadius: 10,
+            padding: "18px 16px",
+            background: `linear-gradient(150deg, #f6f1e6, #efe6d2)`,
+            textAlign: "center",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "center", gap: 4, marginBottom: 8, opacity: 0.85 }}>
+            <Rosette size={14} color={TT.gold500} />
+            <Rosette size={14} color={TT.gold500} />
+            <Rosette size={14} color={TT.gold500} />
+          </div>
+          <div style={{ fontSize: 11.5, color: TT.teal800, fontWeight: 700, marginBottom: 6 }}>
+            نسب آل تركي من ذرية:
+          </div>
+          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 17, color: TT.text, fontWeight: 700, lineHeight: 1.9 }}>
+            تركي بن إبراهيم بن سليمان بن حماد بن عامر البدراني الدوسري
+          </div>
+          <div style={{ fontSize: 11.5, color: TT.deceasedLine, fontWeight: 700, marginTop: 6 }}>
+            المتوفى عام ١١١٧هـ، رحمه الله
+          </div>
         </div>
+      </div>
+
+      {/* خيارا عرض الشجرة */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
         <button
           onClick={() => setPdfOpen(true)}
           style={{
-            width: "100%",
-            padding: "9px 0",
-            background: "#c9a227",
-            color: "#0d2b2b",
-            border: "none",
-            borderRadius: 8,
-            fontWeight: 800,
-            fontSize: 12.5,
-            fontFamily: "inherit",
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 6,
+            padding: "14px 8px",
+            background: "linear-gradient(160deg, #123838, #0d2b2b)",
+            color: "#F4EFE3",
+            border: "1px solid #c9a227",
+            borderRadius: 14,
             cursor: "pointer",
+            fontFamily: "inherit",
           }}
         >
-          عرض
+          <FileText size={20} color="#dab94a" />
+          <span style={{ fontSize: 12.5, fontWeight: 800 }}>الشجرة المصورة</span>
+          <span style={{ fontSize: 10, color: "#c9b98a" }}>الطبعة الثالثة، ١٤٤٧هـ</span>
+        </button>
+        <button
+          onClick={() => setShowInteractive((v) => !v)}
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 6,
+            padding: "14px 8px",
+            background: showInteractive ? T.sandDark : T.card,
+            color: T.ink,
+            border: `1px solid ${showInteractive ? T.gold : T.line}`,
+            borderRadius: 14,
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          <GitBranch size={20} color={T.gold} />
+          <span style={{ fontSize: 12.5, fontWeight: 800 }}>الشجرة التفاعلية</span>
+          <span style={{ fontSize: 10, color: T.muted }}>{showInteractive ? "إخفاء" : "بيانات حية، بحث وتفرّع"}</span>
         </button>
       </div>
 
@@ -661,6 +722,8 @@ function TreeTab({ members }) {
         </div>
       )}
 
+      {showInteractive && (
+        <>
       <div style={{ position: "relative", marginBottom: 14 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث عن فرد بالاسم..." style={{ ...inputStyle, padding: "9px 38px 9px 12px" }} />
@@ -765,6 +828,8 @@ function TreeTab({ members }) {
           <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.4px dashed ${TT.deceasedLine}` }} /> متوفى رحمه الله
         </span>
       </div>
+      </>
+      )}
     </div>
   );
 }
