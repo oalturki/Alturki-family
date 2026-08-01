@@ -605,41 +605,13 @@ function TreeTab({ members }) {
     <div>
       <SectionTitle>شجرة العائلة</SectionTitle>
 
-      {/* رأسية نسب العائلة — بإطار مزخرف يستلهم لوحة النسب */}
-      <div
-        style={{
-          position: "relative",
-          border: `3px solid ${TT.teal800}`,
-          borderRadius: 14,
-          padding: 5,
-          marginBottom: 16,
-          background: `linear-gradient(160deg, ${TT.gold500}, ${TT.teal800})`,
-        }}
-      >
-        <div
-          style={{
-            border: `1.5px solid ${TT.gold500}`,
-            borderRadius: 10,
-            padding: "18px 16px",
-            background: `linear-gradient(150deg, #f6f1e6, #efe6d2)`,
-            textAlign: "center",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "center", gap: 4, marginBottom: 8, opacity: 0.85 }}>
-            <Rosette size={14} color={TT.gold500} />
-            <Rosette size={14} color={TT.gold500} />
-            <Rosette size={14} color={TT.gold500} />
-          </div>
-          <div style={{ fontSize: 11.5, color: TT.teal800, fontWeight: 700, marginBottom: 6 }}>
-            نسب آل تركي من ذرية:
-          </div>
-          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 17, color: TT.text, fontWeight: 700, lineHeight: 1.9 }}>
-            تركي بن إبراهيم بن سليمان بن حماد بن عامر البدراني الدوسري
-          </div>
-          <div style={{ fontSize: 11.5, color: TT.deceasedLine, fontWeight: 700, marginTop: 6 }}>
-            المتوفى عام ١١١٧هـ، رحمه الله
-          </div>
-        </div>
+      {/* رأسية نسب العائلة — صورة اللوحة الأصلية */}
+      <div style={{ marginBottom: 16, borderRadius: 14, overflow: "hidden", border: `1px solid ${TT.gold500}`, boxShadow: "0 3px 10px rgba(13,43,43,0.15)" }}>
+        <img
+          src="/Nasab-Frame.jpg"
+          alt="نسب آل تركي من ذرية تركي بن إبراهيم بن سليمان بن حماد بن عامر البدراني الدوسري، المتوفى عام ١١١٧هـ رحمه الله"
+          style={{ width: "100%", height: "auto", display: "block" }}
+        />
       </div>
 
       {/* خيارا عرض الشجرة */}
