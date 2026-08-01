@@ -4,7 +4,7 @@ import {
   Search, Plus, X, MapPin, Briefcase,
   Link2, ChevronDown, ChevronUp, Check,
   Baby, HeartHandshake, Megaphone, Cross, Loader2,
-  FileText, Phone, Cake, Shield, UserPlus, Trash2, Save
+  FileText, Phone, Cake, Shield, UserPlus, Trash2, Save, Pencil
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -389,21 +389,23 @@ function NewsTab({ news, setNews, canManageNews }) {
         const meta = NEWS_TYPES[n.type] || NEWS_TYPES["عام"];
         const Icon = meta.icon;
         return (
-          <div key={n.id} style={{ display: "flex", gap: 12, background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 13, marginBottom: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: "50%", background: T.sandDark, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: meta.color }}>
-              <Icon size={17} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.6 }}>{n.text}</div>
-              <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{n.type} · {n.date}</div>
+          <div key={n.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 13, marginBottom: 10 }}>
+            <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: T.sandDark, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: meta.color }}>
+                <Icon size={17} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.6 }}>{n.text}</div>
+                <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{n.type} · {n.date}</div>
+              </div>
             </div>
             {canManageNews && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
-                <button onClick={() => startEdit(n)} title="تعديل" style={{ background: "none", border: "none", color: T.gold, cursor: "pointer", padding: 2, fontFamily: "inherit" }}>
-                  <span style={{ fontSize: 11 }}>تعديل</span>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
+                <button onClick={() => startEdit(n)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "5px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
+                  <Pencil size={12} /> تعديل
                 </button>
-                <button onClick={() => remove(n.id)} title="حذف" style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", padding: 2 }}>
-                  <span style={{ fontSize: 11 }}>حذف</span>
+                <button onClick={() => remove(n.id)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "5px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
+                  <Trash2 size={12} /> حذف
                 </button>
               </div>
             )}
@@ -421,54 +423,185 @@ function NewsTab({ news, setNews, canManageNews }) {
   );
 }
 
-function TreeTab({ members }) {
-  const [openBranch, setOpenBranch] = useState(null);
-  const [query, setQuery] = useState("");
+const TREE_NODE_W = 96;
+const TREE_NODE_H = 58;
+const TREE_H_GAP = 16;
+const TREE_V_GAP = 54;
 
-  const branches = useMemo(() => {
-    const map = {};
-    members.filter((m) => !query || m.name.includes(query)).forEach((m) => {
-      map[m.branch] = map[m.branch] || [];
-      map[m.branch].push(m);
+function TreeTab({ members }) {
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState(() => new Set());
+  const [selectedNode, setSelectedNode] = useState(null);
+
+  const { byId, childrenMap, rootId } = useMemo(() => {
+    const byId = {};
+    members.forEach((m) => { byId[m.id] = m; });
+    const childrenMap = {};
+    members.forEach((m) => {
+      if (m.fatherId) {
+        childrenMap[m.fatherId] = childrenMap[m.fatherId] || [];
+        childrenMap[m.fatherId].push(m.id);
+      }
     });
-    return map;
-  }, [members, query]);
+    const root = members.find((m) => !m.fatherId);
+    return { byId, childrenMap, rootId: root ? root.id : null };
+  }, [members]);
+
+  // بالبداية: الجذر مفتوح فقط
+  useEffect(() => {
+    if (rootId) setExpanded(new Set([rootId]));
+  }, [rootId]);
+
+  // البحث: يفتح تلقائيًا مسار الأجداد لأول عضو مطابق
+  useEffect(() => {
+    if (!query.trim() || !rootId) return;
+    const match = members.find((m) => m.name.includes(query.trim()) || m.nasab?.includes(query.trim()));
+    if (!match) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      let cur = match;
+      while (cur) {
+        next.add(cur.id);
+        cur = cur.fatherId ? byId[cur.fatherId] : null;
+      }
+      return next;
+    });
+    setSelectedNode(match.id);
+  }, [query]);
+
+  const toggle = (id) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const layout = useMemo(() => {
+    if (!rootId || !byId[rootId]) return { nodes: [], edges: [], width: 0, height: 0 };
+
+    const subtreeWidth = (id) => {
+      const kids = expanded.has(id) ? (childrenMap[id] || []) : [];
+      if (kids.length === 0) return TREE_NODE_W + TREE_H_GAP;
+      return kids.reduce((sum, kidId) => sum + subtreeWidth(kidId), 0);
+    };
+
+    const nodes = [];
+    const edges = [];
+    let maxDepth = 0;
+
+    const assign = (id, x0, depth) => {
+      maxDepth = Math.max(maxDepth, depth);
+      const kids = expanded.has(id) ? (childrenMap[id] || []) : [];
+      const y = depth * (TREE_NODE_H + TREE_V_GAP);
+      if (kids.length === 0) {
+        const cx = x0 + (TREE_NODE_W + TREE_H_GAP) / 2;
+        nodes.push({ id, x: cx, y, depth, hasChildren: !!(childrenMap[id] && childrenMap[id].length) });
+        return cx;
+      }
+      let cursor = x0;
+      const centers = [];
+      kids.forEach((kidId) => {
+        const w = subtreeWidth(kidId);
+        centers.push(assign(kidId, cursor, depth + 1));
+        cursor += w;
+      });
+      const cx = (centers[0] + centers[centers.length - 1]) / 2;
+      nodes.push({ id, x: cx, y, depth, hasChildren: true });
+      centers.forEach((ccx) => {
+        edges.push({ x1: cx, y1: y + TREE_NODE_H, x2: ccx, y2: y + TREE_NODE_H + TREE_V_GAP });
+      });
+      return cx;
+    };
+
+    assign(rootId, 0, 0);
+    const width = subtreeWidth(rootId);
+    const height = (maxDepth + 1) * (TREE_NODE_H + TREE_V_GAP);
+    return { nodes, edges, width, height };
+  }, [rootId, byId, childrenMap, expanded]);
 
   return (
     <div>
       <SectionTitle>شجرة العائلة</SectionTitle>
+
       <div style={{ position: "relative", marginBottom: 14 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث عن فرد بالاسم..." style={{ ...inputStyle, padding: "9px 38px 9px 12px" }} />
       </div>
-      {Object.keys(branches).length === 0 && <EmptyState text="لا نتائج مطابقة." />}
-      {Object.entries(branches).map(([branch, list]) => {
-        const isOpen = openBranch === branch || query;
-        return (
-          <div key={branch} style={{ marginBottom: 10, border: `1px solid ${T.line}`, borderRadius: 14, overflow: "hidden", background: T.card }}>
-            <button onClick={() => setOpenBranch(isOpen && !query ? null : branch)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", background: T.sandDark, border: "none", fontFamily: "inherit", cursor: "pointer" }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 700, color: T.ink }}>
-                <GitBranch size={15} color={T.gold} /> {branch}
-                <span style={{ color: T.muted, fontWeight: 500 }}>({list.length})</span>
-              </span>
-              {isOpen ? <ChevronUp size={16} color={T.muted} /> : <ChevronDown size={16} color={T.muted} />}
-            </button>
-            {isOpen && (
-              <div style={{ padding: 10 }}>
-                {list.map((m) => (
-                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px" }}>
-                    <Avatar name={m.name} photoUrl={m.photoUrl} size={34} />
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{m.name}</div>
-                      <div style={{ fontSize: 11, color: T.muted }}>{m.nasab}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
+
+      {/* شريط زخرفي أعلى الشجرة */}
+      <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 10, opacity: 0.8 }}>
+        {[0, 1, 2, 3, 4].map((i) => <Rosette key={i} size={18} color={T.gold} />)}
+      </div>
+
+      {!rootId ? (
+        <EmptyState text="تعذّر تحديد جذر الشجرة." />
+      ) : (
+        <div style={{ overflow: "auto", border: `1px solid ${T.line}`, borderRadius: 14, background: T.card, padding: 16 }}>
+          <svg width={Math.max(layout.width, 260)} height={layout.height + 20} style={{ display: "block", margin: "0 auto" }}>
+            {layout.edges.map((e, i) => (
+              <path
+                key={i}
+                d={`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1 + e.y2) / 2}, ${e.x2} ${(e.y1 + e.y2) / 2}, ${e.x2} ${e.y2}`}
+                stroke={T.line}
+                strokeWidth={1.5}
+                fill="none"
+              />
+            ))}
+            {layout.nodes.map((n) => {
+              const m = byId[n.id];
+              const isRoot = n.id === rootId;
+              const w = isRoot ? TREE_NODE_W + 20 : TREE_NODE_W;
+              const h = isRoot ? TREE_NODE_H + 14 : TREE_NODE_H;
+              const isSelected = selectedNode === n.id;
+              return (
+                <g
+                  key={n.id}
+                  transform={`translate(${n.x - w / 2}, ${n.y})`}
+                  onClick={() => { setSelectedNode(n.id); if (n.hasChildren) toggle(n.id); }}
+                  style={{ cursor: n.hasChildren ? "pointer" : "default" }}
+                >
+                  <rect
+                    width={w}
+                    height={h}
+                    rx={12}
+                    fill={isRoot ? T.ink : T.sand}
+                    stroke={isSelected ? T.gold : (m?.isAlive === false ? T.clay : T.gold)}
+                    strokeWidth={isRoot ? 2 : 1.4}
+                    strokeDasharray={m?.isAlive === false ? "4 3" : "0"}
+                  />
+                  <text
+                    x={w / 2}
+                    y={h / 2 - 2}
+                    textAnchor="middle"
+                    fontSize={isRoot ? 13.5 : 11.5}
+                    fontWeight={isRoot ? 800 : 600}
+                    fill={isRoot ? T.goldLight : T.text}
+                    fontFamily="'Tajawal', sans-serif"
+                  >
+                    {(m?.name || "").length > 12 ? m.name.slice(0, 11) + "…" : m?.name}
+                  </text>
+                  {n.hasChildren && !expanded.has(n.id) && (
+                    <text x={w / 2} y={h - 6} textAnchor="middle" fontSize={9} fill={T.muted} fontFamily="'Tajawal', sans-serif">
+                      اضغط للتوسيع
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 10, fontSize: 11, color: T.muted }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.4px solid ${T.gold}` }} /> على قيد الحياة
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.4px dashed ${T.clay}` }} /> متوفى رحمه الله
+        </span>
+      </div>
     </div>
   );
 }
@@ -553,15 +686,7 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
         const attending = ev.attendees.includes(meId);
         return (
           <div key={ev.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div style={{ fontSize: 14.5, fontWeight: 800, color: T.ink }}>{ev.title}</div>
-              {canManageEvents && (
-                <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
-                  <button onClick={() => startEdit(ev)} style={{ background: "none", border: "none", color: T.gold, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>تعديل</button>
-                  <button onClick={() => remove(ev.id)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>حذف</button>
-                </div>
-              )}
-            </div>
+            <div style={{ fontSize: 14.5, fontWeight: 800, color: T.ink }}>{ev.title}</div>
             <div style={{ fontSize: 12, color: T.muted, marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
               <span style={{ display: "flex", alignItems: "center", gap: 4 }}><CalendarDays size={13} /> {ev.date}</span>
               {ev.location && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><MapPin size={13} /> {ev.location}</span>}
@@ -573,6 +698,16 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
                 {attending && <Check size={13} />} {attending ? "مؤكّد الحضور" : "تأكيد الحضور"}
               </button>
             </div>
+            {canManageEvents && (
+              <div style={{ display: "flex", gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
+                <button onClick={() => startEdit(ev)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "5px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
+                  <Pencil size={12} /> تعديل
+                </button>
+                <button onClick={() => remove(ev.id)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "5px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
+                  <Trash2 size={12} /> حذف
+                </button>
+              </div>
+            )}
           </div>
         );
       })}
