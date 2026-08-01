@@ -541,50 +541,69 @@ function TreeTab({ members }) {
   return (
     <div>
       <SectionTitle>شجرة العائلة</SectionTitle>
-      <button
-        onClick={() => setPdfOpen(true)}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          margin: "0 0 14px",
-          padding: "8px 16px",
-          background: "#123838",
-          color: "#dab94a",
-          border: "1.5px solid #c9a227",
-          borderRadius: 8,
-          fontWeight: 700,
-          fontSize: 12.5,
-          fontFamily: "inherit",
-          cursor: "pointer",
-        }}
-      >
-        <FileText size={14} /> عرض الشجرة المصورة
-      </button>
+      <div style={{ display: "flex", gap: 10, margin: "0 0 14px" }}>
+        <button
+          onClick={() => setPdfOpen(true)}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 7,
+            padding: "9px 18px",
+            background: "linear-gradient(160deg, #123838, #0d2b2b)",
+            color: "#dab94a",
+            border: "1px solid #c9a227",
+            borderRadius: 999,
+            fontWeight: 700,
+            fontSize: 12.5,
+            fontFamily: "inherit",
+            cursor: "pointer",
+            boxShadow: "0 3px 10px rgba(13,43,43,0.25)",
+          }}
+        >
+          <FileText size={14} /> عرض الشجرة المصورة
+        </button>
+        <a
+          href="/Family-Tree.pdf"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "9px 16px",
+            background: T.card,
+            color: T.ink,
+            border: `1px solid ${T.line}`,
+            borderRadius: 999,
+            fontWeight: 700,
+            fontSize: 12.5,
+            fontFamily: "inherit",
+            textDecoration: "none",
+          }}
+        >
+          تحميل PDF
+        </a>
+      </div>
 
       {pdfOpen && (
-        <div style={{ position: "fixed", inset: 0, background: "#000", zIndex: 70, display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#123838", borderBottom: "2px solid #c9a227" }}>
+        <div style={{ position: "fixed", inset: 0, background: "#0d2b2b", zIndex: 70, display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderBottom: "2px solid #c9a227" }}>
+            <span style={{ width: 70 }} />
+            <span style={{ color: "#dab94a", fontSize: 13, fontWeight: 700 }}>الشجرة المصورة</span>
             <button
               onClick={() => setPdfOpen(false)}
-              style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#F4EFE3", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 6 }}
+              style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}
             >
-              <X size={18} /> إغلاق
+              <X size={16} /> إغلاق
             </button>
-            <span style={{ color: "#dab94a", fontSize: 13, fontWeight: 700 }}>الشجرة المصورة</span>
-            <a
-              href="/Family-Tree.pdf"
-              download="شجرة_آل_تركي.pdf"
-              style={{ display: "flex", alignItems: "center", gap: 5, color: "#F4EFE3", textDecoration: "none", fontSize: 13, fontWeight: 700, padding: 6 }}
-            >
-              تحميل
-            </a>
           </div>
-          <iframe
-            src="/Family-Tree.pdf"
-            title="الشجرة المصورة"
-            style={{ flex: 1, width: "100%", border: "none", background: "#fff" }}
-          />
+          <div style={{ flex: 1, overflow: "auto", display: "flex", justifyContent: "center", background: "#0d2b2b" }}>
+            <img
+              src="/Family-Tree.jpg"
+              alt="الشجرة المصورة"
+              style={{ width: "100%", height: "auto", display: "block" }}
+            />
+          </div>
         </div>
       )}
 
