@@ -540,26 +540,48 @@ function TreeTab({ members }) {
   return (
     <div>
       <SectionTitle>شجرة العائلة</SectionTitle>
-      <a
-        href="/Family-Tree.pdf"
-        target="_blank"
-        rel="noopener noreferrer"
-        style={{
-          display: "inline-block",
-          margin: "0 0 14px",
-          padding: "8px 16px",
-          background: "#123838",
-          color: "#dab94a",
-          border: "1.5px solid #c9a227",
-          borderRadius: 8,
-          textDecoration: "none",
-          fontWeight: 700,
-          fontSize: 12.5,
-          fontFamily: "inherit",
-        }}
-      >
-        عرض الشجرة المصورة (PDF)
-      </a>
+      <div style={{ display: "flex", gap: 8, margin: "0 0 14px", flexWrap: "wrap" }}>
+        <a
+          href="/Family-Tree.pdf"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "8px 16px",
+            background: "#123838",
+            color: "#dab94a",
+            border: "1.5px solid #c9a227",
+            borderRadius: 8,
+            textDecoration: "none",
+            fontWeight: 700,
+            fontSize: 12.5,
+            fontFamily: "inherit",
+          }}
+        >
+          عرض الشجرة المصورة (PDF)
+        </a>
+        <a
+          href="/Family-Tree.pdf"
+          download="شجرة_آل_تركي.pdf"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            padding: "8px 14px",
+            background: "transparent",
+            color: T.ink,
+            border: `1.5px solid ${T.line}`,
+            borderRadius: 8,
+            textDecoration: "none",
+            fontWeight: 700,
+            fontSize: 12.5,
+            fontFamily: "inherit",
+          }}
+        >
+          <FileText size={13} /> تحميل
+        </a>
+      </div>
 
       <div style={{ position: "relative", marginBottom: 14 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
