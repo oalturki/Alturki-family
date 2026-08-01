@@ -280,6 +280,12 @@ async function rejectBirthRequest(requestId) {
   return true;
 }
 
+async function deleteBirthRequest(requestId) {
+  const { error } = await supabase.from("edit_requests").delete().eq("id", requestId);
+  if (error) { console.error("deleteBirthRequest failed", error); return false; }
+  return true;
+}
+
 function buildAncestryHelper(members) {
   const byId = {};
   members.forEach((m) => { byId[m.id] = m; });
@@ -1465,14 +1471,14 @@ function AdminsTab() {
         <EmptyState text="لا توجد طلبات معلّقة حاليًا." />
       ) : (
         pendingBirths.map((req) => (
-          <div key={req.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink }}>{req.proposed_changes?.name}</div>
-            <div style={{ fontSize: 11.5, color: T.muted, marginTop: 2 }}>
+          <div key={req.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 10, padding: 10, marginBottom: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: T.ink }}>{req.proposed_changes?.name}</div>
+            <div style={{ fontSize: 10.5, color: T.muted, marginTop: 1 }}>
               مولود {req.proposed_changes?.gender === "female" ? "أنثى" : "ذكر"}{req.proposed_changes?.birth_date ? ` · ${req.proposed_changes.birth_date}` : ""}
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              <button onClick={() => handleApproveBirth(req)} disabled={birthBusyId === req.id} style={{ ...primaryBtnStyle, flex: 1 }}>اعتماد</button>
-              <button onClick={() => handleRejectBirth(req)} disabled={birthBusyId === req.id} style={{ background: "transparent", color: T.clay, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", flex: 1 }}>رفض</button>
+            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+              <button onClick={() => handleApproveBirth(req)} disabled={birthBusyId === req.id} style={{ ...primaryBtnStyle, flex: 1, marginTop: 0, padding: "6px 10px", fontSize: 11.5 }}>اعتماد</button>
+              <button onClick={() => handleRejectBirth(req)} disabled={birthBusyId === req.id} style={{ background: "transparent", color: T.clay, border: `1px solid ${T.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", flex: 1 }}>رفض</button>
             </div>
           </div>
         ))
@@ -1794,15 +1800,26 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
             {myRequests.length > 0 && (
               <div style={{ marginBottom: showAddBirth ? 10 : 0 }}>
                 {myRequests.map((r) => (
-                  <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.line}` }}>
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.line}`, gap: 8 }}>
                     <span style={{ fontSize: 12.5, color: T.text }}>{r.proposed_changes?.name}</span>
-                    <span style={{
-                      fontSize: 10.5, fontWeight: 700, borderRadius: 999, padding: "2px 9px",
-                      color: r.status === "approved" ? "#2F7D4F" : r.status === "rejected" ? T.clay : T.gold,
-                      background: r.status === "approved" ? "#E8F3EC" : r.status === "rejected" ? "#FBEAEA" : T.sandDark,
-                    }}>
-                      {r.status === "approved" ? "اعتُمد" : r.status === "rejected" ? "رُفض" : "بانتظار الاعتماد"}
-                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <span style={{
+                        fontSize: 10.5, fontWeight: 700, borderRadius: 999, padding: "2px 9px",
+                        color: r.status === "approved" ? "#2F7D4F" : r.status === "rejected" ? T.clay : T.gold,
+                        background: r.status === "approved" ? "#E8F3EC" : r.status === "rejected" ? "#FBEAEA" : T.sandDark,
+                      }}>
+                        {r.status === "approved" ? "اعتُمد" : r.status === "rejected" ? "رُفض" : "بانتظار الاعتماد"}
+                      </span>
+                      {r.status === "pending" && (
+                        <button
+                          onClick={async () => { await deleteBirthRequest(r.id); loadMyRequests(); }}
+                          title="حذف الطلب"
+                          style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", padding: 2 }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1814,7 +1831,10 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                   <button onClick={() => setBirthGender("male")} style={{ ...inputStyle, cursor: "pointer", background: birthGender === "male" ? T.sandDark : T.sand, textAlign: "center" }}>ذكر</button>
                   <button onClick={() => setBirthGender("female")} style={{ ...inputStyle, cursor: "pointer", background: birthGender === "female" ? T.sandDark : T.sand, textAlign: "center" }}>أنثى</button>
                 </div>
-                <input type="date" placeholder="تاريخ الميلاد (اختياري)" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} style={{ ...inputStyle, minWidth: 0, maxWidth: "100%" }} />
+                <div style={{ width: "100%", overflow: "hidden" }}>
+                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>تاريخ الميلاد (اختياري)</div>
+                  <input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} style={{ ...inputStyle, width: "100%", minWidth: 0, maxWidth: "100%", boxSizing: "border-box", display: "block" }} />
+                </div>
                 <input placeholder="مكان الميلاد (اختياري)" value={birthPlace} onChange={(e) => setBirthPlace(e.target.value)} style={inputStyle} />
                 <button onClick={addBirth} disabled={addingBirth || !birthName.trim()} style={primaryBtnStyle}>
                   {addingBirth ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إرسال لاعتماد المشرف"}
