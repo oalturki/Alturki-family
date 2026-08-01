@@ -65,6 +65,7 @@ function mapMemberRow(row) {
     name: row.first_name,
     fatherId: row.father_id,
     spouseOf: row.spouse_of || null,
+    prefilledEmail: row.prefilled_email || "",
     gender: row.gender,
     isAlive: row.is_alive !== false,
     birthDate: row.birth_date || "",
@@ -72,6 +73,7 @@ function mapMemberRow(row) {
     deathDate: row.death_date || "",
     deathDatePrecision: row.death_date_precision || "day",
     region: row.region || "",
+    birthPlace: row.birth_place || "",
     job: row.occupation || "",
     bio: row.bio || "",
     photoUrl: row.photo_url || "",
@@ -83,18 +85,18 @@ function mapMemberRow(row) {
 async function fetchMembers() {
   const { data, error } = await supabase
     .from("members")
-    .select("id, legacy_id, member_number, first_name, father_id, spouse_of, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, occupation, bio, photo_url, phone, user_account_id")
+    .select("id, legacy_id, member_number, first_name, father_id, spouse_of, prefilled_email, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, birth_place, occupation, bio, photo_url, phone, user_account_id")
     .order("created_at", { ascending: true });
   if (error) { console.error("fetchMembers failed", error); return []; }
   return data.map(mapMemberRow);
 }
 
 async function fetchMemberProfiles() {
-  const { data, error } = await supabase.from("member_profiles").select("member_id, social_links, visibility");
+  const { data, error } = await supabase.from("member_profiles").select("member_id, social_links, visibility, cv_url");
   if (error) { console.error("fetchMemberProfiles failed", error); return {}; }
   const map = {};
   data.forEach((row) => {
-    map[row.member_id] = { socialLinks: row.social_links || {}, visibility: row.visibility || {} };
+    map[row.member_id] = { socialLinks: row.social_links || {}, visibility: row.visibility || {}, cvUrl: row.cv_url || "" };
   });
   return map;
 }
@@ -102,7 +104,7 @@ async function fetchMemberProfiles() {
 async function insertMember(form) {
   const { data, error } = await supabase
     .from("members")
-    .insert({ first_name: form.name, father_id: form.fatherId || null, spouse_of: form.spouseOf || null, gender: form.gender, region: form.region || null, phone: form.phone || null })
+    .insert({ first_name: form.name, father_id: form.fatherId || null, spouse_of: form.spouseOf || null, prefilled_email: form.prefilledEmail || null, gender: form.gender, region: form.region || null, phone: form.phone || null })
     .select()
     .single();
   if (error) { console.error("insertMember failed", error); return null; }
@@ -112,9 +114,15 @@ async function insertMember(form) {
 async function updateMemberCore(id, patch) {
   const { error } = await supabase
     .from("members")
-    .update({ occupation: patch.job, bio: patch.bio, region: patch.region, photo_url: patch.photoUrl })
+    .update({ occupation: patch.job, bio: patch.bio, region: patch.region, photo_url: patch.photoUrl, birth_place: patch.birthPlace })
     .eq("id", id);
   if (error) console.error("updateMemberCore failed", error);
+}
+
+async function updateMemberPhone(id, phone) {
+  const { error } = await supabase.from("members").update({ phone: phone || null }).eq("id", id);
+  if (error) { console.error("updateMemberPhone failed", error); return false; }
+  return true;
 }
 
 async function updateMemberDeathStatus(id, isAlive, deathDate) {
@@ -125,12 +133,17 @@ async function updateMemberDeathStatus(id, isAlive, deathDate) {
   if (error) throw error;
 }
 
-async function upsertMemberProfile(memberId, { socialLinks, extendedVisible }) {
+async function upsertMemberProfile(memberId, { socialLinks, extendedVisible, phoneVisible, emailVisible, cvUrl }) {
   const vis = extendedVisible ? "public" : "private";
   const { error } = await supabase.from("member_profiles").upsert({
     member_id: memberId,
     social_links: socialLinks || {},
-    visibility: { bio: vis, photo_url: vis, occupation: vis, social_links: vis },
+    cv_url: cvUrl || null,
+    visibility: {
+      bio: vis, photo_url: vis, occupation: vis, social_links: vis,
+      phone: phoneVisible ? "public" : "private",
+      email: emailVisible ? "public" : "private",
+    },
     updated_at: new Date().toISOString(),
   });
   if (error) console.error("upsertMemberProfile failed", error);
@@ -242,7 +255,10 @@ function enrichMembers(rawMembers, profilesMap) {
       fullNasab: fullNasabString(chain),
       branch: mainBranchOf(chain),
       socialLinks: profile?.socialLinks || {},
+      cvUrl: profile?.cvUrl || "",
       extendedVisible: profile ? profile.visibility?.bio === "public" : false,
+      phoneVisible: profile ? profile.visibility?.phone === "public" : false,
+      emailVisible: profile ? profile.visibility?.email === "public" : false,
     };
   });
 }
@@ -967,8 +983,15 @@ function MemberDetailModal({ member, members, canManageTree, onClose, onSaved })
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13, color: T.text }}>
           {member.region && <div style={{ display: "flex", alignItems: "center", gap: 8 }}><MapPin size={15} color={T.gold} /> {member.region}</div>}
-          {member.birthDate && <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Cake size={15} color={T.gold} /> {formatDate(member.birthDate, member.birthDatePrecision)}</div>}
-          {member.isAlive && member.phone && <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Phone size={15} color={T.gold} /> {member.phone}</div>}
+          {member.birthDate && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Cake size={15} color={T.gold} />
+              {formatDate(member.birthDate, member.birthDatePrecision)}
+              {member.birthPlace && <span> — {member.birthPlace}</span>}
+            </div>
+          )}
+          {member.isAlive && member.phone && member.phoneVisible && <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Phone size={15} color={T.gold} /> {member.phone}</div>}
+          {member.isAlive && member.prefilledEmail && member.emailVisible && <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Link2 size={15} color={T.gold} /> {member.prefilledEmail}</div>}
           {!member.isAlive && (
             <div style={{ color: T.clay, fontWeight: 700 }}>
               متوفى رحمه الله
@@ -982,10 +1005,15 @@ function MemberDetailModal({ member, members, canManageTree, onClose, onSaved })
             {member.bio && <div style={{ fontSize: 12.5, color: T.text, lineHeight: 1.7 }}>{member.bio}</div>}
             {member.socialLinks && Object.keys(member.socialLinks).length > 0 && (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                {Object.entries(member.socialLinks).map(([k, v]) => (
+                {Object.entries(member.socialLinks).map(([k, v]) => v && (
                   <span key={k} style={{ fontSize: 11.5, color: T.gold, display: "flex", alignItems: "center", gap: 3 }}><Link2 size={11} /> {v}</span>
                 ))}
               </div>
+            )}
+            {member.cvUrl && (
+              <a href={member.cvUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, padding: "7px 14px", background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 999, color: T.ink, textDecoration: "none", fontSize: 11.5, fontWeight: 700 }}>
+                <FileText size={13} /> عرض السيرة الذاتية
+              </a>
             )}
           </div>
         ) : (
@@ -1083,7 +1111,7 @@ function MemberCard({ m, onOpen }) {
             متوفى رحمه الله
             {m.deathDate && <span> — ت: {formatDate(m.deathDate, m.deathDatePrecision)}</span>}
           </div>
-        ) : m.phone ? (
+        ) : m.phone && m.phoneVisible ? (
           <div style={{ fontSize: 11.5, color: T.ink, display: "flex", alignItems: "center", gap: 4 }}><Phone size={12} color={T.gold} /> {m.phone}</div>
         ) : (
           <div style={{ fontSize: 11, color: T.muted }}>—</div>
@@ -1298,7 +1326,11 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
   const me = members.find((m) => m.id === meId);
   const [form, setForm] = useState(me);
   const [daughterName, setDaughterName] = useState("");
+  const [daughterEmail, setDaughterEmail] = useState("");
+  const [daughterPhone, setDaughterPhone] = useState("");
   const [wifeName, setWifeName] = useState("");
+  const [wifeEmail, setWifeEmail] = useState("");
+  const [wifePhone, setWifePhone] = useState("");
   const [addingDaughter, setAddingDaughter] = useState(false);
   const [addingWife, setAddingWife] = useState(false);
 
@@ -1306,28 +1338,49 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
   const save = async () => {
     await updateMemberCore(form.id, form);
-    await upsertMemberProfile(form.id, { socialLinks: form.socialLinks, extendedVisible: form.extendedVisible });
-    const newProfilesMap = { ...profilesMap, [form.id]: { socialLinks: form.socialLinks, visibility: { bio: form.extendedVisible ? "public" : "private" } } };
+    await upsertMemberProfile(form.id, {
+      socialLinks: form.socialLinks,
+      extendedVisible: form.extendedVisible,
+      phoneVisible: form.phoneVisible,
+      emailVisible: form.emailVisible,
+      cvUrl: form.cvUrl,
+    });
+    const newProfilesMap = {
+      ...profilesMap,
+      [form.id]: {
+        socialLinks: form.socialLinks,
+        cvUrl: form.cvUrl,
+        visibility: {
+          bio: form.extendedVisible ? "public" : "private",
+          phone: form.phoneVisible ? "public" : "private",
+          email: form.emailVisible ? "public" : "private",
+        },
+      },
+    };
     setProfilesMap(newProfilesMap);
     const rawUpdated = members.map((m) => (m.id === form.id ? { ...m, ...form } : m));
     setMembers(enrichMembers(rawUpdated, newProfilesMap));
   };
 
   const addDaughter = async () => {
-    if (!daughterName.trim()) return;
+    if (!daughterName.trim() || !daughterEmail.trim()) return;
     setAddingDaughter(true);
-    const created = await insertMember({ name: daughterName.trim(), fatherId: meId, gender: "female" });
+    const created = await insertMember({ name: daughterName.trim(), fatherId: meId, gender: "female", prefilledEmail: daughterEmail.trim(), phone: daughterPhone.trim() });
     if (created) setMembers(enrichMembers([...members, created], profilesMap));
     setDaughterName("");
+    setDaughterEmail("");
+    setDaughterPhone("");
     setAddingDaughter(false);
   };
 
   const addWife = async () => {
-    if (!wifeName.trim()) return;
+    if (!wifeName.trim() || !wifeEmail.trim()) return;
     setAddingWife(true);
-    const created = await insertMember({ name: wifeName.trim(), spouseOf: meId, gender: "female" });
+    const created = await insertMember({ name: wifeName.trim(), spouseOf: meId, gender: "female", prefilledEmail: wifeEmail.trim(), phone: wifePhone.trim() });
     if (created) setMembers(enrichMembers([...members, created], profilesMap));
     setWifeName("");
+    setWifeEmail("");
+    setWifePhone("");
     setAddingWife(false);
   };
 
@@ -1335,6 +1388,15 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
   const myDaughters = members.filter((m) => m.fatherId === meId && m.gender === "female");
   const myWives = members.filter((m) => m.spouseOf === meId);
+
+  const PrivacyToggle = ({ label, checked, onToggle }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <span style={{ fontSize: 12.5, color: T.text }}>{label}</span>
+      <button onClick={onToggle} style={{ border: `1px solid ${checked ? T.gold : T.line}`, background: checked ? T.sandDark : "transparent", borderRadius: 999, padding: "4px 12px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", color: T.text }}>
+        {checked ? "ظاهر للعائلة" : "مخفي"}
+      </button>
+    </div>
+  );
 
   return (
     <div>
@@ -1347,48 +1409,78 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
           {form.memberNumber && <div style={{ fontSize: 11, color: T.gold, fontWeight: 700, marginTop: 3 }}>رقم العضوية: {form.memberNumber}</div>}
         </div>
       </div>
-      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10 }}>
+
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>الصورة الشخصية والبيانات الأساسية</div>
+        <input placeholder="رابط الصورة الشخصية (اختياري)" value={form.photoUrl || ""} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} style={inputStyle} />
+        <input type="date" placeholder="تاريخ الميلاد" value={form.birthDate || ""} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} style={inputStyle} />
+        <input placeholder="مكان الميلاد" value={form.birthPlace || ""} onChange={(e) => setForm({ ...form, birthPlace: e.target.value })} style={inputStyle} />
+        <input placeholder="مدينة الإقامة الحالية" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} style={inputStyle} />
+      </div>
+
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>البيانات الموسّعة (سيرة، وظيفة، تواصل)</span>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>البيانات الموسّعة (سيرة، وظيفة)</span>
           <button onClick={() => setForm({ ...form, extendedVisible: !form.extendedVisible })} style={{ border: `1px solid ${form.extendedVisible ? T.gold : T.line}`, background: form.extendedVisible ? T.sandDark : "transparent", borderRadius: 999, padding: "4px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", color: T.text }}>
             {form.extendedVisible ? "مرئية للعائلة" : "مخفية"}
           </button>
         </div>
         <input placeholder="المسمى الوظيفي" value={form.job} onChange={(e) => setForm({ ...form, job: e.target.value })} style={inputStyle} />
-        <input placeholder="مدينة الإقامة" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} style={inputStyle} />
         <textarea placeholder="نبذة مختصرة" rows={2} value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} style={{ ...inputStyle, resize: "none" }} />
-        <input placeholder="حساب تويتر/X (اختياري)" value={form.socialLinks?.twitter || ""} onChange={(e) => setForm({ ...form, socialLinks: { ...form.socialLinks, twitter: e.target.value } })} style={inputStyle} />
-        <button onClick={save} style={primaryBtnStyle}>حفظ التغييرات</button>
-        <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6 }}>هذه البيانات لا تظهر لأحد إلا إذا فعّلتَ "مرئية للعائلة" أعلاه — تحكّمك بها كامل.</div>
+        <div style={{ fontSize: 11, color: T.muted }}>وسائل التواصل الاجتماعي (اختياري، أضف اللي يخصّك بس):</div>
+        <input placeholder="حساب تويتر/X" value={form.socialLinks?.twitter || ""} onChange={(e) => setForm({ ...form, socialLinks: { ...form.socialLinks, twitter: e.target.value } })} style={inputStyle} />
+        <input placeholder="حساب انستقرام" value={form.socialLinks?.instagram || ""} onChange={(e) => setForm({ ...form, socialLinks: { ...form.socialLinks, instagram: e.target.value } })} style={inputStyle} />
+        <input placeholder="لينكدإن" value={form.socialLinks?.linkedin || ""} onChange={(e) => setForm({ ...form, socialLinks: { ...form.socialLinks, linkedin: e.target.value } })} style={inputStyle} />
+        <input placeholder="رابط السيرة الذاتية (PDF من Google Drive مثلًا)" value={form.cvUrl || ""} onChange={(e) => setForm({ ...form, cvUrl: e.target.value })} style={inputStyle} />
+        <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6 }}>هذه البيانات لا تظهر لأحد إلا إذا فعّلتَ "مرئية للعائلة" أعلاه.</div>
       </div>
+
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>خصوصية معلومات التواصل</div>
+        <PrivacyToggle label={`رقم الجوال${form.phone ? ` (${form.phone})` : " (غير مسجّل)"}`} checked={!!form.phoneVisible} onToggle={() => setForm({ ...form, phoneVisible: !form.phoneVisible })} />
+        <PrivacyToggle label={`البريد الإلكتروني${form.prefilledEmail ? ` (${form.prefilledEmail})` : ""}`} checked={!!form.emailVisible} onToggle={() => setForm({ ...form, emailVisible: !form.emailVisible })} />
+        <div style={{ fontSize: 11, color: T.muted, lineHeight: 1.6 }}>لك الخيار الكامل — إظهار أي منهما للعائلة أو إبقاؤه خاصًا.</div>
+      </div>
+
+      <button onClick={save} style={{ ...primaryBtnStyle, width: "100%" }}>حفظ كل التغييرات</button>
 
       {form.gender !== "female" && (
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginTop: 14, display: "grid", gap: 14 }}>
           <div>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>البنات</div>
             {myDaughters.map((d) => (
-              <div key={d.id} style={{ fontSize: 12.5, color: T.text, marginBottom: 4 }}>{d.name}</div>
+              <div key={d.id} style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 12.5, color: T.text }}>{d.name}</div>
+                <div style={{ fontSize: 10.5, color: T.muted }}>{d.prefilledEmail}{d.phone ? ` · ${d.phone}` : ""}</div>
+              </div>
             ))}
-            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-              <input placeholder="اسم الابنة" value={daughterName} onChange={(e) => setDaughterName(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-              <button onClick={addDaughter} disabled={addingDaughter} style={{ ...primaryBtnStyle, padding: "9px 14px" }}>
+            <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+              <input placeholder="اسم الابنة" value={daughterName} onChange={(e) => setDaughterName(e.target.value)} style={inputStyle} />
+              <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={daughterEmail} onChange={(e) => setDaughterEmail(e.target.value)} style={inputStyle} />
+              <input type="tel" placeholder="رقم جوالها (اختياري، مفيد للرسائل الجماعية)" value={daughterPhone} onChange={(e) => setDaughterPhone(e.target.value)} style={inputStyle} />
+              <button onClick={addDaughter} disabled={addingDaughter || !daughterName.trim() || !daughterEmail.trim()} style={primaryBtnStyle}>
                 {addingDaughter ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
               </button>
             </div>
-            <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>تُربط الاسم تلقائيًا بك كأب، بدون حاجة لجوالها.</div>
+            <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>تُربط تلقائيًا بك كأب. البريد يُستخدم لتفعيل حسابها برسالة تحقق.</div>
           </div>
           <div style={{ borderTop: `1px dashed ${T.line}`, paddingTop: 14 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>{myWives.length > 1 ? "الزوجات" : "الزوجة"}</div>
             {myWives.map((w) => (
-              <div key={w.id} style={{ fontSize: 12.5, color: T.text, marginBottom: 4 }}>{w.name}</div>
+              <div key={w.id} style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 12.5, color: T.text }}>{w.name}</div>
+                <div style={{ fontSize: 10.5, color: T.muted }}>{w.prefilledEmail}{w.phone ? ` · ${w.phone}` : ""}</div>
+              </div>
             ))}
-            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-              <input placeholder="الاسم الكامل للزوجة" value={wifeName} onChange={(e) => setWifeName(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-              <button onClick={addWife} disabled={addingWife} style={{ ...primaryBtnStyle, padding: "9px 14px" }}>
+            <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+              <input placeholder="الاسم الكامل للزوجة" value={wifeName} onChange={(e) => setWifeName(e.target.value)} style={inputStyle} />
+              <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={wifeEmail} onChange={(e) => setWifeEmail(e.target.value)} style={inputStyle} />
+              <input type="tel" placeholder="رقم جوالها (اختياري، مفيد للرسائل الجماعية)" value={wifePhone} onChange={(e) => setWifePhone(e.target.value)} style={inputStyle} />
+              <button onClick={addWife} disabled={addingWife || !wifeName.trim() || !wifeEmail.trim()} style={primaryBtnStyle}>
                 {addingWife ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
               </button>
             </div>
-            <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>تُكتب اسمها كامل بما إنها من خارج شجرة العائلة.</div>
+            <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>اسمها كامل بما إنها من خارج شجرة العائلة. البريد يُستخدم لتفعيل حسابها.</div>
           </div>
         </div>
       )}
