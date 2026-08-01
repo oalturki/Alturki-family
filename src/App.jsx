@@ -52,7 +52,7 @@ function Logo({ size = 44 }) {
     <img
       src="/logo.jpg"
       alt="شعار عائلة آل تركي"
-      style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: `1.5px solid ${T.goldLight}` }}
+      style={{ width: size, height: "auto", display: "block" }}
     />
   );
 }
@@ -1353,13 +1353,9 @@ function FamilyAppInner({ meId }) {
         button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid ${T.gold}; outline-offset: 1px; }
       `}</style>
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: T.sand, position: "relative", paddingBottom: 78 }}>
-        <div style={{ background: `linear-gradient(160deg, ${T.ink}, ${T.inkSoft})`, padding: "22px 18px 20px", borderBottomLeftRadius: 22, borderBottomRightRadius: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <Logo size={44} />
-            <div>
-              <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 22, color: T.goldLight, fontWeight: 700 }}>عائلة آل تركي</div>
-              <div style={{ fontSize: 11, color: "#CFE0DC" }}>{me ? `مرحبًا، ${me.name}` : "alturki.family"}</div>
-            </div>
+        <div style={{ background: `linear-gradient(160deg, ${T.ink}, ${T.inkSoft})`, padding: "24px 18px", borderBottomLeftRadius: 22, borderBottomRightRadius: 22, display: "flex", justifyContent: "center" }}>
+          <div style={{ background: T.sand, borderRadius: 16, padding: "10px 14px", boxShadow: "0 4px 14px rgba(0,0,0,0.2)" }}>
+            <Logo size={140} />
           </div>
         </div>
         <div style={{ padding: "16px 16px 0" }}>
