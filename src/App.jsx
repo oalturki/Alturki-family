@@ -371,7 +371,15 @@ function NewsTab({ news, setNews, canManageNews }) {
             ))}
           </div>
           <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="اكتب نص الخبر هنا..." rows={3} style={{ ...inputStyle, resize: "none" }} />
-          <button onClick={submit} style={{ ...primaryBtnStyle, marginTop: 8 }}>{editingId ? "حفظ التعديل" : "نشر الخبر"}</button>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button onClick={submit} style={{ ...primaryBtnStyle, marginTop: 0, flex: 1 }}>{editingId ? "حفظ التعديل" : "نشر الخبر"}</button>
+            <button
+              onClick={() => { setOpen(false); setEditingId(null); setText(""); setType("عام"); }}
+              style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}
+            >
+              تراجع
+            </button>
+          </div>
         </div>
       )}
 
@@ -527,7 +535,15 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
           <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} style={inputStyle} />
           <input placeholder="المكان" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} style={inputStyle} />
           <textarea placeholder="تفاصيل مختصرة" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} style={{ ...inputStyle, resize: "none" }} />
-          <button onClick={submit} style={primaryBtnStyle}>{editingId ? "حفظ التعديل" : "إضافة المناسبة"}</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={submit} style={{ ...primaryBtnStyle, flex: 1 }}>{editingId ? "حفظ التعديل" : "إضافة المناسبة"}</button>
+            <button
+              onClick={() => { setOpen(false); setEditingId(null); setForm({ title: "", date: "", location: "", description: "" }); }}
+              style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}
+            >
+              تراجع
+            </button>
+          </div>
         </div>
       )}
 
