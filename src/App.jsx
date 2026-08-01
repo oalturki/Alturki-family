@@ -323,7 +323,7 @@ function IconButton({ onClick, children, active }) {
   );
 }
 
-const inputStyle = { width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 10, border: `1px solid ${T.line}`, fontFamily: "inherit", fontSize: 13.5, background: T.sand, color: T.text };
+const inputStyle = { width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 10, border: `1px solid ${T.line}`, fontFamily: "inherit", fontSize: 16, background: T.sand, color: T.text };
 const primaryBtnStyle = { background: T.ink, color: T.sand, border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" };
 
 function ConfirmModal({ onConfirm, onCancel }) {
@@ -1749,6 +1749,7 @@ function FamilyAppInner({ meId }) {
       <style>{`
         ${FONTS}
         * { box-sizing: border-box; }
+        html, body { max-width: 100vw; overflow-x: hidden; position: relative; }
         ::placeholder { color: ${T.muted}; opacity: 0.8; }
         @keyframes rosette-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
