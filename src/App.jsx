@@ -608,7 +608,7 @@ function TreeTab({ members }) {
       {/* رأسية نسب العائلة — صورة اللوحة الأصلية */}
       <div style={{ marginBottom: 16, borderRadius: 14, overflow: "hidden", border: `1px solid ${TT.gold500}`, boxShadow: "0 3px 10px rgba(13,43,43,0.15)" }}>
         <img
-          src="/Nasab-Frame.jpg"
+          src="/Nasab-Frame.jpeg"
           alt="نسب آل تركي من ذرية تركي بن إبراهيم بن سليمان بن حماد بن عامر البدراني الدوسري، المتوفى عام ١١١٧هـ رحمه الله"
           style={{ width: "100%", height: "auto", display: "block" }}
         />
