@@ -541,7 +541,7 @@ function TreeTab({ members }) {
     <div>
       <SectionTitle>شجرة العائلة</SectionTitle>
       <a
-        href="/Tree.html"
+        href="/Family-Tree.pdf"
         target="_blank"
         rel="noopener noreferrer"
         style={{
@@ -558,7 +558,7 @@ function TreeTab({ members }) {
           fontFamily: "inherit",
         }}
       >
-        عرض الشجرة الكاملة (تفاعلية)
+        عرض الشجرة المصورة (PDF)
       </a>
 
       <div style={{ position: "relative", marginBottom: 14 }}>
