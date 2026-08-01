@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Newspaper, GitBranch, CalendarDays, Users, UserCircle2,
   Search, Plus, X, MapPin, Briefcase,
@@ -449,6 +449,68 @@ function TreeTab({ members }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [selectedNode, setSelectedNode] = useState(null);
   const [pdfOpen, setPdfOpen] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState(false);
+  const canvasRef = useRef(null);
+
+  // تحميل مكتبة PDF.js من CDN مرة واحدة فقط، ورسم الصفحة الأولى داخل canvas
+  useEffect(() => {
+    if (!pdfOpen) return;
+    let cancelled = false;
+    setPdfLoading(true);
+    setPdfError(false);
+
+    const ensurePdfJs = () =>
+      new Promise((resolve, reject) => {
+        if (window.pdfjsLib) return resolve(window.pdfjsLib);
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+        script.onload = () => resolve(window.pdfjsLib);
+        script.onerror = reject;
+        document.body.appendChild(script);
+      });
+
+    ensurePdfJs()
+      .then((pdfjsLib) => {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        return pdfjsLib.getDocument("/Family-Tree.pdf").promise;
+      })
+      .then((pdf) => pdf.getPage(1))
+      .then((page) => {
+        if (cancelled) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const scale = 2.2;
+        const viewport = page.getViewport({ scale });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.style.width = "100%";
+        canvas.style.height = "auto";
+        const ctx = canvas.getContext("2d");
+        return page.render({ canvasContext: ctx, viewport }).promise;
+      })
+      .then(() => { if (!cancelled) setPdfLoading(false); })
+      .catch(() => { if (!cancelled) { setPdfLoading(false); setPdfError(true); } });
+
+    return () => { cancelled = true; };
+  }, [pdfOpen]);
+
+  const handleDownloadPdf = async () => {
+    try {
+      const res = await fetch("/Family-Tree.pdf");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "شجرة_آل_تركي.pdf";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {
+      window.open("/Family-Tree.pdf", "_blank");
+    }
+  };
 
   const { byId, childrenMap, rootId } = useMemo(() => {
     const byId = {};
@@ -541,54 +603,58 @@ function TreeTab({ members }) {
   return (
     <div>
       <SectionTitle>شجرة العائلة</SectionTitle>
-      <div style={{ display: "flex", gap: 10, margin: "0 0 14px" }}>
-        <button
-          onClick={() => setPdfOpen(true)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 7,
-            padding: "9px 18px",
-            background: "linear-gradient(160deg, #123838, #0d2b2b)",
-            color: "#dab94a",
-            border: "1px solid #c9a227",
-            borderRadius: 999,
-            fontWeight: 700,
-            fontSize: 12.5,
-            fontFamily: "inherit",
-            cursor: "pointer",
-            boxShadow: "0 3px 10px rgba(13,43,43,0.25)",
-          }}
-        >
-          <FileText size={14} /> عرض الشجرة المصورة
-        </button>
-        <a
-          href="/Family-Tree.pdf"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "9px 16px",
-            background: T.card,
-            color: T.ink,
-            border: `1px solid ${T.line}`,
-            borderRadius: 999,
-            fontWeight: 700,
-            fontSize: 12.5,
-            fontFamily: "inherit",
-            textDecoration: "none",
-          }}
-        >
-          تحميل PDF
-        </a>
+      <div style={{ background: "linear-gradient(160deg, #123838, #0d2b2b)", border: "1px solid #c9a227", borderRadius: 14, padding: 14, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <FileText size={16} color="#dab94a" />
+          <span style={{ color: "#F4EFE3", fontSize: 13.5, fontWeight: 700 }}>الشجرة المصورة (الطبعة الثالثة، ١٤٤٧هـ)</span>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={() => setPdfOpen(true)}
+            style={{
+              flex: 1,
+              padding: "9px 0",
+              background: "#c9a227",
+              color: "#0d2b2b",
+              border: "none",
+              borderRadius: 8,
+              fontWeight: 800,
+              fontSize: 12.5,
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            عرض
+          </button>
+          <button
+            onClick={handleDownloadPdf}
+            style={{
+              flex: 1,
+              padding: "9px 0",
+              background: "rgba(244,239,227,0.1)",
+              color: "#F4EFE3",
+              border: "1px solid rgba(244,239,227,0.3)",
+              borderRadius: 8,
+              fontWeight: 700,
+              fontSize: 12.5,
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            تحميل
+          </button>
+        </div>
       </div>
 
       {pdfOpen && (
         <div style={{ position: "fixed", inset: 0, background: "#0d2b2b", zIndex: 70, display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderBottom: "2px solid #c9a227" }}>
-            <span style={{ width: 70 }} />
+            <button
+              onClick={handleDownloadPdf}
+              style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}
+            >
+              تحميل
+            </button>
             <span style={{ color: "#dab94a", fontSize: 13, fontWeight: 700 }}>الشجرة المصورة</span>
             <button
               onClick={() => setPdfOpen(false)}
@@ -597,12 +663,19 @@ function TreeTab({ members }) {
               <X size={16} /> إغلاق
             </button>
           </div>
-          <div style={{ flex: 1, overflow: "auto", display: "flex", justifyContent: "center", background: "#0d2b2b" }}>
-            <img
-              src="/Family-Tree.jpg"
-              alt="الشجرة المصورة"
-              style={{ width: "100%", height: "auto", display: "block" }}
-            />
+          <div style={{ flex: 1, overflow: "auto", padding: 8 }}>
+            {pdfLoading && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "80px 0", color: "#F4EFE3" }}>
+                <Loader2 size={24} style={{ animation: "rosette-spin 1.2s linear infinite" }} />
+                <span style={{ fontSize: 13 }}>جارِ تحميل الشجرة...</span>
+              </div>
+            )}
+            {pdfError && (
+              <div style={{ textAlign: "center", padding: "60px 20px", color: "#F4EFE3" }}>
+                تعذّر عرض الشجرة. حاول التحميل بدل العرض.
+              </div>
+            )}
+            <canvas ref={canvasRef} style={{ display: pdfLoading || pdfError ? "none" : "block", margin: "0 auto" }} />
           </div>
         </div>
       )}
