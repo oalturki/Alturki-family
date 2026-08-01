@@ -592,8 +592,17 @@ function TreeTab({ members }) {
     });
     setSelectedNode(id);
     setTimeout(() => {
-      const el = svgWrapRef.current?.querySelector(`[data-node-id="${id}"]`);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+      const container = svgWrapRef.current;
+      const el = container?.querySelector(`[data-node-id="${id}"]`);
+      if (container && el) {
+        const elRect = el.getBoundingClientRect();
+        const contRect = container.getBoundingClientRect();
+        container.scrollBy({
+          left: (elRect.left + elRect.width / 2) - (contRect.left + contRect.width / 2),
+          top: (elRect.top + elRect.height / 2) - (contRect.top + contRect.height / 2),
+          behavior: "smooth",
+        });
+      }
     }, 60);
   };
 
@@ -670,10 +679,8 @@ function TreeTab({ members }) {
 
   return (
     <div>
-      <SectionTitle>شجرة العائلة</SectionTitle>
-
       {/* رأسية نسب العائلة — صورة اللوحة الأصلية */}
-      <div style={{ marginBottom: 16, borderRadius: 14, overflow: "hidden", border: `1px solid ${TT.gold500}`, boxShadow: "0 3px 10px rgba(13,43,43,0.15)" }}>
+      <div style={{ marginTop: 4, marginBottom: 16, borderRadius: 14, overflow: "hidden", border: `1px solid ${TT.gold500}`, boxShadow: "0 3px 10px rgba(13,43,43,0.15)" }}>
         <img
           src="/Nasab-Frame.jpeg"
           alt="نسب آل تركي من ذرية تركي بن إبراهيم بن سليمان بن حماد بن عامر البدراني الدوسري، المتوفى عام ١١١٧هـ رحمه الله"
@@ -775,29 +782,27 @@ function TreeTab({ members }) {
           ) : (
             searchResults.map(({ member: rm, label }) => (
               <div key={rm.id} style={{ padding: "10px 12px", borderBottom: `1px solid ${T.line}` }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>{label}</span>
-                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                    {rm.fullNasab && rm.fullNasab !== label && (
-                      <button
-                        onClick={() => setExpandedResults((prev) => { const n = new Set(prev); n.has(rm.id) ? n.delete(rm.id) : n.add(rm.id); return n; })}
-                        title="إظهار النسب كامل"
-                        style={{ border: `1px solid ${T.line}`, background: "transparent", borderRadius: 8, padding: "4px 7px", cursor: "pointer", color: T.muted }}
-                      >
-                        <ChevronDown size={13} />
-                      </button>
-                    )}
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text, marginBottom: 6, wordBreak: "break-word" }}>{label}</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {rm.fullNasab && rm.fullNasab !== label && (
                     <button
-                      onClick={() => goToMember(rm.id)}
-                      title="الذهاب لمكانه بالشجرة"
-                      style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
+                      onClick={() => setExpandedResults((prev) => { const n = new Set(prev); n.has(rm.id) ? n.delete(rm.id) : n.add(rm.id); return n; })}
+                      title="إظهار النسب كامل"
+                      style={{ border: `1px solid ${T.line}`, background: "transparent", borderRadius: 8, padding: "4px 7px", cursor: "pointer", color: T.muted }}
                     >
-                      <MapPin size={12} /> الموقع بالشجرة
+                      <ChevronDown size={13} />
                     </button>
-                  </div>
+                  )}
+                  <button
+                    onClick={() => goToMember(rm.id)}
+                    title="الذهاب لمكانه بالشجرة"
+                    style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
+                  >
+                    <MapPin size={12} /> الموقع بالشجرة
+                  </button>
                 </div>
                 {expandedResults.has(rm.id) && (
-                  <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{rm.fullNasab}</div>
+                  <div style={{ fontSize: 11, color: T.muted, marginTop: 4, wordBreak: "break-word" }}>{rm.fullNasab}</div>
                 )}
               </div>
             ))
@@ -1190,7 +1195,7 @@ function MemberCard({ m, onOpen }) {
         <Avatar name={m.name} photoUrl={m.photoUrl} gender={m.gender} />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{m.name}</div>
-          <div style={{ fontSize: 11.5, color: T.muted }}>{m.branch} · {m.nasab}</div>
+          <div style={{ fontSize: 11.5, color: T.muted }}>{m.nasab}</div>
         </div>
       </div>
       <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
@@ -1544,7 +1549,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         <Avatar name={form.name} photoUrl={form.photoUrl} gender={form.gender} size={56} />
         <div>
           <div style={{ fontSize: 16, fontWeight: 800, color: T.ink }}>{form.name}</div>
-          <div style={{ fontSize: 12, color: T.muted }}>{form.branch} · {form.nasab}</div>
+          <div style={{ fontSize: 12, color: T.muted }}>{form.nasab}</div>
           {form.memberNumber && <div style={{ fontSize: 11, color: T.gold, fontWeight: 700, marginTop: 3 }}>رقم العضوية: {form.memberNumber}</div>}
         </div>
       </div>
@@ -1749,22 +1754,20 @@ function FamilyAppInner({ meId }) {
         @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
         button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid ${T.gold}; outline-offset: 1px; }
       `}</style>
-      <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: T.sand, position: "relative", paddingBottom: 78 }}>
+      <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: T.sand, position: "relative", paddingBottom: 78, overflowX: "hidden" }}>
         <div
           onClick={() => setTab("news")}
           style={{
-            background: `linear-gradient(160deg, ${T.ink}, ${T.inkSoft})`,
-            padding: "16px 18px",
+            height: 118,
+            backgroundImage: "url(/Header-Banner.jpeg)",
+            backgroundSize: "cover",
+            backgroundPosition: "85% center",
             borderBottomLeftRadius: 22,
             borderBottomRightRadius: 22,
-            display: "flex",
-            justifyContent: "flex-start",
             cursor: "pointer",
           }}
           title="الرجوع للرئيسية"
-        >
-          <Logo size={64} />
-        </div>
+        />
         <div style={{ padding: "16px 16px 0" }}>
           {loading ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "70px 0", color: T.muted }}>
