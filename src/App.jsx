@@ -4,7 +4,8 @@ import {
   Search, Plus, X, MapPin, Briefcase,
   Link2, ChevronDown, ChevronUp, Check,
   Baby, HeartHandshake, Megaphone, Cross, Loader2,
-  FileText, Phone, Cake, Shield, UserPlus, Trash2, Save, Pencil
+  FileText, Phone, Cake, Shield, UserPlus, Trash2, Save, Pencil,
+  BookOpen, ChevronRight, ChevronLeft, Upload
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -250,6 +251,70 @@ async function checkPermission(key) {
   return !!data;
 }
 
+async function fetchMagazineIndexFile() {
+  const { data, error } = await supabase.from("magazine_index_file").select("*").order("uploaded_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) { console.error("fetchMagazineIndexFile failed", error); return null; }
+  return data;
+}
+
+async function uploadMagazineIndexFile(file) {
+  const path = `index/${Date.now()}_${file.name}`;
+  const { error: uploadErr } = await supabase.storage.from("magazine").upload(path, file);
+  if (uploadErr) { console.error("uploadMagazineIndexFile upload failed", uploadErr); return null; }
+  const { data: urlData } = supabase.storage.from("magazine").getPublicUrl(path);
+  const { data, error } = await supabase
+    .from("magazine_index_file")
+    .insert({ file_url: urlData.publicUrl, file_name: file.name })
+    .select()
+    .single();
+  if (error) { console.error("uploadMagazineIndexFile insert failed", error); return null; }
+  return data;
+}
+
+async function fetchMagazineIssues() {
+  const { data, error } = await supabase.from("magazine_issues").select("*").order("issue_number", { ascending: false });
+  if (error) { console.error("fetchMagazineIssues failed", error); return []; }
+  return data;
+}
+
+async function fetchMagazineArticles() {
+  const { data, error } = await supabase.from("magazine_articles").select("*, magazine_issues(issue_number, title)").order("created_at", { ascending: false });
+  if (error) { console.error("fetchMagazineArticles failed", error); return []; }
+  return data;
+}
+
+async function uploadMagazinePdf(file) {
+  const path = `${Date.now()}_${file.name}`;
+  const { error } = await supabase.storage.from("magazine").upload(path, file);
+  if (error) { console.error("uploadMagazinePdf failed", error); return null; }
+  const { data } = supabase.storage.from("magazine").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+async function insertMagazineIssue(issue) {
+  const { data, error } = await supabase.from("magazine_issues").insert(issue).select().single();
+  if (error) { console.error("insertMagazineIssue failed", error); return null; }
+  return data;
+}
+
+async function deleteMagazineIssue(id) {
+  const { error } = await supabase.from("magazine_issues").delete().eq("id", id);
+  if (error) { console.error("deleteMagazineIssue failed", error); return false; }
+  return true;
+}
+
+async function insertMagazineArticle(article) {
+  const { data, error } = await supabase.from("magazine_articles").insert(article).select().single();
+  if (error) { console.error("insertMagazineArticle failed", error); return null; }
+  return data;
+}
+
+async function deleteMagazineArticle(id) {
+  const { error } = await supabase.from("magazine_articles").delete().eq("id", id);
+  if (error) { console.error("deleteMagazineArticle failed", error); return false; }
+  return true;
+}
+
 async function submitBirthRequest({ name, gender, birthDate, birthPlace, fatherId }) {
   const { data: userData } = await supabase.auth.getUser();
   const uid = userData?.user?.id;
@@ -449,172 +514,18 @@ function Toast({ message, type = "success", onClose }) {
   );
 }
 
-function ConfirmModal({ onConfirm, onCancel }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onCancel}>
-      <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340, fontFamily: "'Tajawal', sans-serif" }} onClick={(e) => e.stopPropagation()} dir="rtl">
-        <div style={{ fontSize: 12.5, color: T.muted, lineHeight: 1.7, marginBottom: 16, textAlign: "center" }}>
-          الحذف سيكون نهائيًا، ولا يمكن استرجاع المحذوف.
-        </div>
-        <button onClick={onConfirm} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
-          تأكيد الحذف
-        </button>
-        <button onClick={onCancel} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
-          تراجع
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function NewsTab({ news, setNews, canManageNews }) {
-  const [open, setOpen] = useState(false);
-  const [type, setType] = useState("عام");
-  const [text, setText] = useState("");
-  const [editingId, setEditingId] = useState(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-
-  const submit = async () => {
-    if (!text.trim()) return;
-    if (editingId) {
-      const updated = await updateNews(editingId, { type, text: text.trim() });
-      if (updated) setNews(news.map((n) => (n.id === editingId ? updated : n)));
-    } else {
-      const created = await insertNews({ type, text: text.trim(), date: new Date().toISOString().slice(0, 10) });
-      if (created) setNews([created, ...news]);
-    }
-    setText("");
-    setType("عام");
-    setEditingId(null);
-    setOpen(false);
-  };
-
-  const startEdit = (n) => {
-    setEditingId(n.id);
-    setType(n.type);
-    setText(n.text);
-    setOpen(true);
-  };
-
-  const remove = (id) => setConfirmDeleteId(id);
-
-  const confirmRemove = async () => {
-    const ok = await deleteNews(confirmDeleteId);
-    if (ok) setNews(news.filter((n) => n.id !== confirmDeleteId));
-    setConfirmDeleteId(null);
-  };
-
-  return (
-    <div>
-      <SectionTitle action={canManageNews && (
-        <IconButton onClick={() => { setOpen((v) => !v); setEditingId(null); setText(""); setType("عام"); }} active={open}>
-          <Plus size={14} /> إضافة خبر
-        </IconButton>
-      )}>
-        الأخبار
-      </SectionTitle>
-
-      {open && canManageNews && (
-        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
-          <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {Object.keys(NEWS_TYPES).map((t) => (
-              <button key={t} onClick={() => setType(t)} style={{ border: `1px solid ${type === t ? T.gold : T.line}`, background: type === t ? T.sandDark : "transparent", borderRadius: 999, padding: "5px 12px", fontSize: 12, fontFamily: "inherit", color: T.text, cursor: "pointer" }}>
-                {t}
-              </button>
-            ))}
-          </div>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="اكتب نص الخبر هنا..." rows={3} style={{ ...inputStyle, resize: "none" }} />
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button onClick={submit} style={{ ...primaryBtnStyle, marginTop: 0, flex: 1 }}>{editingId ? "حفظ التعديل" : "نشر الخبر"}</button>
-            <button
-              onClick={() => { setOpen(false); setEditingId(null); setText(""); setType("عام"); }}
-              style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}
-            >
-              تراجع
-            </button>
-          </div>
-        </div>
-      )}
-
-      {news.length === 0 && <EmptyState text="لا توجد أخبار بعد. كونوا أول من ينشر خبرًا للعائلة." />}
-
-      {news.map((n) => {
-        const meta = NEWS_TYPES[n.type] || NEWS_TYPES["عام"];
-        const Icon = meta.icon;
-        return (
-          <div key={n.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 13, marginBottom: 10 }}>
-            <div style={{ display: "flex", gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", background: T.sandDark, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: meta.color }}>
-                <Icon size={17} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.6 }}>{n.text}</div>
-                <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{n.type} · {n.date}</div>
-              </div>
-            </div>
-            {canManageNews && (
-              <div style={{ display: "flex", gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
-                <button onClick={() => startEdit(n)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "5px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
-                  <Pencil size={12} /> تعديل
-                </button>
-                <button onClick={() => remove(n.id)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "5px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
-                  <Trash2 size={12} /> حذف
-                </button>
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      {confirmDeleteId && (
-        <ConfirmModal
-          onConfirm={confirmRemove}
-          onCancel={() => setConfirmDeleteId(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-const TREE_NODE_W = 96;
-const TREE_NODE_H = 58;
-const TREE_H_GAP = 16;
-const TREE_V_GAP = 54;
-
-// نظام ألوان الشجرة الموثقة (Tree.html) — يطبَّق هنا على البيانات الحية
-const TT = {
-  tealDark: "#0d2b2b",
-  teal900: "#123838",
-  teal800: "#1a4d4d",
-  teal700: "#1f6161",
-  sand100: "#f6f1e6",
-  sand200: "#efe6d2",
-  gold500: "#c9a227",
-  gold400: "#dab94a",
-  line: "#8fae9f",
-  hasPhoneFill: "#dff0e4",
-  deceasedLine: "#a24936",
-  text: "#16241f",
-};
-
-function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
-  const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState(() => new Set());
-  const [selectedNode, setSelectedNode] = useState(null);
-  const [expandedResults, setExpandedResults] = useState(() => new Set());
-  const [pdfOpen, setPdfOpen] = useState(false);
-  const [showInteractive, setShowInteractive] = useState(false);
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const [pdfError, setPdfError] = useState(false);
+function MagazineReader({ pdfUrl, startPage, title, onClose }) {
   const canvasRef = useRef(null);
+  const [pdfDoc, setPdfDoc] = useState(null);
+  const [pageNum, setPageNum] = useState(startPage || 1);
+  const [numPages, setNumPages] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  // تحميل مكتبة PDF.js من CDN مرة واحدة فقط، ورسم الصفحة الأولى داخل canvas
   useEffect(() => {
-    if (!pdfOpen) return;
     let cancelled = false;
-    setPdfLoading(true);
-    setPdfError(false);
-
+    setLoading(true);
+    setError(false);
     const ensurePdfJs = () =>
       new Promise((resolve, reject) => {
         if (window.pdfjsLib) return resolve(window.pdfjsLib);
@@ -624,424 +535,325 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         script.onerror = reject;
         document.body.appendChild(script);
       });
-
     const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 15000));
-
     Promise.race([
-      ensurePdfJs()
-        .then((pdfjsLib) => {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-          return pdfjsLib.getDocument("/Family-Tree.pdf").promise;
-        })
-        .then((pdf) => pdf.getPage(1))
-        .then((page) => {
-          if (cancelled) return;
-          const canvas = canvasRef.current;
-          if (!canvas) return;
-          const scale = 2.2;
-          const viewport = page.getViewport({ scale });
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          canvas.style.width = "100%";
-          canvas.style.height = "auto";
-          const ctx = canvas.getContext("2d");
-          return page.render({ canvasContext: ctx, viewport }).promise;
-        }),
+      ensurePdfJs().then((pdfjsLib) => {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        return pdfjsLib.getDocument(pdfUrl).promise;
+      }),
       timeout,
     ])
-      .then(() => { if (!cancelled) setPdfLoading(false); })
-      .catch(() => { if (!cancelled) { setPdfLoading(false); setPdfError(true); } });
-
+      .then((pdf) => {
+        if (cancelled) return;
+        setPdfDoc(pdf);
+        setNumPages(pdf.numPages);
+        setLoading(false);
+      })
+      .catch(() => { if (!cancelled) { setLoading(false); setError(true); } });
     return () => { cancelled = true; };
-  }, [pdfOpen]);
+  }, [pdfUrl]);
 
-  const handleDownloadPdf = async () => {
-    try {
-      const res = await fetch("/Family-Tree.pdf");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "شجرة_آل_تركي.pdf";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-    } catch (e) {
-      window.open("/Family-Tree.pdf", "_blank");
-    }
-  };
-
-  const { byId, childrenMap, rootId } = useMemo(() => {
-    const byId = {};
-    members.forEach((m) => { byId[m.id] = m; });
-    const childrenMap = {};
-    members.forEach((m) => {
-      if (m.gender === "female") return; // البنات عضوات كاملات بالتطبيق، لكن لا يظهرن بالشجرة المرسومة حفاظًا على شكل اللوحة التقليدية
-      if (m.fatherId) {
-        childrenMap[m.fatherId] = childrenMap[m.fatherId] || [];
-        childrenMap[m.fatherId].push(m.id);
-      }
-    });
-    const root = members.find((m) => !m.fatherId);
-    return { byId, childrenMap, rootId: root ? root.id : null };
-  }, [members]);
-
-  // بالبداية: الجذر مفتوح فقط
   useEffect(() => {
-    if (rootId) setExpanded(new Set([rootId]));
-  }, [rootId]);
-
-  const svgWrapRef = useRef(null);
-
-  const nasabAtDepth = (member, depth) => {
-    const parts = [];
-    let cur = member;
-    let n = 0;
-    while (cur && n < depth) {
-      parts.push(cur.name);
-      cur = cur.fatherId ? byId[cur.fatherId] : null;
-      n++;
-    }
-    return parts.join(" بن ");
-  };
-
-  const goToMember = (id) => {
-    const target = byId[id];
-    if (!target) return;
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      let cur = target;
-      while (cur) {
-        next.add(cur.id);
-        cur = cur.fatherId ? byId[cur.fatherId] : null;
-      }
-      return next;
+    if (!pdfDoc) return;
+    let cancelled = false;
+    const safePage = Math.min(Math.max(pageNum, 1), pdfDoc.numPages);
+    pdfDoc.getPage(safePage).then((page) => {
+      if (cancelled) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const viewport = page.getViewport({ scale: 2 });
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.style.width = "100%";
+      canvas.style.height = "auto";
+      const ctx = canvas.getContext("2d");
+      page.render({ canvasContext: ctx, viewport });
     });
-    setSelectedNode(id);
-    setTimeout(() => {
-      const container = svgWrapRef.current;
-      const el = container?.querySelector(`[data-node-id="${id}"]`);
-      if (container && el) {
-        const elRect = el.getBoundingClientRect();
-        const contRect = container.getBoundingClientRect();
-        container.scrollBy({
-          left: (elRect.left + elRect.width / 2) - (contRect.left + contRect.width / 2),
-          top: (elRect.top + elRect.height / 2) - (contRect.top + contRect.height / 2),
-          behavior: "smooth",
-        });
-      }
-    }, 60);
+    return () => { cancelled = true; };
+  }, [pdfDoc, pageNum]);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#0d2b2b", zIndex: 70, display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderBottom: "2px solid #c9a227" }}>
+        <a
+          href={pdfUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px", textDecoration: "none" }}
+        >
+          تحميل
+        </a>
+        <span style={{ color: "#dab94a", fontSize: 12.5, fontWeight: 700, textAlign: "center", flex: 1, padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {title}{numPages ? ` — صفحة ${pageNum} من ${numPages}` : ""}
+        </span>
+        <button
+          onClick={onClose}
+          style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}
+        >
+          <X size={16} /> إغلاق
+        </button>
+      </div>
+      <div style={{ flex: 1, overflow: "auto", padding: 8 }}>
+        {loading && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "80px 0", color: "#F4EFE3" }}>
+            <Loader2 size={24} style={{ animation: "rosette-spin 1.2s linear infinite" }} />
+            <span style={{ fontSize: 13 }}>جارِ تحميل العدد...</span>
+          </div>
+        )}
+        {error && (
+          <div style={{ textAlign: "center", padding: "60px 20px", color: "#F4EFE3" }}>
+            <div style={{ marginBottom: 14 }}>تعذّر عرض العدد داخل الصفحة.</div>
+            <a href={pdfUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "9px 18px", background: "#c9a227", color: "#0d2b2b", borderRadius: 8, textDecoration: "none", fontWeight: 700, fontSize: 13 }}>
+              فتح ملف PDF مباشرة
+            </a>
+          </div>
+        )}
+        <canvas ref={canvasRef} style={{ display: loading || error ? "none" : "block", margin: "0 auto" }} />
+      </div>
+      {!loading && !error && numPages > 1 && (
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14, padding: "10px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderTop: "1px solid rgba(201,162,39,0.4)" }}>
+          <button onClick={() => setPageNum((p) => Math.min(p + 1, numPages))} disabled={pageNum >= numPages} style={{ border: "1px solid #c9a227", background: "transparent", color: "#dab94a", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", opacity: pageNum >= numPages ? 0.4 : 1 }}>
+            الصفحة السابقة
+          </button>
+          <span style={{ color: "#F4EFE3", fontSize: 12 }}>{pageNum} / {numPages}</span>
+          <button onClick={() => setPageNum((p) => Math.max(p - 1, 1))} disabled={pageNum <= 1} style={{ border: "1px solid #c9a227", background: "transparent", color: "#dab94a", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", opacity: pageNum <= 1 ? 0.4 : 1 }}>
+            الصفحة التالية
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MagazineTab({ canManageDocuments }) {
+  const [issues, setIssues] = useState([]);
+  const [articles, setArticles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [readerIssue, setReaderIssue] = useState(null);
+  const [showAddIssue, setShowAddIssue] = useState(false);
+  const [issueNumber, setIssueNumber] = useState("");
+  const [issueTitle, setIssueTitle] = useState("");
+  const [issueDate, setIssueDate] = useState("");
+  const [issueFile, setIssueFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [addArticleFor, setAddArticleFor] = useState(null);
+  const [articleTitle, setArticleTitle] = useState("");
+  const [articlePage, setArticlePage] = useState("");
+  const [confirmDeleteIssue, setConfirmDeleteIssue] = useState(null);
+  const [indexFile, setIndexFile] = useState(null);
+  const [uploadingIndex, setUploadingIndex] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    const [i, a, idx] = await Promise.all([fetchMagazineIssues(), fetchMagazineArticles(), fetchMagazineIndexFile()]);
+    setIssues(i);
+    setArticles(a);
+    setIndexFile(idx);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleUploadIndex = async (file) => {
+    if (!file) return;
+    setUploadingIndex(true);
+    const created = await uploadMagazineIndexFile(file);
+    if (created) setIndexFile(created);
+    setUploadingIndex(false);
   };
 
-  // نتائج البحث: مطابقة الاسم الأول/الثنائي/الثلاثي مع تجاهل "بن"، عرض رباعي (خماسي عند التطابق)، ترتيب أبجدي مع أولوية للاسم الأول المطابق تمامًا
-  const norm = (s) => (s || "").replace(/بن/g, " ").replace(/\s+/g, " ").trim();
   const searchResults = useMemo(() => {
-    const nq = norm(query);
-    if (!nq) return [];
-    const matched = members.filter((m) => m.gender !== "female" && norm(m.nasab).startsWith(nq));
-    let display = matched.map((m) => ({ member: m, label: nasabAtDepth(m, 4) }));
-    const counts = {};
-    display.forEach((d) => { counts[d.label] = (counts[d.label] || 0) + 1; });
-    display = display.map((d) => (counts[d.label] > 1 ? { ...d, label: nasabAtDepth(d.member, 5) } : d));
-    display.sort((a, b) => a.label.localeCompare(b.label, "ar"));
-    return display.slice(0, 100);
-  }, [query, members, byId]);
+    const q = query.trim();
+    if (!q) return [];
+    return articles.filter((a) => a.title.includes(q)).slice(0, 30);
+  }, [query, articles]);
 
-  const toggle = (id) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const handleAddIssue = async () => {
+    if (!issueNumber || !issueTitle.trim() || !issueFile) { setMsg("عبّي رقم العدد والعنوان واختر ملف PDF."); return; }
+    setUploading(true);
+    setMsg("");
+    const url = await uploadMagazinePdf(issueFile);
+    if (!url) { setMsg("تعذّر رفع الملف، حاول مرة أخرى."); setUploading(false); return; }
+    const created = await insertMagazineIssue({ issue_number: Number(issueNumber), title: issueTitle.trim(), pdf_url: url, published_date: issueDate || null });
+    if (created) {
+      setIssues((prev) => [created, ...prev].sort((a, b) => b.issue_number - a.issue_number));
+      setIssueNumber(""); setIssueTitle(""); setIssueDate(""); setIssueFile(null); setShowAddIssue(false);
+      setMsg("تمت إضافة العدد بنجاح.");
+    } else {
+      setMsg("تعذّرت الإضافة — تأكد إن رقم العدد غير مستخدم سابقًا.");
+    }
+    setUploading(false);
   };
 
-  const layout = useMemo(() => {
-    if (!rootId || !byId[rootId]) return { nodes: [], edges: [], width: 0, height: 0 };
+  const handleAddArticle = async (issueId) => {
+    if (!articleTitle.trim()) return;
+    const created = await insertMagazineArticle({ issue_id: issueId, title: articleTitle.trim(), page_number: articlePage ? Number(articlePage) : null });
+    if (created) {
+      setArticles((prev) => [{ ...created, magazine_issues: issues.find((i) => i.id === issueId) }, ...prev]);
+      setArticleTitle(""); setArticlePage(""); setAddArticleFor(null);
+    }
+  };
 
-    const subtreeWidth = (id) => {
-      const kids = expanded.has(id) ? (childrenMap[id] || []) : [];
-      if (kids.length === 0) return TREE_NODE_W + TREE_H_GAP;
-      return kids.reduce((sum, kidId) => sum + subtreeWidth(kidId), 0);
-    };
+  const handleDeleteArticle = async (id) => {
+    await deleteMagazineArticle(id);
+    setArticles((prev) => prev.filter((a) => a.id !== id));
+  };
 
-    const nodes = [];
-    const edges = [];
-    let maxDepth = 0;
-
-    const assign = (id, x0, depth) => {
-      maxDepth = Math.max(maxDepth, depth);
-      const kids = expanded.has(id) ? (childrenMap[id] || []) : [];
-      const y = depth * (TREE_NODE_H + TREE_V_GAP);
-      if (kids.length === 0) {
-        const cx = x0 + (TREE_NODE_W + TREE_H_GAP) / 2;
-        nodes.push({ id, x: cx, y, depth, hasChildren: !!(childrenMap[id] && childrenMap[id].length) });
-        return cx;
-      }
-      let cursor = x0;
-      const centers = [];
-      kids.forEach((kidId) => {
-        const w = subtreeWidth(kidId);
-        centers.push(assign(kidId, cursor, depth + 1));
-        cursor += w;
-      });
-      const cx = (centers[0] + centers[centers.length - 1]) / 2;
-      nodes.push({ id, x: cx, y, depth, hasChildren: true });
-      centers.forEach((ccx) => {
-        edges.push({ x1: cx, y1: y + TREE_NODE_H, x2: ccx, y2: y + TREE_NODE_H + TREE_V_GAP });
-      });
-      return cx;
-    };
-
-    assign(rootId, 0, 0);
-    const width = subtreeWidth(rootId);
-    const height = (maxDepth + 1) * (TREE_NODE_H + TREE_V_GAP);
-    return { nodes, edges, width, height };
-  }, [rootId, byId, childrenMap, expanded]);
+  const handleDeleteIssue = async () => {
+    if (!confirmDeleteIssue) return;
+    await deleteMagazineIssue(confirmDeleteIssue.id);
+    setIssues((prev) => prev.filter((i) => i.id !== confirmDeleteIssue.id));
+    setArticles((prev) => prev.filter((a) => a.issue_id !== confirmDeleteIssue.id));
+    setConfirmDeleteIssue(null);
+  };
 
   return (
     <div>
-      {/* رأسية نسب العائلة — صورة اللوحة الأصلية */}
-      <div style={{ marginTop: 4, marginBottom: 16, borderRadius: 14, overflow: "hidden", border: `1px solid ${TT.gold500}`, boxShadow: "0 3px 10px rgba(13,43,43,0.15)" }}>
-        <img
-          src="/Nasab-Frame.jpeg"
-          alt="نسب آل تركي من ذرية تركي بن إبراهيم بن سليمان بن حماد بن عامر البدراني الدوسري، المتوفى عام ١١١٧هـ رحمه الله"
-          style={{ width: "100%", height: "auto", display: "block" }}
-        />
-      </div>
+      <SectionTitle action={canManageDocuments && (
+        <IconButton onClick={() => setShowAddIssue((v) => !v)} active={showAddIssue}><Plus size={14} /> عدد جديد</IconButton>
+      )}>
+        مجلة العائلة
+      </SectionTitle>
 
-      {/* خيارا عرض الشجرة */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        <button
-          onClick={() => setPdfOpen(true)}
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 6,
-            padding: "14px 8px",
-            background: "linear-gradient(160deg, #123838, #0d2b2b)",
-            color: "#F4EFE3",
-            border: "1px solid #c9a227",
-            borderRadius: 14,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          <FileText size={20} color="#dab94a" />
-          <span style={{ fontSize: 12.5, fontWeight: 800 }}>الشجرة المصورة</span>
-          <span style={{ fontSize: 10, color: "#c9b98a" }}>الطبعة الثالثة، ١٤٤٧هـ</span>
-        </button>
-        <button
-          onClick={() => setShowInteractive((v) => !v)}
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 6,
-            padding: "14px 8px",
-            background: showInteractive ? T.sandDark : T.card,
-            color: T.ink,
-            border: `1px solid ${showInteractive ? T.gold : T.line}`,
-            borderRadius: 14,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          <GitBranch size={20} color={T.gold} />
-          <span style={{ fontSize: 12.5, fontWeight: 800 }}>الشجرة التفاعلية</span>
-          <span style={{ fontSize: 10, color: T.muted }}>{showInteractive ? "إخفاء" : "بيانات حية، بحث وتفرّع"}</span>
-        </button>
-      </div>
-
-      {pdfOpen && (
-        <div style={{ position: "fixed", inset: 0, background: "#0d2b2b", zIndex: 70, display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderBottom: "2px solid #c9a227" }}>
-            <button
-              onClick={handleDownloadPdf}
-              style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}
-            >
-              تحميل
-            </button>
-            <span style={{ color: "#dab94a", fontSize: 13, fontWeight: 700 }}>الشجرة المصورة</span>
-            <button
-              onClick={() => setPdfOpen(false)}
-              style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}
-            >
-              <X size={16} /> إغلاق
-            </button>
-          </div>
-          <div style={{ flex: 1, overflow: "auto", padding: 8 }}>
-            {pdfLoading && (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "80px 0", color: "#F4EFE3" }}>
-                <Loader2 size={24} style={{ animation: "rosette-spin 1.2s linear infinite" }} />
-                <span style={{ fontSize: 13 }}>جارِ تحميل الشجرة...</span>
-              </div>
-            )}
-            {pdfError && (
-              <div style={{ textAlign: "center", padding: "60px 20px", color: "#F4EFE3" }}>
-                <div style={{ marginBottom: 14 }}>تعذّر عرض الشجرة داخل الصفحة (قد يكون بسبب الشبكة أو المتصفح).</div>
-                <a
-                  href="/Family-Tree.pdf"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ display: "inline-block", padding: "9px 18px", background: "#c9a227", color: "#0d2b2b", borderRadius: 8, textDecoration: "none", fontWeight: 700, fontSize: 13 }}
-                >
-                  فتح ملف PDF مباشرة
-                </a>
-              </div>
-            )}
-            <canvas ref={canvasRef} style={{ display: pdfLoading || pdfError ? "none" : "block", margin: "0 auto" }} />
-          </div>
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: 12, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <FileText size={17} color={T.gold} />
+          <span style={{ fontSize: 12, color: T.text }}>
+            {indexFile ? "الفهرس الشامل لموضوعات كل الأعداد" : "ما فيه فهرس شامل مرفوع بعد"}
+          </span>
         </div>
-      )}
+        <div style={{ display: "flex", gap: 8 }}>
+          {indexFile && (
+            <a href={indexFile.file_url} target="_blank" rel="noopener noreferrer" style={{ border: "none", background: T.ink, color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 11, fontFamily: "inherit", fontWeight: 700, textDecoration: "none" }}>
+              فتح الفهرس
+            </a>
+          )}
+          {canManageDocuments && (
+            <label style={{ border: `1px solid ${T.gold}`, color: T.gold, borderRadius: 8, padding: "6px 12px", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
+              {uploadingIndex ? "جارِ الرفع..." : indexFile ? "استبدال" : "رفع الفهرس"}
+              <input type="file" accept="application/pdf,.doc,.docx" onChange={(e) => handleUploadIndex(e.target.files[0])} style={{ display: "none" }} disabled={uploadingIndex} />
+            </label>
+          )}
+        </div>
+      </div>
 
-      {showInteractive && (
-        <>
       <div style={{ position: "relative", marginBottom: 14 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث عن فرد بالاسم..." style={{ ...inputStyle, padding: "9px 38px 9px 12px" }} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث بفهرس المواضيع..." style={{ ...inputStyle, padding: "9px 38px 9px 12px" }} />
       </div>
 
       {query.trim() && (
-        <div style={{ border: `1px solid ${TT.gold500}`, borderRadius: 14, background: T.card, marginBottom: 14, overflow: "auto", maxHeight: "50vh" }}>
+        <div style={{ border: `1px solid ${T.line}`, borderRadius: 14, background: T.card, marginBottom: 14, overflow: "auto", maxHeight: "40vh" }}>
           {searchResults.length === 0 ? (
-            <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: T.muted }}>لا نتائج مطابقة.</div>
+            <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: T.muted }}>لا نتائج مطابقة بالفهرس.</div>
           ) : (
-            searchResults.map(({ member: rm, label }) => (
-              <div key={rm.id} style={{ padding: "10px 12px", borderBottom: `1px solid ${T.line}` }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: T.text, wordBreak: "break-word" }}>{label}</span>
-                  {rm.fullNasab && rm.fullNasab !== label && (
-                    <button
-                      onClick={() => setExpandedResults((prev) => { const n = new Set(prev); n.has(rm.id) ? n.delete(rm.id) : n.add(rm.id); return n; })}
-                      title="إظهار النسب كامل"
-                      style={{ border: `1px solid ${T.line}`, background: "transparent", borderRadius: 8, padding: "2px 5px", cursor: "pointer", color: T.muted, display: "flex", alignItems: "center" }}
-                    >
-                      <ChevronDown size={13} style={{ transform: expandedResults.has(rm.id) ? "rotate(180deg)" : "none" }} />
-                    </button>
-                  )}
+            searchResults.map((a) => (
+              <div key={a.id} style={{ padding: "10px 12px", borderBottom: `1px solid ${T.line}` }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>{a.title}</div>
+                <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>
+                  العدد {a.magazine_issues?.issue_number} — {a.magazine_issues?.title}{a.page_number ? ` · صفحة ${a.page_number}` : ""}
                 </div>
                 <button
-                  onClick={() => goToMember(rm.id)}
-                  title="الذهاب لمكانه بالشجرة"
-                  style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
+                  onClick={() => {
+                    const issue = issues.find((i) => i.id === a.issue_id);
+                    if (issue) setReaderIssue({ pdfUrl: issue.pdf_url, startPage: a.page_number || 1, title: issue.title });
+                  }}
+                  style={{ marginTop: 6, border: "none", background: "#123838", color: "#dab94a", borderRadius: 8, padding: "5px 12px", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}
                 >
-                  <MapPin size={12} /> الموقع بالشجرة
+                  فتح عند الصفحة
                 </button>
-                {expandedResults.has(rm.id) && (
-                  <div style={{ fontSize: 11, color: T.muted, marginTop: 4, wordBreak: "break-word" }}>{rm.fullNasab}</div>
-                )}
               </div>
             ))
           )}
         </div>
       )}
 
-      {/* شريط زخرفي أعلى الشجرة */}
-      <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 10, opacity: 0.8 }}>
-        {[0, 1, 2, 3, 4].map((i) => <Rosette key={i} size={18} color={T.gold} />)}
-      </div>
+      {msg && <div style={{ marginBottom: 14, padding: "8px 12px", borderRadius: 8, background: "#E8F3EC", color: "#2F7D4F", fontSize: 11.5, fontWeight: 700 }}>{msg}</div>}
 
-      {!rootId ? (
-        <EmptyState text="تعذّر تحديد جذر الشجرة." />
-      ) : (
-        <div ref={svgWrapRef} style={{ overflow: "auto", border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, padding: 16, maxHeight: "60vh" }}>
-          <svg width={Math.max(layout.width, 260)} height={layout.height + 20} style={{ display: "block", margin: "0 auto" }}>
-            {layout.edges.map((e, i) => (
-              <path
-                key={i}
-                d={`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1 + e.y2) / 2}, ${e.x2} ${(e.y1 + e.y2) / 2}, ${e.x2} ${e.y2}`}
-                stroke={TT.line}
-                strokeWidth={1.6}
-                fill="none"
-              />
-            ))}
-            {layout.nodes.map((n) => {
-              const m = byId[n.id];
-              const isRoot = n.id === rootId;
-              const hasPhone = m?.isAlive !== false && !!m?.phone;
-              const isDeceased = m?.isAlive === false;
-              const w = isRoot ? TREE_NODE_W + 20 : TREE_NODE_W;
-              const h = isRoot ? TREE_NODE_H + 14 : TREE_NODE_H;
-              const isSelected = selectedNode === n.id;
-
-              let fill = TT.sand100;
-              let stroke = TT.teal800;
-              let strokeWidth = 1.6;
-              let dash = "0";
-              if (isRoot) {
-                fill = TT.teal900;
-                stroke = TT.gold500;
-                strokeWidth = 2;
-              } else if (hasPhone) {
-                fill = TT.hasPhoneFill;
-                stroke = TT.teal700;
-              }
-              if (isDeceased) {
-                stroke = TT.deceasedLine;
-                dash = "4 3";
-              }
-              if (isSelected) {
-                stroke = TT.gold500;
-                strokeWidth = 2.4;
-              }
-
-              return (
-                <g
-                  key={n.id}
-                  data-node-id={n.id}
-                  transform={`translate(${n.x - w / 2}, ${n.y})`}
-                  onClick={() => { setSelectedNode(n.id); if (n.hasChildren) toggle(n.id); }}
-                  style={{ cursor: n.hasChildren ? "pointer" : "default" }}
-                >
-                  <rect
-                    width={w}
-                    height={h}
-                    rx={12}
-                    fill={fill}
-                    stroke={stroke}
-                    strokeWidth={strokeWidth}
-                    strokeDasharray={dash}
-                  />
-                  <text
-                    x={w / 2}
-                    y={h / 2 - 2}
-                    textAnchor="middle"
-                    fontSize={isRoot ? 13.5 : 11.5}
-                    fontWeight={isRoot ? 800 : 600}
-                    fill={isRoot ? TT.gold400 : TT.text}
-                    fontFamily="'Tajawal', sans-serif"
-                  >
-                    {(m?.name || "").length > 12 ? m.name.slice(0, 11) + "…" : m?.name}
-                  </text>
-                  {n.hasChildren && !expanded.has(n.id) && (
-                    <text x={w / 2} y={h - 6} textAnchor="middle" fontSize={9} fill={TT.teal700} fontFamily="'Tajawal', sans-serif">
-                      اضغط للتوسيع
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-          </svg>
+      {showAddIssue && canManageDocuments && (
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14, display: "grid", gap: 8 }}>
+          <input type="number" placeholder="رقم العدد" value={issueNumber} onChange={(e) => setIssueNumber(e.target.value)} style={inputStyle} />
+          <input placeholder="عنوان العدد" value={issueTitle} onChange={(e) => setIssueTitle(e.target.value)} style={inputStyle} />
+          <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} style={{ ...inputStyle, minWidth: 0, maxWidth: "100%" }} />
+          <label style={{ ...inputStyle, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: issueFile ? T.text : T.muted }}>
+            <Upload size={15} color={T.gold} /> {issueFile ? issueFile.name : "اختر ملف PDF للعدد"}
+            <input type="file" accept="application/pdf" onChange={(e) => setIssueFile(e.target.files[0])} style={{ display: "none" }} />
+          </label>
+          <button onClick={handleAddIssue} disabled={uploading} style={primaryBtnStyle}>
+            {uploading ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "رفع العدد"}
+          </button>
         </div>
       )}
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, justifyContent: "center", marginTop: 10, fontSize: 11, color: T.muted }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 4, background: TT.hasPhoneFill, border: `1.4px solid ${TT.teal700}` }} /> جوال مسجّل
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.4px solid ${TT.teal800}` }} /> على قيد الحياة
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.4px dashed ${TT.deceasedLine}` }} /> متوفى رحمه الله
-        </span>
-      </div>
-      </>
+      {loading ? (
+        <Loader2 size={20} style={{ animation: "rosette-spin 1s linear infinite" }} />
+      ) : issues.length === 0 ? (
+        <EmptyState text="لا توجد أعداد مرفوعة بعد." />
+      ) : (
+        issues.map((issue) => (
+          <div key={issue.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 800, color: T.ink }}>العدد {issue.issue_number}</div>
+                <div style={{ fontSize: 12.5, color: T.text, marginTop: 2 }}>{issue.title}</div>
+                {issue.published_date && <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>{issue.published_date}</div>}
+              </div>
+              <BookOpen size={20} color={T.gold} />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <button onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: 1, title: issue.title })} style={{ ...primaryBtnStyle, marginTop: 0, padding: "7px 14px", fontSize: 12 }}>
+                قراءة العدد
+              </button>
+              {canManageDocuments && (
+                <>
+                  <button onClick={() => setAddArticleFor(addArticleFor === issue.id ? null : issue.id)} style={{ border: `1px solid ${T.line}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
+                    + فهرس
+                  </button>
+                  <button onClick={() => setConfirmDeleteIssue({ id: issue.id, title: issue.title })} style={{ border: `1px solid ${T.line}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
+                    حذف
+                  </button>
+                </>
+              )}
+            </div>
+            {addArticleFor === issue.id && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}`, display: "grid", gap: 6 }}>
+                <input placeholder="عنوان الموضوع" value={articleTitle} onChange={(e) => setArticleTitle(e.target.value)} style={inputStyle} />
+                <input type="number" placeholder="رقم الصفحة (اختياري)" value={articlePage} onChange={(e) => setArticlePage(e.target.value)} style={inputStyle} />
+                <button onClick={() => handleAddArticle(issue.id)} style={primaryBtnStyle}>إضافة للفهرس</button>
+              </div>
+            )}
+            {articles.filter((a) => a.issue_id === issue.id).length > 0 && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}` }}>
+                {articles.filter((a) => a.issue_id === issue.id).map((a) => (
+                  <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, color: T.text, marginBottom: 4 }}>
+                    <span>{a.title}{a.page_number ? ` — ص ${a.page_number}` : ""}</span>
+                    {canManageDocuments && (
+                      <button onClick={() => handleDeleteArticle(a.id)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }}>
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))
+      )}
+
+      {readerIssue && (
+        <MagazineReader pdfUrl={readerIssue.pdfUrl} startPage={readerIssue.startPage} title={readerIssue.title} onClose={() => setReaderIssue(null)} />
+      )}
+
+      {confirmDeleteIssue && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={() => setConfirmDeleteIssue(null)}>
+          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>حذف "{confirmDeleteIssue.title}"؟</div>
+            <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.7, marginBottom: 16 }}>سيُحذف العدد وكل عناصر فهرسه نهائيًا.</div>
+            <button onClick={handleDeleteIssue} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>تأكيد الحذف</button>
+            <button onClick={() => setConfirmDeleteIssue(null)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>تراجع</button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -2263,6 +2075,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 const BASE_TABS = [
   { key: "news", label: "الأخبار", icon: Newspaper },
   { key: "tree", label: "الشجرة", icon: GitBranch },
+  { key: "magazine", label: "المجلة", icon: BookOpen },
   { key: "events", label: "المناسبات", icon: CalendarDays },
   { key: "profile", label: "ملفي", icon: UserCircle2 },
 ];
@@ -2271,7 +2084,7 @@ const ADMINS_TAB = { key: "admins", label: "الإشراف", icon: Shield };
 function FamilyAppInner({ meId }) {
   const [tab, setTab] = useState(() => {
     const h = window.location.hash.replace("#", "");
-    return ["news", "tree", "events", "profile", "admins"].includes(h) ? h : "news";
+    return ["news", "tree", "magazine", "events", "profile", "admins"].includes(h) ? h : "news";
   });
 
   useEffect(() => {
@@ -2286,13 +2099,15 @@ function FamilyAppInner({ meId }) {
   const [canManageAdmins, setCanManageAdmins] = useState(false);
   const [canManageNews, setCanManageNews] = useState(false);
   const [canManageEvents, setCanManageEvents] = useState(false);
+  const [canManageDocuments, setCanManageDocuments] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const [rawMembers, profiles, n, e, treePerm, adminsPerm, newsPerm, eventsPerm] = await Promise.all([
+      const [rawMembers, profiles, n, e, treePerm, adminsPerm, newsPerm, eventsPerm, docsPerm] = await Promise.all([
         fetchMembers(), fetchMemberProfiles(), fetchNews(), fetchEvents(),
         checkPermission("manage_tree_profiles"), checkPermission("manage_admins"),
         checkPermission("manage_news"), checkPermission("manage_events"),
+        checkPermission("manage_documents"),
       ]);
       setProfilesMap(profiles);
       setMembers(enrichMembers(rawMembers, profiles));
@@ -2302,6 +2117,7 @@ function FamilyAppInner({ meId }) {
       setCanManageAdmins(adminsPerm);
       setCanManageNews(newsPerm);
       setCanManageEvents(eventsPerm);
+      setCanManageDocuments(docsPerm);
       setLoading(false);
     })();
   }, []);
@@ -2350,6 +2166,7 @@ function FamilyAppInner({ meId }) {
             <>
               {tab === "news" && <NewsTab news={news} setNews={setNews} canManageNews={canManageNews} />}
               {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
+              {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
               {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} />}
               {tab === "admins" && (canManageAdmins || canManageTree) && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} canManageAdmins={canManageAdmins} />}
