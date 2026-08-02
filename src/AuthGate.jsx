@@ -2,9 +2,12 @@ import React, { useState, useEffect, useRef } from "react";
 import { Loader2, Phone, ShieldCheck, Mail, Fingerprint, UserPlus, LogIn } from "lucide-react";
 import {
   checkPhoneEligibility,
+  checkEmailEligibility,
   registerAccount,
   requestPhoneVerification,
   confirmPhoneVerification,
+  requestEmailVerification,
+  confirmEmailVerification,
   linkAccountToMember,
   getLinkedMember,
   signInWithPassword,
@@ -16,11 +19,14 @@ import {
 import { supabase } from "./supabaseClient";
 
 /* ---------------------------------------------------------
-   بوابة الدخول — تدفقان رئيسيان:
-   1) تسجيل عضو جديد: جوال+بريد+كلمة مرور → تحقق جوال (مرة واحدة،
-      حد 5 محاولات) → ربط الحساب بملف العضو → عرض اختياري لتفعيل
-      دخول سريع بالبصمة (Passkey).
-   2) دخول عضو سابق: بصمة (Passkey) كطريقة افتراضية، أو بريد+كلمة
+   بوابة الدخول — ثلاثة تدفقات رئيسية:
+   1) تسجيل عضو جديد بالجوال: جوال+بريد+كلمة مرور → تحقق جوال
+      (مرة واحدة، حد 5 محاولات) → ربط الحساب بملف العضو → عرض
+      اختياري لتفعيل دخول سريع بالبصمة (Passkey).
+   2) تسجيل عضو أُضيف بدون جوال (بنات/زوجات): بريد+كلمة مرور فقط
+      → تحقق برمز يُرسل لنفس البريد → ربط الحساب بملف العضو →
+      نفس عرض تفعيل البصمة.
+   3) دخول عضو سابق: بصمة (Passkey) كطريقة افتراضية، أو بريد+كلمة
       مرور كبديل دائم.
    بعد نجاح أي مسار: <AuthGate>{(me) => <App meId={me.id} />}</AuthGate>
 --------------------------------------------------------- */
@@ -67,7 +73,7 @@ const inputStyle = {
   borderRadius: 10,
   border: `1px solid ${T.line}`,
   fontFamily: "inherit",
-  fontSize: 14,
+  fontSize: 16,
   background: T.sand,
   color: T.text,
   marginTop: 10,
@@ -135,10 +141,12 @@ export default function AuthGate({ children }) {
   const [checking, setChecking] = useState(true);
   const [member, setMember] = useState(null);
 
-  // mode: landing | register | login
-  const [mode, setMode] = useState("landing");
+  // mode: landing | register | register-email | login
+  const [mode, setMode] = useState(() => (window.location.hash === "#register-email" ? "register-email" : "landing"));
   // registerStep: info | phone | passkey-offer
   const [registerStep, setRegisterStep] = useState("info");
+  // registerEmailStep: info | otp | passkey-offer
+  const [registerEmailStep, setRegisterEmailStep] = useState("info");
 
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -193,7 +201,7 @@ export default function AuthGate({ children }) {
     setSuccess("");
   };
 
-  /* ---------------- تسجيل عضو جديد ---------------- */
+  /* ---------------- تسجيل عضو جديد بالجوال ---------------- */
 
   const handleCheckPhoneAndRegister = async () => {
     resetMessages();
@@ -250,6 +258,67 @@ export default function AuthGate({ children }) {
       await confirmPhoneVerification(phone.trim(), code.trim());
       await linkAccountToMember(pendingMember.id);
       setRegisterStep("passkey-offer");
+    } catch (e) {
+      setError(e.message || "الرمز غير صحيح أو منتهي الصلاحية. حاول مرة أخرى.");
+    }
+    setBusy(false);
+  };
+
+  /* ---------------- تسجيل عضو أُضيف بدون جوال (بالبريد) ---------------- */
+
+  const handleCheckEmailAndRegister = async () => {
+    resetMessages();
+    if (!email.trim() || !password.trim()) {
+      return setError("الرجاء تعبئة البريد وكلمة المرور.");
+    }
+    if (password.length < 6) {
+      return setError("كلمة المرور يجب أن تكون 6 أحرف على الأقل.");
+    }
+    setBusy(true);
+    try {
+      const result = await checkEmailEligibility(email.trim());
+      if (result.status === "not_found") {
+        setError("هذا البريد غير مسجّل من قِبل أحد أفراد العائلة. تأكد من البريد أو تواصل مع من أضافك.");
+        setBusy(false);
+        return;
+      }
+      if (result.status === "already_claimed") {
+        setError("هذا البريد مرتبط بحساب مسبقًا. جرّب تسجيل الدخول بدلًا من ذلك.");
+        setBusy(false);
+        return;
+      }
+
+      setPendingMember(result.member);
+      await registerAccount(email.trim(), password);
+      await requestEmailVerification(email.trim());
+      setRegisterEmailStep("otp");
+      setSuccess("تم إرسال رمز التحقق إلى بريدك.");
+    } catch (e) {
+      setError(e.message || "تعذّر إتمام التسجيل. تحقق من البيانات وحاول مجددًا.");
+    }
+    setBusy(false);
+  };
+
+  const handleResendEmailCode = async () => {
+    resetMessages();
+    setBusy(true);
+    try {
+      await requestEmailVerification(email.trim());
+      setSuccess("تم إرسال رمز جديد إلى بريدك.");
+    } catch (e) {
+      setError(e.message || "تعذّر إرسال الرمز.");
+    }
+    setBusy(false);
+  };
+
+  const handleConfirmEmailOtp = async () => {
+    resetMessages();
+    if (!code.trim()) return setError("الرجاء إدخال رمز التحقق.");
+    setBusy(true);
+    try {
+      await confirmEmailVerification(email.trim(), code.trim());
+      await linkAccountToMember(pendingMember.id);
+      setRegisterEmailStep("passkey-offer");
     } catch (e) {
       setError(e.message || "الرمز غير صحيح أو منتهي الصلاحية. حاول مرة أخرى.");
     }
@@ -412,6 +481,9 @@ export default function AuthGate({ children }) {
             <button style={ghostBtnStyle} onClick={() => { resetMessages(); setMode("login"); }}>
               <LogIn size={16} /> لديّ حساب بالفعل
             </button>
+            <button style={linkTextStyle} onClick={() => { resetMessages(); setMode("register-email"); setRegisterEmailStep("info"); }}>
+              أُضفتِ بدون رقم جوال (بنت/زوجة)؟ فعّلي حسابك بالبريد
+            </button>
           </>
         )}
 
@@ -444,7 +516,36 @@ export default function AuthGate({ children }) {
           </>
         )}
 
-        {mode === "register" && registerStep === "passkey-offer" && (
+        {mode === "register-email" && registerEmailStep === "info" && (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>تفعيل حساب بالبريد</div>
+            <div style={{ fontSize: 12, color: T.muted, marginTop: 6, lineHeight: 1.6 }}>
+              خاص بمن أضافها أحد أفراد العائلة (بنت أو زوجة) ببريدها فقط، بدون رقم جوال. أدخلي نفس البريد اللي سُجّل لك، وكلمة مرور تختارينها.
+            </div>
+            <input type="email" placeholder="البريد الإلكتروني المسجّل" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
+            <input type="password" placeholder="كلمة المرور (6 أحرف فأكثر)" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
+            <button style={btnStyle} onClick={handleCheckEmailAndRegister} disabled={busy}>
+              {busy && <Spinner />} متابعة
+            </button>
+            <button style={ghostBtnStyle} onClick={() => { resetMessages(); setMode("landing"); }}>رجوع</button>
+          </>
+        )}
+
+        {mode === "register-email" && registerEmailStep === "otp" && (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, display: "flex", alignItems: "center", gap: 8 }}>
+              <Mail size={16} color={T.gold} /> أدخلي رمز التحقق المرسل إلى {email}
+            </div>
+            <input type="text" inputMode="numeric" placeholder="رمز التحقق" value={code} onChange={(e) => setCode(e.target.value)} style={inputStyle} />
+            <button style={btnStyle} onClick={handleConfirmEmailOtp} disabled={busy}>
+              {busy && <Spinner />} تأكيد الرمز
+            </button>
+            <button style={linkTextStyle} onClick={handleResendEmailCode} disabled={busy}>إعادة إرسال الرمز</button>
+          </>
+        )}
+
+        {((mode === "register" && registerStep === "passkey-offer") ||
+          (mode === "register-email" && registerEmailStep === "passkey-offer")) && (
           <div style={{ textAlign: "center" }}>
             <ShieldCheck size={30} color={T.gold} />
             <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, marginTop: 10 }}>تم تفعيل ملفك بنجاح!</div>
