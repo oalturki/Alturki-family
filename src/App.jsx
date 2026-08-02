@@ -1831,7 +1831,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
   const confirmRemoveAction = async () => {
     const { type, id } = confirmRemove;
-    if (type === "daughter") {
+    if (type === "daughter" || type === "son") {
       await deleteMember(id);
       setMembers(members.filter((m) => m.id !== id));
     } else {
@@ -1840,6 +1840,20 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
       setMembers(enrichMembers(rawUpdated, profilesMap));
     }
     setConfirmRemove(null);
+  };
+
+  const [editingSon, setEditingSon] = useState(null);
+  const [savingSon, setSavingSon] = useState(false);
+  const saveEditSon = async () => {
+    if (!editingSon) return;
+    setSavingSon(true);
+    const ok = await updateMemberAdmin(editingSon.id, editingSon);
+    if (ok) {
+      const rawUpdated = members.map((m) => (m.id === editingSon.id ? { ...m, name: editingSon.name, region: editingSon.region, birthDate: editingSon.birthDate, birthPlace: editingSon.birthPlace } : m));
+      setMembers(enrichMembers(rawUpdated, profilesMap));
+    }
+    setSavingSon(false);
+    setEditingSon(null);
   };
 
   const addBirth = async () => {
@@ -2043,13 +2057,49 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
               </div>
             ))}
             {mySons.map((s) => (
-              <div key={s.id} style={{ padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
-                <div style={{ fontSize: 12.5, color: T.text, fontWeight: 700 }}>{s.name}</div>
-                {s.memberNumber && <div style={{ fontSize: 10.5, color: T.muted }}>رقم العضوية: {s.memberNumber}</div>}
+              <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
+                <div>
+                  <div style={{ fontSize: 12.5, color: T.text, fontWeight: 700 }}>{s.name}</div>
+                  {s.memberNumber && <div style={{ fontSize: 10.5, color: T.muted }}>رقم العضوية: {s.memberNumber}</div>}
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => setEditingSon({ id: s.id, name: s.name, region: s.region || "", birthDate: s.birthDate || "", birthPlace: s.birthPlace || "" })} style={{ background: "none", border: "none", color: T.gold, cursor: "pointer" }} title="تعديل">
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      const childrenCount = members.filter((m) => m.fatherId === s.id).length;
+                      setConfirmRemove({ type: "son", id: s.id, name: s.name, childrenCount });
+                    }}
+                    style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }}
+                    title="حذف"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         </div>
+
+          {editingSon && (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }} onClick={() => setEditingSon(null)}>
+              <div style={{ background: T.card, borderRadius: "18px 18px 0 0", padding: 20, width: "100%", maxWidth: 430 }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 10 }}>تعديل بيانات {editingSon.name}</div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  <input placeholder="الاسم" value={editingSon.name} onChange={(e) => setEditingSon({ ...editingSon, name: e.target.value })} style={inputStyle} />
+                  <input placeholder="مدينة الإقامة" value={editingSon.region} onChange={(e) => setEditingSon({ ...editingSon, region: e.target.value })} style={inputStyle} />
+                  <div style={{ fontSize: 11, color: T.muted }}>تاريخ الميلاد</div>
+                  <input type="date" value={editingSon.birthDate} onChange={(e) => setEditingSon({ ...editingSon, birthDate: e.target.value })} style={{ ...inputStyle, width: "100%", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }} />
+                  <input placeholder="مكان الميلاد" value={editingSon.birthPlace} onChange={(e) => setEditingSon({ ...editingSon, birthPlace: e.target.value })} style={inputStyle} />
+                  <button onClick={saveEditSon} disabled={savingSon} style={primaryBtnStyle}>
+                    {savingSon ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "حفظ"}
+                  </button>
+                  <button onClick={() => setEditingSon(null)} style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>إلغاء</button>
+                </div>
+              </div>
+            </div>
+          )}
       )}
 
       {form.gender !== "female" && (
@@ -2140,7 +2190,27 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
       )}
 
       {confirmRemove && (
-        <ConfirmModal onConfirm={confirmRemoveAction} onCancel={() => setConfirmRemove(null)} />
+        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={() => setConfirmRemove(null)}>
+          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()} dir="rtl">
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>
+              {confirmRemove.type === "wife" ? `فك الارتباط بـ${confirmRemove.name}؟` : `حذف ${confirmRemove.name}؟`}
+            </div>
+            <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.7, marginBottom: 16 }}>
+              {confirmRemove.type === "wife"
+                ? "يزيل رابط الزوجية بس، وحسابها وبياناتها تبقى محفوظة."
+                : "الحذف نهائي ولا يمكن التراجع عنه."}
+              {confirmRemove.childrenCount > 0 && (
+                <span style={{ color: T.clay, fontWeight: 700 }}> تنبيه: له {confirmRemove.childrenCount} من الأبناء المرتبطين به بالشجرة — حذفه سيقطع ارتباطهم بجدّهم.</span>
+              )}
+            </div>
+            <button onClick={confirmRemoveAction} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
+              {confirmRemove.type === "wife" ? "تأكيد فك الارتباط" : "تأكيد الحذف"}
+            </button>
+            <button onClick={() => setConfirmRemove(null)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
+              تراجع
+            </button>
+          </div>
+        </div>
       )}
 
       {editingRel && (
