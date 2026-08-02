@@ -605,25 +605,30 @@ function TreeTab({ members }) {
         document.body.appendChild(script);
       });
 
-    ensurePdfJs()
-      .then((pdfjsLib) => {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        return pdfjsLib.getDocument("/Family-Tree.pdf").promise;
-      })
-      .then((pdf) => pdf.getPage(1))
-      .then((page) => {
-        if (cancelled) return;
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const scale = 2.2;
-        const viewport = page.getViewport({ scale });
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        canvas.style.width = "100%";
-        canvas.style.height = "auto";
-        const ctx = canvas.getContext("2d");
-        return page.render({ canvasContext: ctx, viewport }).promise;
-      })
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 15000));
+
+    Promise.race([
+      ensurePdfJs()
+        .then((pdfjsLib) => {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          return pdfjsLib.getDocument("/Family-Tree.pdf").promise;
+        })
+        .then((pdf) => pdf.getPage(1))
+        .then((page) => {
+          if (cancelled) return;
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const scale = 2.2;
+          const viewport = page.getViewport({ scale });
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          canvas.style.width = "100%";
+          canvas.style.height = "auto";
+          const ctx = canvas.getContext("2d");
+          return page.render({ canvasContext: ctx, viewport }).promise;
+        }),
+      timeout,
+    ])
       .then(() => { if (!cancelled) setPdfLoading(false); })
       .catch(() => { if (!cancelled) { setPdfLoading(false); setPdfError(true); } });
 
@@ -863,7 +868,15 @@ function TreeTab({ members }) {
             )}
             {pdfError && (
               <div style={{ textAlign: "center", padding: "60px 20px", color: "#F4EFE3" }}>
-                تعذّر عرض الشجرة. حاول التحميل بدل العرض.
+                <div style={{ marginBottom: 14 }}>تعذّر عرض الشجرة داخل الصفحة (قد يكون بسبب الشبكة أو المتصفح).</div>
+                <a
+                  href="/Family-Tree.pdf"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: "inline-block", padding: "9px 18px", background: "#c9a227", color: "#0d2b2b", borderRadius: 8, textDecoration: "none", fontWeight: 700, fontSize: 13 }}
+                >
+                  فتح ملف PDF مباشرة
+                </a>
               </div>
             )}
             <canvas ref={canvasRef} style={{ display: pdfLoading || pdfError ? "none" : "block", margin: "0 auto" }} />
