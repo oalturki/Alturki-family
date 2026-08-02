@@ -315,4 +315,3 @@ export async function signInWithPasskey() {
 //
 // تدفق الدخول اللاحق (لأي عضو، بغض النظر عن طريقة تسجيله الأولى):
 // - جرب signInWithPasskey() أولًا (زر "دخول سريع")
-// - أو signInWithPassword(email, password) كبديل دائم
