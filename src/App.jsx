@@ -1434,7 +1434,7 @@ function normalizeSaudiPhoneLocal(p) {
   return "+966" + digits;
 }
 
-function AdminsTab({ members, setMembers, profilesMap }) {
+function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageAdmins }) {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [phone, setPhone] = useState("");
@@ -1575,6 +1575,18 @@ function AdminsTab({ members, setMembers, profilesMap }) {
 
   return (
     <div>
+      <div style={{ background: `linear-gradient(160deg, ${T.ink}, ${T.inkSoft})`, borderRadius: 14, padding: "14px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
+        <Shield size={22} color={T.goldLight} />
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 800, color: T.goldLight }}>لوحة الإشراف</div>
+          <div style={{ fontSize: 10.5, color: "#CFE0DC", marginTop: 2 }}>
+            {canManageAdmins ? "مشرف عام — كل الصلاحيات" : "الأقسام المتاحة لك حسب صلاحيتك"}
+          </div>
+        </div>
+      </div>
+
+      {canManageTree && (
+        <>
       <SectionTitle>إدارة الشجرة (بحث، تعديل، حذف)</SectionTitle>
       <div style={{ position: "relative", marginBottom: 10 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
@@ -1677,7 +1689,11 @@ function AdminsTab({ members, setMembers, profilesMap }) {
           </div>
         ))
       )}
+        </>
+      )}
 
+      {canManageAdmins && (
+        <>
       <SectionTitle>إدارة المشرفين</SectionTitle>
       <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}><UserPlus size={15} /> إضافة مشرف جديد</div>
@@ -1723,6 +1739,8 @@ function AdminsTab({ members, setMembers, profilesMap }) {
           onConfirm={doRemoveAdmin}
           onCancel={() => setConfirmRemoveAdmin(null)}
         />
+      )}
+        </>
       )}
     </div>
   );
@@ -2248,7 +2266,7 @@ const BASE_TABS = [
   { key: "events", label: "المناسبات", icon: CalendarDays },
   { key: "profile", label: "ملفي", icon: UserCircle2 },
 ];
-const ADMINS_TAB = { key: "admins", label: "المشرفون", icon: Shield };
+const ADMINS_TAB = { key: "admins", label: "الإشراف", icon: Shield };
 
 function FamilyAppInner({ meId }) {
   const [tab, setTab] = useState(() => {
@@ -2289,7 +2307,7 @@ function FamilyAppInner({ meId }) {
   }, []);
 
   const me = members.find((m) => m.id === meId);
-  const TABS = canManageAdmins ? [...BASE_TABS, ADMINS_TAB] : BASE_TABS;
+  const TABS = (canManageAdmins || canManageTree) ? [...BASE_TABS, ADMINS_TAB] : BASE_TABS;
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Tajawal', sans-serif", background: T.sand, minHeight: "100vh" }}>
@@ -2334,7 +2352,7 @@ function FamilyAppInner({ meId }) {
               {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
               {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} />}
-              {tab === "admins" && canManageAdmins && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} />}
+              {tab === "admins" && (canManageAdmins || canManageTree) && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} canManageAdmins={canManageAdmins} />}
             </>
           )}
         </div>
