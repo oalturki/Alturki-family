@@ -2062,21 +2062,25 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                   <div style={{ fontSize: 12.5, color: T.text, fontWeight: 700 }}>{s.name}</div>
                   {s.memberNumber && <div style={{ fontSize: 10.5, color: T.muted }}>رقم العضوية: {s.memberNumber}</div>}
                 </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button onClick={() => setEditingSon({ id: s.id, name: s.name, region: s.region || "", birthDate: s.birthDate || "", birthPlace: s.birthPlace || "" })} style={{ background: "none", border: "none", color: T.gold, cursor: "pointer" }} title="تعديل">
-                    <Pencil size={15} />
-                  </button>
-                  <button
-                    onClick={() => {
-                      const childrenCount = members.filter((m) => m.fatherId === s.id).length;
-                      setConfirmRemove({ type: "son", id: s.id, name: s.name, childrenCount });
-                    }}
-                    style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }}
-                    title="حذف"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
+                {s.userAccountId ? (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#2F7D4F" }}>لديه حساب مستقل</span>
+                ) : (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => setEditingSon({ id: s.id, name: s.name, region: s.region || "", birthDate: s.birthDate || "", birthPlace: s.birthPlace || "" })} style={{ background: "none", border: "none", color: T.gold, cursor: "pointer" }} title="تعديل">
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        const childrenCount = members.filter((m) => m.fatherId === s.id).length;
+                        setConfirmRemove({ type: "son", id: s.id, name: s.name, childrenCount });
+                      }}
+                      style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }}
+                      title="حذف"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -2127,14 +2131,16 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                     الحساب: {d.userAccountId ? "مفعّل" : "غير مفعّل"}
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button onClick={() => setEditingRel({ id: d.id, name: d.name, prefilledEmail: d.prefilledEmail || "", birthDate: d.birthDate || "", birthPlace: d.birthPlace || "" })} style={{ background: "none", border: "none", color: T.gold, cursor: "pointer" }} title="تعديل">
-                    <Pencil size={15} />
-                  </button>
-                  <button onClick={() => setConfirmRemove({ type: "daughter", id: d.id, name: d.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف">
-                    <Trash2 size={15} />
-                  </button>
-                </div>
+                {!d.userAccountId && (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => setEditingRel({ id: d.id, name: d.name, prefilledEmail: d.prefilledEmail || "", birthDate: d.birthDate || "", birthPlace: d.birthPlace || "" })} style={{ background: "none", border: "none", color: T.gold, cursor: "pointer" }} title="تعديل">
+                      <Pencil size={15} />
+                    </button>
+                    <button onClick={() => setConfirmRemove({ type: "daughter", id: d.id, name: d.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف">
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
             {showAddDaughter && (
