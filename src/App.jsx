@@ -135,6 +135,15 @@ async function updateMemberCore(id, patch) {
   if (error) console.error("updateMemberCore failed", error);
 }
 
+async function updateMemberAdmin(id, patch) {
+  const { error } = await supabase
+    .from("members")
+    .update({ first_name: patch.name, region: patch.region || null, birth_date: patch.birthDate || null, birth_place: patch.birthPlace || null })
+    .eq("id", id);
+  if (error) { console.error("updateMemberAdmin failed", error); return false; }
+  return true;
+}
+
 async function updateMemberPhone(id, phone) {
   const { error } = await supabase.from("members").update({ phone: phone || null }).eq("id", id);
   if (error) { console.error("updateMemberPhone failed", error); return false; }
@@ -593,14 +602,6 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [selectedNode, setSelectedNode] = useState(null);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
-  const [confirmDeleteMember, setConfirmDeleteMember] = useState(null); // { id, name, childrenCount }
-
-  const handleDeleteMember = async () => {
-    if (!confirmDeleteMember) return;
-    await deleteMember(confirmDeleteMember.id);
-    setMembers(members.filter((m) => m.id !== confirmDeleteMember.id));
-    setConfirmDeleteMember(null);
-  };
   const [pdfOpen, setPdfOpen] = useState(false);
   const [showInteractive, setShowInteractive] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -738,7 +739,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const searchResults = useMemo(() => {
     const nq = norm(query);
     if (!nq) return [];
-    const matched = members.filter((m) => m.gender !== "female" && norm(m.nasab).includes(nq));
+    const matched = members.filter((m) => m.gender !== "female" && norm(m.nasab).startsWith(nq));
     let display = matched.map((m) => ({ member: m, label: nasabAtDepth(m, 4) }));
     const counts = {};
     display.forEach((d) => { counts[d.label] = (counts[d.label] || 0) + 1; });
@@ -924,53 +925,19 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
                     </button>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <button
-                    onClick={() => goToMember(rm.id)}
-                    title="الذهاب لمكانه بالشجرة"
-                    style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
-                  >
-                    <MapPin size={12} /> الموقع بالشجرة
-                  </button>
-                  {canManageTree && (
-                    <button
-                      onClick={() => {
-                        const childrenCount = members.filter((m) => m.fatherId === rm.id).length;
-                        setConfirmDeleteMember({ id: rm.id, name: rm.name, childrenCount });
-                      }}
-                      title="حذف العضو"
-                      style={{ border: `1px solid ${T.clay}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
-                    >
-                      <Trash2 size={12} /> حذف
-                    </button>
-                  )}
-                </div>
+                <button
+                  onClick={() => goToMember(rm.id)}
+                  title="الذهاب لمكانه بالشجرة"
+                  style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
+                >
+                  <MapPin size={12} /> الموقع بالشجرة
+                </button>
                 {expandedResults.has(rm.id) && (
                   <div style={{ fontSize: 11, color: T.muted, marginTop: 4, wordBreak: "break-word" }}>{rm.fullNasab}</div>
                 )}
               </div>
             ))
           )}
-        </div>
-      )}
-
-      {confirmDeleteMember && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={() => setConfirmDeleteMember(null)}>
-          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>حذف {confirmDeleteMember.name}؟</div>
-            <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.7, marginBottom: 16 }}>
-              الحذف نهائي ولا يمكن التراجع عنه.
-              {confirmDeleteMember.childrenCount > 0 && (
-                <span style={{ color: T.clay, fontWeight: 700 }}> تنبيه: لهذا العضو {confirmDeleteMember.childrenCount} من الأبناء المرتبطين به بالشجرة — حذفه سيقطع ارتباطهم بجدّهم.</span>
-              )}
-            </div>
-            <button onClick={handleDeleteMember} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
-              تأكيد الحذف
-            </button>
-            <button onClick={() => setConfirmDeleteMember(null)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
-              تراجع
-            </button>
-          </div>
         </div>
       )}
 
@@ -1479,6 +1446,39 @@ function AdminsTab({ members, setMembers, profilesMap }) {
   const [pendingBirths, setPendingBirths] = useState([]);
   const [loadingBirths, setLoadingBirths] = useState(true);
   const [birthBusyId, setBirthBusyId] = useState(null);
+  const [treeQuery, setTreeQuery] = useState("");
+  const [confirmDeleteMember, setConfirmDeleteMember] = useState(null);
+  const [editingMember, setEditingMember] = useState(null);
+  const [savingMember, setSavingMember] = useState(false);
+
+  const normA = (s) => (s || "").replace(/بن/g, " ").replace(/\s+/g, " ").trim();
+  const treeSearchResults = useMemo(() => {
+    const nq = normA(treeQuery);
+    if (!nq) return [];
+    return members
+      .filter((m) => normA(m.nasab || "").startsWith(nq))
+      .sort((a, b) => (a.nasab || "").localeCompare(b.nasab || "", "ar"))
+      .slice(0, 50);
+  }, [treeQuery, members]);
+
+  const handleDeleteMember = async () => {
+    if (!confirmDeleteMember) return;
+    await deleteMember(confirmDeleteMember.id);
+    setMembers(members.filter((m) => m.id !== confirmDeleteMember.id));
+    setConfirmDeleteMember(null);
+  };
+
+  const saveEditMember = async () => {
+    if (!editingMember) return;
+    setSavingMember(true);
+    const ok = await updateMemberAdmin(editingMember.id, editingMember);
+    if (ok) {
+      const rawUpdated = members.map((m) => (m.id === editingMember.id ? { ...m, name: editingMember.name, region: editingMember.region, birthDate: editingMember.birthDate, birthPlace: editingMember.birthPlace } : m));
+      setMembers(enrichMembers(rawUpdated, profilesMap));
+    }
+    setSavingMember(false);
+    setEditingMember(null);
+  };
 
   const loadPendingBirths = async () => {
     setLoadingBirths(true);
@@ -1575,6 +1575,84 @@ function AdminsTab({ members, setMembers, profilesMap }) {
 
   return (
     <div>
+      <SectionTitle>إدارة الشجرة (بحث، تعديل، حذف)</SectionTitle>
+      <div style={{ position: "relative", marginBottom: 10 }}>
+        <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
+        <input value={treeQuery} onChange={(e) => setTreeQuery(e.target.value)} placeholder="ابحث عن عضو لتعديله أو حذفه..." style={{ ...inputStyle, padding: "9px 38px 9px 12px" }} />
+      </div>
+      {treeQuery.trim() && (
+        <div style={{ border: `1px solid ${T.line}`, borderRadius: 12, background: T.card, marginBottom: 16, overflow: "auto", maxHeight: "45vh" }}>
+          {treeSearchResults.length === 0 ? (
+            <div style={{ padding: 12, textAlign: "center", fontSize: 11.5, color: T.muted }}>لا نتائج مطابقة.</div>
+          ) : (
+            treeSearchResults.map((m) => (
+              <div key={m.id} style={{ padding: "8px 10px", borderBottom: `1px solid ${T.line}` }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: T.text, wordBreak: "break-word" }}>{m.nasab}</div>
+                <div style={{ fontSize: 10, color: T.muted, marginTop: 1 }}>
+                  {m.memberNumber ? `#${m.memberNumber}` : ""}{m.gender === "female" ? " · أنثى" : ""}{m.region ? ` · ${m.region}` : ""}
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  <button
+                    onClick={() => setEditingMember({ id: m.id, name: m.name, region: m.region || "", birthDate: m.birthDate || "", birthPlace: m.birthPlace || "" })}
+                    style={{ border: `1px solid ${T.gold}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "4px 9px", cursor: "pointer", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700 }}
+                  >
+                    تعديل
+                  </button>
+                  <button
+                    onClick={() => {
+                      const childrenCount = members.filter((mm) => mm.fatherId === m.id).length;
+                      setConfirmDeleteMember({ id: m.id, name: m.name, childrenCount });
+                    }}
+                    style={{ border: `1px solid ${T.clay}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "4px 9px", cursor: "pointer", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700 }}
+                  >
+                    حذف
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {editingMember && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }} onClick={() => setEditingMember(null)}>
+          <div style={{ background: T.card, borderRadius: "18px 18px 0 0", padding: 20, width: "100%", maxWidth: 430 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 10 }}>تعديل بيانات {editingMember.name}</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <input placeholder="الاسم" value={editingMember.name} onChange={(e) => setEditingMember({ ...editingMember, name: e.target.value })} style={inputStyle} />
+              <input placeholder="المنطقة" value={editingMember.region} onChange={(e) => setEditingMember({ ...editingMember, region: e.target.value })} style={inputStyle} />
+              <div style={{ fontSize: 11, color: T.muted }}>تاريخ الميلاد</div>
+              <input type="date" value={editingMember.birthDate} onChange={(e) => setEditingMember({ ...editingMember, birthDate: e.target.value })} style={{ ...inputStyle, width: "100%", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }} />
+              <input placeholder="مكان الميلاد" value={editingMember.birthPlace} onChange={(e) => setEditingMember({ ...editingMember, birthPlace: e.target.value })} style={inputStyle} />
+              <button onClick={saveEditMember} disabled={savingMember} style={primaryBtnStyle}>
+                {savingMember ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "حفظ"}
+              </button>
+              <button onClick={() => setEditingMember(null)} style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteMember && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={() => setConfirmDeleteMember(null)}>
+          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>حذف {confirmDeleteMember.name}؟</div>
+            <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.7, marginBottom: 16 }}>
+              الحذف نهائي ولا يمكن التراجع عنه.
+              {confirmDeleteMember.childrenCount > 0 && (
+                <span style={{ color: T.clay, fontWeight: 700 }}> تنبيه: لهذا العضو {confirmDeleteMember.childrenCount} من الأبناء المرتبطين به بالشجرة — حذفه سيقطع ارتباطهم بجدّهم.</span>
+              )}
+            </div>
+            <button onClick={handleDeleteMember} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
+              تأكيد الحذف
+            </button>
+            <button onClick={() => setConfirmDeleteMember(null)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
+              تراجع
+            </button>
+          </div>
+        </div>
+      )}
+
       <SectionTitle>طلبات تسجيل مواليد بانتظار الاعتماد</SectionTitle>
       {birthAdminMsg && (
         <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "#FBEAEA", color: T.clay, fontSize: 11.5, fontWeight: 700 }}>
