@@ -116,7 +116,13 @@ async function insertMember(form) {
     .insert({ first_name: form.name, father_id: form.fatherId || null, spouse_of: form.spouseOf || null, prefilled_email: form.prefilledEmail || null, gender: form.gender, region: form.region || null, phone: form.phone || null })
     .select()
     .single();
-  if (error) { console.error("insertMember failed", error); return null; }
+  if (error) {
+    console.error("insertMember failed", error);
+    if (error.code === "23505") {
+      throw new Error("هذا البريد الإلكتروني مستخدم مسبقًا لعضو آخر بالعائلة.");
+    }
+    throw new Error("تعذّرت الإضافة، حاول مرة أخرى.");
+  }
   return mapMemberRow(data);
 }
 
@@ -336,6 +342,10 @@ function enrichMembers(rawMembers, profilesMap) {
   });
 }
 
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email || "").trim());
+}
+
 function formatDate(dateStr, precision) {
   if (!dateStr) return "";
   const d = new Date(dateStr);
@@ -386,6 +396,38 @@ function IconButton({ onClick, children, active }) {
 
 const inputStyle = { width: "100%", boxSizing: "border-box", padding: "9px 12px", borderRadius: 10, border: `1px solid ${T.line}`, fontFamily: "inherit", fontSize: 16, background: T.sand, color: T.text };
 const primaryBtnStyle = { background: T.ink, color: T.sand, border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" };
+
+function Toast({ message, type = "success", onClose }) {
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(onClose, 4000);
+    return () => clearTimeout(t);
+  }, [message]);
+  if (!message) return null;
+  const isError = type === "error";
+  return (
+    <div style={{ position: "fixed", top: 100, left: "50%", transform: "translateX(-50%)", zIndex: 90, width: "calc(100% - 32px)", maxWidth: 400 }}>
+      <div
+        onClick={onClose}
+        style={{
+          background: isError ? "#5A2323" : "#123838",
+          color: isError ? "#F9D8D8" : "#F4EFE3",
+          border: `1.5px solid ${isError ? "#A24936" : "#c9a227"}`,
+          borderRadius: 12,
+          padding: "14px 16px",
+          fontSize: 13,
+          fontWeight: 700,
+          textAlign: "center",
+          boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+          cursor: "pointer",
+          lineHeight: 1.6,
+        }}
+      >
+        {message}
+      </div>
+    </div>
+  );
+}
 
 function ConfirmModal({ onConfirm, onCancel }) {
   return (
@@ -1364,7 +1406,7 @@ function normalizeSaudiPhoneLocal(p) {
   return "+966" + digits;
 }
 
-function AdminsTab() {
+function AdminsTab({ members, setMembers, profilesMap }) {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [phone, setPhone] = useState("");
@@ -1388,7 +1430,10 @@ function AdminsTab() {
 
   const handleApproveBirth = async (req) => {
     setBirthBusyId(req.id);
-    await approveBirthRequest(req);
+    const created = await approveBirthRequest(req);
+    if (created) {
+      setMembers(enrichMembers([...members, created], profilesMap));
+    }
     if (req.requested_by) {
       sendFamilyEmail({
         type: "congrats",
@@ -1598,37 +1643,39 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
   const [relSuccess, setRelSuccess] = useState("");
 
   const addDaughter = async () => {
-    if (!daughterName.trim() || !daughterEmail.trim()) return;
+    if (!daughterName.trim()) return setRelError("اكتب اسم الابنة رباعيًا.");
+    if (!isValidEmail(daughterEmail)) return setRelError("صيغة البريد الإلكتروني غير صحيحة (تأكد من وجود @ ونطاق صحيح).");
     setAddingDaughter(true);
     setRelError(""); setRelSuccess("");
-    const created = await insertMember({ name: daughterName.trim(), fatherId: meId, gender: "female", prefilledEmail: daughterEmail.trim() });
-    if (created) {
+    try {
+      const created = await insertMember({ name: daughterName.trim(), fatherId: meId, gender: "female", prefilledEmail: daughterEmail.trim() });
       setMembers(enrichMembers([...members, created], profilesMap));
       setRelSuccess(`تمت إضافة ${created.name} بنجاح.`);
       sendFamilyEmail({ type: "welcome", email: daughterEmail.trim(), name: daughterName.trim() });
       setDaughterName("");
       setDaughterEmail("");
       setShowAddDaughter(false);
-    } else {
-      setRelError("تعذّرت الإضافة، حاول مرة أخرى.");
+    } catch (e) {
+      setRelError(e.message || "تعذّرت الإضافة، حاول مرة أخرى.");
     }
     setAddingDaughter(false);
   };
 
   const addWife = async () => {
-    if (!wifeName.trim() || !wifeEmail.trim()) return;
+    if (!wifeName.trim()) return setRelError("اكتب اسم الزوجة رباعيًا.");
+    if (!isValidEmail(wifeEmail)) return setRelError("صيغة البريد الإلكتروني غير صحيحة (تأكد من وجود @ ونطاق صحيح).");
     setAddingWife(true);
     setRelError(""); setRelSuccess("");
-    const created = await insertMember({ name: wifeName.trim(), spouseOf: meId, gender: "female", prefilledEmail: wifeEmail.trim() });
-    if (created) {
+    try {
+      const created = await insertMember({ name: wifeName.trim(), spouseOf: meId, gender: "female", prefilledEmail: wifeEmail.trim() });
       setMembers(enrichMembers([...members, created], profilesMap));
       setRelSuccess(`تمت إضافة ${created.name} بنجاح.`);
       sendFamilyEmail({ type: "welcome", email: wifeEmail.trim(), name: wifeName.trim() });
       setWifeName("");
       setWifeEmail("");
       setShowAddWife(false);
-    } else {
-      setRelError("تعذّرت الإضافة، حاول مرة أخرى.");
+    } catch (e) {
+      setRelError(e.message || "تعذّرت الإضافة، حاول مرة أخرى.");
     }
     setAddingWife(false);
   };
@@ -1659,8 +1706,15 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
     setAddingBirth(false);
   };
 
+  const [editRelError, setEditRelError] = useState("");
+
   const saveRelEdit = async () => {
     if (!editingRel) return;
+    if (editingRel.prefilledEmail?.trim() && !isValidEmail(editingRel.prefilledEmail)) {
+      setEditRelError("صيغة البريد الإلكتروني غير صحيحة (تأكد من وجود @ ونطاق صحيح).");
+      return;
+    }
+    setEditRelError("");
     setSavingRel(true);
     const before = members.find((m) => m.id === editingRel.id);
     await supabase.from("members").update({
@@ -1781,11 +1835,8 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         </>
       )}
 
-      {(relSuccess || relError) && (
-        <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700, background: relSuccess ? "#E8F3EC" : "#FBEAEA", color: relSuccess ? "#2F7D4F" : T.clay }}>
-          {relSuccess || relError}
-        </div>
-      )}
+      <Toast message={relSuccess} type="success" onClose={() => setRelSuccess("")} />
+      <Toast message={relError} type="error" onClose={() => setRelError("")} />
 
       {form.gender !== "female" && (
         <div style={{ marginTop: 14 }}>
@@ -1871,7 +1922,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
             ))}
             {showAddDaughter && (
               <div style={{ display: "grid", gap: 6, marginTop: 10, paddingTop: 10, borderTop: myDaughters.length ? `1px dashed ${T.line}` : "none" }}>
-                <input placeholder="اسم الابنة" value={daughterName} onChange={(e) => setDaughterName(e.target.value)} style={inputStyle} />
+                <input placeholder="الاسم رباعيًا (مثال: نورة عثمان عبدالمحسن أحمد)" value={daughterName} onChange={(e) => setDaughterName(e.target.value)} style={inputStyle} />
                 <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={daughterEmail} onChange={(e) => setDaughterEmail(e.target.value)} style={inputStyle} />
                 <button onClick={addDaughter} disabled={addingDaughter || !daughterName.trim() || !daughterEmail.trim()} style={primaryBtnStyle}>
                   {addingDaughter ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
@@ -1909,7 +1960,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
             ))}
             {showAddWife && (
               <div style={{ display: "grid", gap: 6, marginTop: 10, paddingTop: 10, borderTop: myWives.length ? `1px dashed ${T.line}` : "none" }}>
-                <input placeholder="الاسم الكامل للزوجة" value={wifeName} onChange={(e) => setWifeName(e.target.value)} style={inputStyle} />
+                <input placeholder="الاسم رباعيًا (مثال: هياء محمد العبدالجبار)" value={wifeName} onChange={(e) => setWifeName(e.target.value)} style={inputStyle} />
                 <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={wifeEmail} onChange={(e) => setWifeEmail(e.target.value)} style={inputStyle} />
                 <button onClick={addWife} disabled={addingWife || !wifeName.trim() || !wifeEmail.trim()} style={primaryBtnStyle}>
                   {addingWife ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
@@ -1932,12 +1983,14 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
             <div style={{ display: "grid", gap: 8 }}>
               <input placeholder="الاسم" value={editingRel.name} onChange={(e) => setEditingRel({ ...editingRel, name: e.target.value })} style={inputStyle} />
               <input type="email" placeholder="البريد الإلكتروني (لتفعيل حسابها)" value={editingRel.prefilledEmail} onChange={(e) => setEditingRel({ ...editingRel, prefilledEmail: e.target.value })} style={inputStyle} />
-              <input type="date" placeholder="تاريخ الميلاد" value={editingRel.birthDate} onChange={(e) => setEditingRel({ ...editingRel, birthDate: e.target.value })} style={{ ...inputStyle, minWidth: 0, maxWidth: "100%" }} />
+              <div style={{ fontSize: 11, color: T.muted }}>تاريخ الميلاد</div>
+              <input type="date" value={editingRel.birthDate} onChange={(e) => setEditingRel({ ...editingRel, birthDate: e.target.value })} style={{ ...inputStyle, width: "100%", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }} />
               <input placeholder="مكان الميلاد" value={editingRel.birthPlace} onChange={(e) => setEditingRel({ ...editingRel, birthPlace: e.target.value })} style={inputStyle} />
+              {editRelError && <div style={{ color: T.clay, fontSize: 12, fontWeight: 700 }}>{editRelError}</div>}
               <button onClick={saveRelEdit} disabled={savingRel} style={primaryBtnStyle}>
                 {savingRel ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "حفظ"}
               </button>
-              <button onClick={() => setEditingRel(null)} style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>إلغاء</button>
+              <button onClick={() => { setEditingRel(null); setEditRelError(""); }} style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>إلغاء</button>
             </div>
           </div>
         </div>
@@ -2038,7 +2091,7 @@ function FamilyAppInner({ meId }) {
               {tab === "tree" && <TreeTab members={members} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
               {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} />}
-              {tab === "admins" && canManageAdmins && <AdminsTab />}
+              {tab === "admins" && canManageAdmins && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} />}
             </>
           )}
         </div>
