@@ -86,7 +86,8 @@ async function fetchMembers() {
   const { data, error } = await supabase
     .from("members")
     .select("id, legacy_id, member_number, first_name, father_id, spouse_of, prefilled_email, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, birth_place, occupation, bio, photo_url, phone, user_account_id")
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    .range(0, 4999);
   if (error) { console.error("fetchMembers failed", error); return []; }
   return data.map(mapMemberRow);
 }
@@ -1935,7 +1936,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
             ))}
             {showAddDaughter && (
               <div style={{ display: "grid", gap: 6, marginTop: 10, paddingTop: 10, borderTop: myDaughters.length ? `1px dashed ${T.line}` : "none" }}>
-                <input placeholder="الاسم رباعيًا (مثال: نورة عثمان عبدالمحسن أحمد)" value={daughterName} onChange={(e) => setDaughterName(e.target.value)} style={inputStyle} />
+                <input placeholder="اسم الابنة" value={daughterName} onChange={(e) => setDaughterName(e.target.value)} style={inputStyle} />
                 <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={daughterEmail} onChange={(e) => setDaughterEmail(e.target.value)} style={inputStyle} />
                 <button onClick={addDaughter} disabled={addingDaughter || !daughterName.trim() || !daughterEmail.trim()} style={primaryBtnStyle}>
                   {addingDaughter ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
@@ -1973,7 +1974,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
             ))}
             {showAddWife && (
               <div style={{ display: "grid", gap: 6, marginTop: 10, paddingTop: 10, borderTop: myWives.length ? `1px dashed ${T.line}` : "none" }}>
-                <input placeholder="الاسم رباعيًا (مثال: هياء محمد العبدالجبار)" value={wifeName} onChange={(e) => setWifeName(e.target.value)} style={inputStyle} />
+                <input placeholder="الاسم رباعي" value={wifeName} onChange={(e) => setWifeName(e.target.value)} style={inputStyle} />
                 <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={wifeEmail} onChange={(e) => setWifeEmail(e.target.value)} style={inputStyle} />
                 <button onClick={addWife} disabled={addingWife || !wifeName.trim() || !wifeEmail.trim()} style={primaryBtnStyle}>
                   {addingWife ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
