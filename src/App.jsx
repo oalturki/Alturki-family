@@ -2078,7 +2078,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
               <div style={{ display: "grid", gap: 6, marginTop: 10, paddingTop: 10, borderTop: myDaughters.length ? `1px dashed ${T.line}` : "none" }}>
                 <input placeholder="اسم الابنة" value={daughterName} onChange={(e) => setDaughterName(e.target.value)} style={inputStyle} />
                 <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={daughterEmail} onChange={(e) => setDaughterEmail(e.target.value)} style={inputStyle} />
-                <button onClick={addDaughter} disabled={addingDaughter || !daughterName.trim() || !daughterEmail.trim()} style={primaryBtnStyle}>
+                <button onClick={addDaughter} disabled={addingDaughter} style={primaryBtnStyle}>
                   {addingDaughter ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
                 </button>
                 <div style={{ fontSize: 10.5, color: T.muted }}>تُربط تلقائيًا بك كأب. الجوال تقدر تضيفه هي بنفسها لاحقًا من ملفها.</div>
@@ -2116,7 +2116,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
               <div style={{ display: "grid", gap: 6, marginTop: 10, paddingTop: 10, borderTop: myWives.length ? `1px dashed ${T.line}` : "none" }}>
                 <input placeholder="الاسم رباعي" value={wifeName} onChange={(e) => setWifeName(e.target.value)} style={inputStyle} />
                 <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={wifeEmail} onChange={(e) => setWifeEmail(e.target.value)} style={inputStyle} />
-                <button onClick={addWife} disabled={addingWife || !wifeName.trim() || !wifeEmail.trim()} style={primaryBtnStyle}>
+                <button onClick={addWife} disabled={addingWife} style={primaryBtnStyle}>
                   {addingWife ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}
                 </button>
                 <div style={{ fontSize: 10.5, color: T.muted }}>اسمها كامل بما إنها من خارج شجرة العائلة. الجوال تقدر تضيفه هي بنفسها لاحقًا. يدعم إضافة أكثر من زوجة.</div>
