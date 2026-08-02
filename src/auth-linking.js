@@ -1,7 +1,8 @@
 // auth-linking.js
 // منطق التسجيل والدخول لتطبيق alturki.family
-// التصميم: الجوال يثبت عضوية العائلة (مرة واحدة عند التسجيل)
-//          البريد + كلمة المرور طريقة دخول احتياطية دائمة
+// التصميم: الجوال يثبت عضوية العائلة (مرة واحدة عند التسجيل) — المسار الأساسي
+//          البريد وحده يثبت العضوية لمن أُضيفت بدون جوال (بنات/زوجات) — مسار بديل
+//          البريد + كلمة المرور طريقة دخول احتياطية دائمة لكل الأعضاء
 //          Passkeys (بصمة/وجه) طريقة الدخول السريعة المفضّلة بعد أول تسجيل
 
 import { supabase } from './supabaseClient';
@@ -44,6 +45,27 @@ export async function checkPhoneEligibility(phone) {
 }
 
 // ============================================================
+// 1ب) نظير التحقق أعلاه، لكن بالبريد بدل الجوال — لمن أُضيفت بدون
+//      رقم جوال (بنات/زوجات أضافهن الأب/الزوج ببريدها فقط)
+// ============================================================
+export async function checkEmailEligibility(email) {
+  const { data, error } = await supabase.rpc('find_member_by_email', {
+    p_email: email.trim().toLowerCase(),
+  });
+
+  if (error) throw error;
+  if (!data || data.length === 0) return { status: 'not_found' };
+
+  const member = data[0];
+  if (member.is_claimed) return { status: 'already_claimed' };
+
+  return {
+    status: 'eligible',
+    member: { id: member.member_id, first_name: member.first_name },
+  };
+}
+
+// ============================================================
 // أداة مساعدة: تحويل رسائل خطأ Supabase الإنجليزية العامة
 // لرسائل عربية دقيقة توضح المشكلة الفعلية للمستخدم
 // ============================================================
@@ -71,7 +93,9 @@ function translateAuthError(error) {
 
 // ============================================================
 // 2) إنشاء حساب جديد ببريد + كلمة مرور
-//    (الحساب يُنشأ ويُفعّل فورًا لأن Confirm email معطّل عمدًا)
+//    (الحساب يُنشأ ويُفعّل فورًا لأن Confirm email معطّل عمدًا —
+//     لهذا نعتمد نحن على خطوة تحقق منفصلة (جوال أو بريد) كبوابتنا
+//     الخاصة قبل ربط الحساب بملف العضو، بغض النظر عن حالة Supabase الداخلية)
 // ============================================================
 export async function registerAccount(email, password) {
   const { data, error } = await supabase.auth.signUp({ email, password });
@@ -102,6 +126,20 @@ export async function requestPhoneVerification(phone) {
 }
 
 // ============================================================
+// 3ب) نظير الجوال أعلاه، لكن للبريد — ترسل رمز تحقق (OTP) لبريد
+//      حساب أُنشئ للتو عبر registerAccount (shouldCreateUser: false
+//      لأن الحساب موجود فعلًا، نطلب رمزًا فقط لا حسابًا جديدًا)
+// ============================================================
+export async function requestEmailVerification(email) {
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: false },
+  });
+  if (error) throw translateAuthError(error);
+  return true;
+}
+
+// ============================================================
 // 4) تأكيد رمز التحقق المرسل للجوال
 // ============================================================
 export async function confirmPhoneVerification(phone, token) {
@@ -125,8 +163,29 @@ export async function confirmPhoneVerification(phone, token) {
 }
 
 // ============================================================
+// 4ب) تأكيد رمز التحقق المرسل للبريد
+// ============================================================
+export async function confirmEmailVerification(email, token) {
+  const { data, error } = await supabase.auth.verifyOtp({
+    email,
+    token,
+    type: 'email',
+  });
+  if (error) {
+    if ((error.message || '').toLowerCase().includes('expired')) {
+      throw new Error('رمز التحقق منتهي الصلاحية. اطلب رمزًا جديدًا.');
+    }
+    if ((error.message || '').toLowerCase().includes('invalid')) {
+      throw new Error('رمز التحقق غير صحيح. تأكد منه وحاول مرة ثانية.');
+    }
+    throw translateAuthError(error);
+  }
+  return data.user;
+}
+
+// ============================================================
 // 5) ربط الحساب المُتحقق منه بملف العضو بجدول members
-//    (يُستدعى فقط بعد نجاح تأكيد رمز الجوال)
+//    (يُستدعى فقط بعد نجاح تأكيد رمز الجوال أو رمز البريد)
 // ============================================================
 export async function linkAccountToMember(memberId) {
   const { data: { user } } = await supabase.auth.getUser();
@@ -234,7 +293,7 @@ export async function signInWithPasskey() {
 }
 
 // ============================================================
-// مثال تدفق التسجيل الكامل (React component pseudo-code):
+// مثال تدفق التسجيل الكامل بالجوال (React component pseudo-code):
 // ============================================================
 //
 // 1. checkPhoneEligibility(phone)
@@ -247,6 +306,13 @@ export async function signInWithPasskey() {
 // 6. (اختياري) registerPasskey() → لتفعيل الدخول السريع بالبصمة لاحقًا
 // 7. روح للصفحة الرئيسية
 //
-// تدفق الدخول اللاحق:
+// تدفق التسجيل البديل بالبريد (للبنات/الزوجات بدون جوال مسجّل):
+// 1. checkEmailEligibility(email)
+// 2. registerAccount(email, password)
+// 3. requestEmailVerification(email) → إرسال رمز للبريد
+// 4. confirmEmailVerification(email, token) → تأكيد الرمز
+// 5. linkAccountToMember(member.id)
+//
+// تدفق الدخول اللاحق (لأي عضو، بغض النظر عن طريقة تسجيله الأولى):
 // - جرب signInWithPasskey() أولًا (زر "دخول سريع")
 // - أو signInWithPassword(email, password) كبديل دائم
