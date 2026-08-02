@@ -588,11 +588,19 @@ const TT = {
   text: "#16241f",
 };
 
-function TreeTab({ members }) {
+function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
   const [selectedNode, setSelectedNode] = useState(null);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
+  const [confirmDeleteMember, setConfirmDeleteMember] = useState(null); // { id, name, childrenCount }
+
+  const handleDeleteMember = async () => {
+    if (!confirmDeleteMember) return;
+    await deleteMember(confirmDeleteMember.id);
+    setMembers(members.filter((m) => m.id !== confirmDeleteMember.id));
+    setConfirmDeleteMember(null);
+  };
   const [pdfOpen, setPdfOpen] = useState(false);
   const [showInteractive, setShowInteractive] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -916,19 +924,53 @@ function TreeTab({ members }) {
                     </button>
                   )}
                 </div>
-                <button
-                  onClick={() => goToMember(rm.id)}
-                  title="الذهاب لمكانه بالشجرة"
-                  style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
-                >
-                  <MapPin size={12} /> الموقع بالشجرة
-                </button>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => goToMember(rm.id)}
+                    title="الذهاب لمكانه بالشجرة"
+                    style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
+                  >
+                    <MapPin size={12} /> الموقع بالشجرة
+                  </button>
+                  {canManageTree && (
+                    <button
+                      onClick={() => {
+                        const childrenCount = members.filter((m) => m.fatherId === rm.id).length;
+                        setConfirmDeleteMember({ id: rm.id, name: rm.name, childrenCount });
+                      }}
+                      title="حذف العضو"
+                      style={{ border: `1px solid ${T.clay}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
+                    >
+                      <Trash2 size={12} /> حذف
+                    </button>
+                  )}
+                </div>
                 {expandedResults.has(rm.id) && (
                   <div style={{ fontSize: 11, color: T.muted, marginTop: 4, wordBreak: "break-word" }}>{rm.fullNasab}</div>
                 )}
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {confirmDeleteMember && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={() => setConfirmDeleteMember(null)}>
+          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>حذف {confirmDeleteMember.name}؟</div>
+            <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.7, marginBottom: 16 }}>
+              الحذف نهائي ولا يمكن التراجع عنه.
+              {confirmDeleteMember.childrenCount > 0 && (
+                <span style={{ color: T.clay, fontWeight: 700 }}> تنبيه: لهذا العضو {confirmDeleteMember.childrenCount} من الأبناء المرتبطين به بالشجرة — حذفه سيقطع ارتباطهم بجدّهم.</span>
+              )}
+            </div>
+            <button onClick={handleDeleteMember} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
+              تأكيد الحذف
+            </button>
+            <button onClick={() => setConfirmDeleteMember(null)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
+              تراجع
+            </button>
+          </div>
         </div>
       )}
 
@@ -2124,7 +2166,7 @@ function FamilyAppInner({ meId }) {
           ) : (
             <>
               {tab === "news" && <NewsTab news={news} setNews={setNews} canManageNews={canManageNews} />}
-              {tab === "tree" && <TreeTab members={members} />}
+              {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
               {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} />}
               {tab === "admins" && canManageAdmins && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} />}
