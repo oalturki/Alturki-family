@@ -2017,15 +2017,13 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                       }}>
                         {r.status === "approved" ? "اعتُمد" : r.status === "rejected" ? "رُفض" : "بانتظار الاعتماد"}
                       </span>
-                      {r.status === "pending" && (
-                        <button
-                          onClick={async () => { await deleteBirthRequest(r.id); loadMyRequests(); }}
-                          title="حذف الطلب"
-                          style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", padding: 2 }}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
+                      <button
+                        onClick={async () => { await deleteBirthRequest(r.id); loadMyRequests(); }}
+                        title={r.status === "pending" ? "حذف الطلب" : "إخفاء من القائمة"}
+                        style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", padding: 2 }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -2092,7 +2090,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
       {form.gender !== "female" && (
         <div style={{ marginTop: 14, marginBottom: 14 }}>
-          <SectionTitle action={<IconButton onClick={() => setShowAddWife((v) => !v)} active={showAddWife}><Plus size={13} /> إضافة</IconButton>}>الزوجة</SectionTitle>
+          <SectionTitle action={<IconButton onClick={() => setShowAddWife((v) => !v)} active={showAddWife}><Plus size={13} /> إضافة</IconButton>}>{myWives.length > 1 ? "الزوجات" : "الزوجة"}</SectionTitle>
           <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
             {myWives.length === 0 && !showAddWife && <div style={{ fontSize: 12, color: T.muted, textAlign: "center", padding: "8px 0" }}>لا توجد زوجة مضافة بعد.</div>}
             {myWives.map((w) => (
