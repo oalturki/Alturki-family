@@ -268,6 +268,16 @@ async function fetchMyBirthRequests() {
 
 async function approveBirthRequest(request) {
   const c = request.proposed_changes;
+  const { data: existing } = await supabase
+    .from("members")
+    .select("id")
+    .eq("father_id", c.father_id)
+    .eq("first_name", c.name)
+    .maybeSingle();
+  if (existing) {
+    console.error("approveBirthRequest: duplicate name for this father, skipped insert");
+    return { duplicate: true };
+  }
   const { data: userData } = await supabase.auth.getUser();
   const { data: memberData, error: insertErr } = await supabase
     .from("members")
@@ -725,13 +735,8 @@ function TreeTab({ members }) {
     const counts = {};
     display.forEach((d) => { counts[d.label] = (counts[d.label] || 0) + 1; });
     display = display.map((d) => (counts[d.label] > 1 ? { ...d, label: nasabAtDepth(d.member, 5) } : d));
-    display.sort((a, b) => {
-      const aExact = norm(a.member.name) === nq;
-      const bExact = norm(b.member.name) === nq;
-      if (aExact !== bExact) return aExact ? -1 : 1;
-      return a.label.localeCompare(b.label, "ar");
-    });
-    return display.slice(0, 25);
+    display.sort((a, b) => a.label.localeCompare(b.label, "ar"));
+    return display.slice(0, 100);
   }, [query, members, byId]);
 
   const toggle = (id) => {
@@ -893,7 +898,7 @@ function TreeTab({ members }) {
       </div>
 
       {query.trim() && (
-        <div style={{ border: `1px solid ${TT.gold500}`, borderRadius: 14, background: T.card, marginBottom: 14, overflow: "hidden" }}>
+        <div style={{ border: `1px solid ${TT.gold500}`, borderRadius: 14, background: T.card, marginBottom: 14, overflow: "auto", maxHeight: "50vh" }}>
           {searchResults.length === 0 ? (
             <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: T.muted }}>لا نتائج مطابقة.</div>
           ) : (
@@ -1442,9 +1447,17 @@ function AdminsTab({ members, setMembers, profilesMap }) {
 
   useEffect(() => { loadPendingBirths(); }, []);
 
+  const [birthAdminMsg, setBirthAdminMsg] = useState("");
+
   const handleApproveBirth = async (req) => {
     setBirthBusyId(req.id);
+    setBirthAdminMsg("");
     const created = await approveBirthRequest(req);
+    if (created && created.duplicate) {
+      setBirthAdminMsg(`"${req.proposed_changes?.name}" مسجّل مسبقًا بنفس الاسم لنفس الأب — راجع الطلب مع مقدّمه قبل الاعتماد.`);
+      setBirthBusyId(null);
+      return;
+    }
     if (created) {
       setMembers(enrichMembers([...members, created], profilesMap));
     }
@@ -1471,13 +1484,10 @@ function AdminsTab({ members, setMembers, profilesMap }) {
     setLoading(true);
     const { data: roles, error } = await supabase.from("member_roles").select("id, user_id, role, permissions").neq("role", "owner");
     if (error || !roles) { setLoading(false); return; }
-    const userIds = roles.map((r) => r.user_id);
-    let namesByUserId = {};
-    if (userIds.length > 0) {
-      const { data: memberRows } = await supabase.from("members").select("user_account_id, first_name").in("user_account_id", userIds);
-      (memberRows || []).forEach((m) => { namesByUserId[m.user_account_id] = m.first_name; });
-    }
-    setAdmins(roles.map((r) => ({ ...r, memberName: namesByUserId[r.user_id] || "عضو" })));
+    setAdmins(roles.map((r) => {
+      const m = members.find((mm) => mm.userAccountId === r.user_id);
+      return { ...r, memberName: m?.nasab || m?.name || "عضو" };
+    }));
     setLoading(false);
   };
 
@@ -1524,6 +1534,11 @@ function AdminsTab({ members, setMembers, profilesMap }) {
   return (
     <div>
       <SectionTitle>طلبات تسجيل مواليد بانتظار الاعتماد</SectionTitle>
+      {birthAdminMsg && (
+        <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "#FBEAEA", color: T.clay, fontSize: 11.5, fontWeight: 700 }}>
+          {birthAdminMsg}
+        </div>
+      )}
       {loadingBirths ? (
         <Loader2 size={18} style={{ animation: "rosette-spin 1s linear infinite" }} />
       ) : pendingBirths.length === 0 ? (
@@ -1709,9 +1724,16 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
   const addBirth = async () => {
     if (!birthName.trim()) return;
+    const nameTrim = birthName.trim();
+    const dupExisting = members.some((m) => m.fatherId === meId && m.name.trim() === nameTrim);
+    const dupPending = myRequests.some((r) => r.status === "pending" && (r.proposed_changes?.name || "").trim() === nameTrim);
+    if (dupExisting || dupPending) {
+      setBirthMsg(`يوجد مولود بالاسم "${nameTrim}" مسجّل مسبقًا لديك بنفس الاسم — لو تقصد شخصًا مختلفًا، أضف اسمًا مميزًا (مثلًا اسم الجد).`);
+      return;
+    }
     setAddingBirth(true);
     setBirthMsg("");
-    const ok = await submitBirthRequest({ name: birthName.trim(), gender: birthGender, birthDate, birthPlace, fatherId: meId });
+    const ok = await submitBirthRequest({ name: nameTrim, gender: birthGender, birthDate, birthPlace, fatherId: meId });
     setBirthMsg(ok ? "أُرسل طلب تسجيل المولود لاعتماد المشرف." : "تعذّر إرسال الطلب، حاول مرة أخرى.");
     if (ok) {
       setBirthName(""); setBirthDate(""); setBirthPlace(""); setShowAddBirth(false);
