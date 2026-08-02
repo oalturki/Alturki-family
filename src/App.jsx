@@ -1915,6 +1915,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
             ))}
           </div>
         </div>
+        )}
 
           {editingSon && (
             <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }} onClick={() => setEditingSon(null)}>
@@ -1934,7 +1935,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
               </div>
             </div>
           )}
-      )}
+
 
       {form.gender !== "female" && (
         <div style={{ marginTop: 14 }}>
