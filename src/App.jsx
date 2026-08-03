@@ -1104,6 +1104,14 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
   const [numPages, setNumPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [flipDir, setFlipDir] = useState("forward");
+  const prevPageRef = useRef(pageNum);
+
+  const goToPage = (n) => {
+    setFlipDir(n >= prevPageRef.current ? "forward" : "backward");
+    prevPageRef.current = n;
+    setPageNum(n);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1192,16 +1200,37 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
             <div style={{ fontSize: 10.5, color: "#c9b98a", marginTop: 10 }}>يفتح بنفس الصفحة — اضغط سهم الرجوع بالمتصفح للعودة للتطبيق.</div>
           </div>
         )}
-        <canvas ref={canvasRef} style={{ display: loading || error ? "none" : "block", margin: "0 auto" }} />
+        <div style={{ perspective: "1600px", display: loading || error ? "none" : "block" }}>
+          <canvas
+            key={pageNum}
+            ref={canvasRef}
+            style={{
+              display: "block",
+              margin: "0 auto",
+              transformOrigin: flipDir === "forward" ? "right center" : "left center",
+              animation: `magazine-flip-${flipDir === "forward" ? "fwd" : "bwd"} 0.45s ease-out`,
+            }}
+          />
+        </div>
+        <style>{`
+          @keyframes magazine-flip-fwd {
+            0% { transform: rotateY(-35deg) scale(0.96); opacity: 0.4; }
+            100% { transform: rotateY(0deg) scale(1); opacity: 1; }
+          }
+          @keyframes magazine-flip-bwd {
+            0% { transform: rotateY(35deg) scale(0.96); opacity: 0.4; }
+            100% { transform: rotateY(0deg) scale(1); opacity: 1; }
+          }
+        `}</style>
       </div>
       {!loading && !error && numPages > 1 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderTop: "1px solid rgba(201,162,39,0.4)" }}>
           <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14 }}>
-            <button onClick={() => setPageNum((p) => Math.max(p - 1, 1))} disabled={pageNum <= 1} style={{ border: "1px solid #c9a227", background: "transparent", color: "#dab94a", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", opacity: pageNum <= 1 ? 0.4 : 1 }}>
+            <button onClick={() => goToPage(Math.max(pageNum - 1, 1))} disabled={pageNum <= 1} style={{ border: "1px solid #c9a227", background: "transparent", color: "#dab94a", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", opacity: pageNum <= 1 ? 0.4 : 1 }}>
               الصفحة السابقة
             </button>
             <span style={{ color: "#F4EFE3", fontSize: 12 }}>{pageNum} / {numPages}</span>
-            <button onClick={() => setPageNum((p) => Math.min(p + 1, numPages))} disabled={pageNum >= numPages} style={{ border: "1px solid #c9a227", background: "transparent", color: "#dab94a", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", opacity: pageNum >= numPages ? 0.4 : 1 }}>
+            <button onClick={() => goToPage(Math.min(pageNum + 1, numPages))} disabled={pageNum >= numPages} style={{ border: "1px solid #c9a227", background: "transparent", color: "#dab94a", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", opacity: pageNum >= numPages ? 0.4 : 1 }}>
               الصفحة التالية
             </button>
           </div>
@@ -1216,12 +1245,12 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   const n = Math.min(Math.max(Number(e.target.value) || 1, 1), numPages);
-                  setPageNum(n);
+                  goToPage(n);
                 }
               }}
               onBlur={(e) => {
                 const n = Math.min(Math.max(Number(e.target.value) || 1, 1), numPages);
-                setPageNum(n);
+                goToPage(n);
               }}
               style={{ width: 64, textAlign: "center", background: "rgba(244,239,227,0.1)", border: "1px solid rgba(201,162,39,0.5)", borderRadius: 8, color: "#F4EFE3", fontSize: 13, padding: "5px 4px" }}
             />
@@ -1230,7 +1259,7 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
               min={1}
               max={numPages}
               value={pageNum}
-              onChange={(e) => setPageNum(Number(e.target.value))}
+              onChange={(e) => goToPage(Number(e.target.value))}
               style={{ flex: 1, maxWidth: 160 }}
             />
           </div>
