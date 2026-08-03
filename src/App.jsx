@@ -686,7 +686,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       ensurePdfJs()
         .then((pdfjsLib) => {
           pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-          return pdfjsLib.getDocument("/Family-Tree.pdf").promise;
+          return pdfjsLib.getDocument({ url: "/Family-Tree.pdf", cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/", cMapPacked: true }).promise;
         })
         .then((pdf) => pdf.getPage(1))
         .then((page) => {
@@ -1130,7 +1130,7 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
     Promise.race([
       ensurePdfJs().then((pdfjsLib) => {
         pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        return pdfjsLib.getDocument(pdfUrl).promise;
+        return pdfjsLib.getDocument({ url: pdfUrl, cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/", cMapPacked: true }).promise;
       }),
       timeout,
     ])
