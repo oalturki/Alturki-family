@@ -1378,19 +1378,21 @@ function MagazineTab({ canManageDocuments }) {
             <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: T.muted }}>لا نتائج مطابقة بالفهرس.</div>
           ) : (
             searchResults.map((a) => (
-              <div key={a.id} style={{ padding: "10px 12px", borderBottom: `1px solid ${T.line}` }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>{a.title}</div>
-                <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>
-                  {a.author ? `${a.author} · ` : ""}مجلة {a.magazine_issues?.title} {a.magazine_issues?.issue_number}{a.page_number ? ` · صفحة ${a.page_number}` : ""}
+              <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: `1px solid ${T.line}` }}>
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>{a.title}</div>
+                  <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>
+                    {a.author ? `${a.author} · ` : ""}مجلة {a.magazine_issues?.title} {a.magazine_issues?.issue_number}
+                  </div>
                 </div>
                 <button
                   onClick={() => {
                     const issue = issues.find((i) => i.id === a.issue_id);
                     if (issue) setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title });
                   }}
-                  style={{ marginTop: 6, border: "none", background: "#123838", color: "#dab94a", borderRadius: 8, padding: "5px 12px", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}
+                  style={{ flexShrink: 0, border: "none", background: "#123838", color: "#dab94a", borderRadius: 8, padding: "6px 12px", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
                 >
-                  فتح عند الصفحة
+                  {a.page_number ? `ص ${a.page_number}` : "فتح"}
                 </button>
               </div>
             ))
@@ -1466,18 +1468,21 @@ function MagazineTab({ canManageDocuments }) {
             {articles.filter((a) => a.issue_id === issue.id).length > 0 && (
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}` }}>
                 {articles.filter((a) => a.issue_id === issue.id).map((a) => (
-                  <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, color: T.text, marginBottom: 4 }}>
-                    <button
-                      onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title })}
-                      style={{ background: "none", border: "none", color: T.text, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, textAlign: "right", padding: 0, textDecoration: "underline", textDecorationColor: T.line }}
-                    >
-                      {a.title}{a.page_number ? ` — ص ${a.page_number}` : ""}
-                    </button>
-                    {canManageDocuments && (
-                      <button onClick={() => handleDeleteArticle(a.id)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }}>
-                        <Trash2 size={12} />
+                  <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 11.5, color: T.text, marginBottom: 6 }}>
+                    <span style={{ flex: 1 }}>{a.title}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <button
+                        onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title })}
+                        style={{ border: `1px solid ${T.gold}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "4px 9px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}
+                      >
+                        {a.page_number ? `ص ${a.page_number}` : "فتح"}
                       </button>
-                    )}
+                      {canManageDocuments && (
+                        <button onClick={() => handleDeleteArticle(a.id)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }}>
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
