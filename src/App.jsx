@@ -247,6 +247,27 @@ async function setAttendance(eventId, memberId, attending) {
   }
 }
 
+async function sendContactMessage(memberId, message) {
+  const { error } = await supabase.from("contact_messages").insert({ sender_member_id: memberId, message });
+  if (error) { console.error("sendContactMessage failed", error); return false; }
+  return true;
+}
+
+async function fetchContactMessages() {
+  const { data, error } = await supabase
+    .from("contact_messages")
+    .select("id, message, status, created_at, sender_member_id, members(first_name, phone)")
+    .order("created_at", { ascending: false });
+  if (error) { console.error("fetchContactMessages failed", error); return []; }
+  return data;
+}
+
+async function markContactMessageRead(id) {
+  const { error } = await supabase.from("contact_messages").update({ status: "read" }).eq("id", id);
+  if (error) { console.error("markContactMessageRead failed", error); return false; }
+  return true;
+}
+
 async function checkPermission(key) {
   const { data, error } = await supabase.rpc("has_permission", { p_permission: key });
   if (error) { console.error("checkPermission failed", key, error); return false; }
@@ -2073,7 +2094,7 @@ function normalizeSaudiPhoneLocal(p) {
   return "+966" + digits;
 }
 
-function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageAdmins }) {
+function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageAdmins, canManageRegistrations }) {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [phone, setPhone] = useState("");
@@ -2127,6 +2148,20 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
   };
 
   useEffect(() => { loadPendingBirths(); }, []);
+
+  const [contactMessages, setContactMessages] = useState([]);
+  const [loadingMessages, setLoadingMessages] = useState(true);
+  const loadContactMessages = async () => {
+    setLoadingMessages(true);
+    const rows = await fetchContactMessages();
+    setContactMessages(rows);
+    setLoadingMessages(false);
+  };
+  useEffect(() => { if (canManageRegistrations) loadContactMessages(); }, [canManageRegistrations]);
+  const handleMarkRead = async (id) => {
+    await markContactMessageRead(id);
+    setContactMessages((prev) => prev.map((m) => (m.id === id ? { ...m, status: "read" } : m)));
+  };
 
   const [birthAdminMsg, setBirthAdminMsg] = useState("");
 
@@ -2223,6 +2258,35 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
           </div>
         </div>
       </div>
+
+      {canManageRegistrations && (
+        <>
+      <SectionTitle>رسائل التواصل {contactMessages.filter((m) => m.status === "new").length > 0 && `(${contactMessages.filter((m) => m.status === "new").length} جديدة)`}</SectionTitle>
+      {loadingMessages ? (
+        <Loader2 size={18} style={{ animation: "rosette-spin 1s linear infinite" }} />
+      ) : contactMessages.length === 0 ? (
+        <EmptyState text="ما فيه رسائل تواصل حاليًا." />
+      ) : (
+        contactMessages.map((m) => (
+          <div key={m.id} style={{ background: T.card, border: `1px solid ${m.status === "new" ? T.gold : T.line}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: T.ink }}>{m.members?.first_name || "عضو"}{m.members?.phone ? ` — ${m.members.phone}` : ""}</span>
+              {m.status === "new" && <span style={{ fontSize: 9.5, fontWeight: 700, color: T.gold, background: T.sandDark, borderRadius: 999, padding: "1px 8px" }}>جديدة</span>}
+            </div>
+            <div style={{ fontSize: 12.5, color: T.text, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{m.message}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+              <span style={{ fontSize: 10, color: T.muted }}>{new Date(m.created_at).toLocaleDateString("ar-SA")}</span>
+              {m.status === "new" && (
+                <button onClick={() => handleMarkRead(m.id)} style={{ border: `1px solid ${T.line}`, background: "transparent", color: T.ink, borderRadius: 8, padding: "3px 10px", fontSize: 10.5, fontFamily: "inherit", cursor: "pointer" }}>
+                  تمييز كمقروءة
+                </button>
+              )}
+            </div>
+          </div>
+        ))
+      )}
+        </>
+      )}
 
       {canManageTree && (
         <>
@@ -2381,6 +2445,71 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
       )}
         </>
       )}
+    </div>
+  );
+}
+
+// ⚠️ عدّل الرقم والبريد هنا لما يجهزان عندك — هذي قيم مؤقتة للعرض بس
+const CONTACT_WHATSAPP = "+966555466973";
+const CONTACT_EMAIL = "oalturki@gmail.com";
+
+function ContactUsView({ onBack, meId }) {
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [err, setErr] = useState("");
+
+  const handleSend = async () => {
+    setErr("");
+    if (!message.trim()) return setErr("اكتب رسالتك أول.");
+    setSending(true);
+    const ok = await sendContactMessage(meId, message.trim());
+    if (ok) { setSent(true); setMessage(""); } else setErr("تعذّر إرسال الرسالة، حاول مرة أخرى.");
+    setSending(false);
+  };
+
+  return (
+    <div>
+      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: T.gold, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: 14 }}>
+        <ChevronsRight size={16} /> رجوع
+      </button>
+      <SectionTitle>تواصل معنا</SectionTitle>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <a
+          href={`https://wa.me/${CONTACT_WHATSAPP.replace(/[^0-9]/g, "")}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, textDecoration: "none", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 8px" }}
+        >
+          <Phone size={18} color={T.gold} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: T.ink }}>واتساب الإشراف</span>
+        </a>
+        <a
+          href={`mailto:${CONTACT_EMAIL}`}
+          style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, textDecoration: "none", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 8px" }}
+        >
+          <Link2 size={18} color={T.gold} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: T.ink }}>البريد الإلكتروني</span>
+        </a>
+      </div>
+
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, marginBottom: 8 }}>أو أرسل رسالة مباشرة للإشراف من هنا</div>
+        {sent ? (
+          <div style={{ color: "#2F7D4F", fontSize: 12.5, fontWeight: 700, textAlign: "center", padding: "10px 0" }}>
+            وصلت رسالتك، بيتواصلون معك قريبًا إن شاء الله.
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="اكتب رسالتك أو استفسارك هنا..." rows={5} style={{ ...inputStyle, resize: "vertical", minHeight: 110, lineHeight: 1.7 }} />
+            {err && <div style={{ color: T.clay, fontSize: 11.5, fontWeight: 700 }}>{err}</div>}
+            <button onClick={handleSend} disabled={sending} style={primaryBtnStyle}>
+              {sending ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إرسال"}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2656,9 +2785,9 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "2px 14px", marginBottom: 14 }}>
           <MenuRow icon={FileText} label="دليل المستخدم" disabled />
-          <MenuRow icon={HelpCircle} label="الأسئلة الشائعة" disabled />
-          <MenuRow icon={Shield} label="سياسة الخصوصية" disabled />
-          <MenuRow icon={MessageCircle} label="تواصل معنا" disabled />
+          <MenuRow icon={HelpCircle} label="الأسئلة الشائعة" onClick={() => setProfileView("faq")} />
+          <MenuRow icon={Shield} label="سياسة الخصوصية" onClick={() => setProfileView("privacy-policy")} />
+          <MenuRow icon={MessageCircle} label="تواصل معنا" onClick={() => setProfileView("contact")} />
         </div>
 
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "2px 14px" }}>
@@ -2705,6 +2834,76 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         </div>
       </div>
     );
+  }
+
+  if (profileView === "faq") {
+    const FAQ_ITEMS = [
+      { q: "كيف أسجّل حساب جديد؟", a: "إذا كان رقم جوالك مسجّلاً بقائمة العائلة، اختر \"تسجيل عضو جديد\" وأدخل جوالك وبريدك وكلمة مرور. أما البنات والزوجات المُضافات بدون رقم جوال، فيستخدمن رابط \"أُضفتِ بدون رقم جوال؟\" من نفس شاشة الدخول." },
+      { q: "نسيت كلمة المرور، وش أسوي؟", a: "من شاشة الدخول اضغط \"نسيت كلمة المرور؟\"، ويوصلك رابط استعادة على بريدك المؤكّد." },
+      { q: "كيف أضيف بناتي أو زوجتي؟", a: "من تبويب \"ملفي\" ← \"ملفي\"، فيه قسمان مستقلان للبنات والزوجة (أو الزوجات)، تضيف الاسم والبريد وتُرسل لها دعوة تفعيل تلقائيًا." },
+      { q: "ليش ما تظهر البنات برسم الشجرة؟", a: "البنات عضوات كاملات بالتطبيق، لكن لا يظهرن بالرسم المرئي للشجرة حفاظًا على شكل اللوحة التقليدية. يظهرن ضمن ملف الأب أو الزوج." },
+      { q: "كيف أسجّل مولودًا جديدًا؟", a: "من ملفك الشخصي، قسم \"تسجيل مولود جديد\" — يمر الطلب على اعتماد المشرف قبل ما يدخل الشجرة رسميًا." },
+      { q: "مين يشوف رقم جوالي أو بريدي؟", a: "أنت المتحكم الوحيد. من \"ملفي\" ← تعديل، كل من الجوال والبريد له مفتاح خصوصية مستقل (ظاهر للعائلة / مخفي)." },
+      { q: "كيف أثبّت الموقع كتطبيق كامل الشاشة؟", a: "بآيفون: من Safari تحديدًا (مو كروم) اضغط زر المشاركة ← \"إضافة إلى الشاشة الرئيسية\"." },
+      { q: "كيف أبحث بمجلة الصلة؟", a: "من تبويب \"المجلة\" ← \"الفهرس\"، ابحث بعنوان الموضوع أو اسم الكاتب، ويفتح لك المقالة مباشرة عند صفحتها الصحيحة." },
+    ];
+    const [openFaq, setOpenFaq] = useState(null);
+    return (
+      <div>
+        <button onClick={() => setProfileView("menu")} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: T.gold, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: 14 }}>
+          <ChevronsRight size={16} /> رجوع
+        </button>
+        <SectionTitle>الأسئلة الشائعة</SectionTitle>
+        <div style={{ display: "grid", gap: 8 }}>
+          {FAQ_ITEMS.map((item, i) => (
+            <div key={i} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: 14 }}>
+              <button onClick={() => setOpenFaq(openFaq === i ? null : i)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "right" }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>{item.q}</span>
+                <ChevronDown size={15} color={T.muted} style={{ transform: openFaq === i ? "rotate(180deg)" : "none", flexShrink: 0, marginRight: 8 }} />
+              </button>
+              {openFaq === i && <div style={{ fontSize: 12, color: T.text, lineHeight: 1.8, marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}` }}>{item.a}</div>}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (profileView === "privacy-policy") {
+    return (
+      <div>
+        <button onClick={() => setProfileView("menu")} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: T.gold, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: 14 }}>
+          <ChevronsRight size={16} /> رجوع
+        </button>
+        <SectionTitle>سياسة الخصوصية</SectionTitle>
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 16, fontSize: 12.5, color: T.text, lineHeight: 1.9, display: "grid", gap: 14 }}>
+          <div>
+            <div style={{ fontWeight: 700, color: T.ink, marginBottom: 4 }}>البيانات اللي نجمعها</div>
+            الاسم، صلة النسب، الجوال والبريد الإلكتروني، تاريخ ومكان الميلاد (اختياري)، الصورة الشخصية والسيرة الذاتية (اختياري). كل هذي البيانات يُدخلها العضو بنفسه أو والده/زوجها عند الإضافة.
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, color: T.ink, marginBottom: 4 }}>كيف تُستخدم</div>
+            حصرًا لعرض شجرة النسب، وتسهيل التواصل بين أفراد العائلة، وإرسال إشعارات تخص الموقع (ترحيب، تهنئة مولود، تنبيهات إدارية). ما تُستخدم لأي غرض تجاري أو إعلاني.
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, color: T.ink, marginBottom: 4 }}>من يشوف بياناتك</div>
+            الجوال والبريد مخفيان افتراضيًا عن باقي العائلة، وأنت المتحكم الوحيد بإظهارهما من "ملفي" ← تعديل. باقي بيانات الشجرة (الاسم والنسب) ظاهرة لكل أعضاء العائلة المسجّلين فقط، وليست عامة على الإنترنت.
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, color: T.ink, marginBottom: 4 }}>التخزين والأمان</div>
+            تُخزَّن البيانات بقاعدة بيانات مشفّرة (Supabase)، بصلاحيات وصول دقيقة على مستوى كل سجل، تمنع أي عضو من الوصول لبيانات غير مصرّح له بها.
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, color: T.ink, marginBottom: 4 }}>حقوقك</div>
+            تقدر تعدّل أو تحذف بياناتك (أو بيانات بناتك/زوجتك اللي أضفتها) بأي وقت من ملفك الشخصي، أو تتواصل مع الإشراف لأي استفسار أو طلب حذف كامل.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (profileView === "contact") {
+    return <ContactUsView onBack={() => setProfileView("menu")} meId={meId} />;
   }
 
   const myDaughters = members.filter((m) => m.fatherId === meId && m.gender === "female");
@@ -3104,16 +3303,17 @@ function FamilyAppInner({ meId }) {
   const [canManageNews, setCanManageNews] = useState(false);
   const [canManageEvents, setCanManageEvents] = useState(false);
   const [canManageDocuments, setCanManageDocuments] = useState(false);
+  const [canManageRegistrations, setCanManageRegistrations] = useState(false);
   const [magazineUploading, setMagazineUploading] = useState(false);
   const [magazineUploadMsg, setMagazineUploadMsg] = useState("");
 
   useEffect(() => {
     (async () => {
-      const [rawMembers, profiles, n, e, treePerm, adminsPerm, newsPerm, eventsPerm, docsPerm] = await Promise.all([
+      const [rawMembers, profiles, n, e, treePerm, adminsPerm, newsPerm, eventsPerm, docsPerm, regPerm] = await Promise.all([
         fetchMembers(), fetchMemberProfiles(), fetchNews(), fetchEvents(),
         checkPermission("manage_tree_profiles"), checkPermission("manage_admins"),
         checkPermission("manage_news"), checkPermission("manage_events"),
-        checkPermission("manage_documents"),
+        checkPermission("manage_documents"), checkPermission("manage_registrations"),
       ]);
       setProfilesMap(profiles);
       setMembers(enrichMembers(rawMembers, profiles));
@@ -3124,12 +3324,13 @@ function FamilyAppInner({ meId }) {
       setCanManageNews(newsPerm);
       setCanManageEvents(eventsPerm);
       setCanManageDocuments(docsPerm);
+      setCanManageRegistrations(regPerm);
       setLoading(false);
     })();
   }, []);
 
   const me = members.find((m) => m.id === meId);
-  const TABS = (canManageAdmins || canManageTree) ? [...BASE_TABS, ADMINS_TAB] : BASE_TABS;
+  const TABS = (canManageAdmins || canManageTree || canManageRegistrations) ? [...BASE_TABS, ADMINS_TAB] : BASE_TABS;
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Tajawal', sans-serif", background: T.sand, minHeight: "100vh" }}>
@@ -3207,7 +3408,7 @@ function FamilyAppInner({ meId }) {
               {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} onUploadingChange={setMagazineUploading} onUploadResult={setMagazineUploadMsg} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
               {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} />}
-              {tab === "admins" && (canManageAdmins || canManageTree) && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} canManageAdmins={canManageAdmins} />}
+              {tab === "admins" && (canManageAdmins || canManageTree || canManageRegistrations) && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} canManageAdmins={canManageAdmins} canManageRegistrations={canManageRegistrations} />}
             </>
           )}
         </div>
