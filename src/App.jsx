@@ -1168,6 +1168,7 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderBottom: "2px solid #c9a227" }}>
         <a
           href={pdfUrl}
+          download={`${title}.pdf`}
           target="_blank"
           rel="noopener noreferrer"
           style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px", textDecoration: "none" }}
@@ -1269,7 +1270,7 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
   );
 }
 
-function MagazineTab({ canManageDocuments }) {
+function MagazineTab({ canManageDocuments, onUploadingChange, onUploadResult }) {
   const [issues, setIssues] = useState([]);
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1307,6 +1308,7 @@ function MagazineTab({ canManageDocuments }) {
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
+  useEffect(() => () => onUploadingChange?.(false), []);
 
   const handleUploadIndex = async (file) => {
     if (!file) return;
@@ -1324,14 +1326,19 @@ function MagazineTab({ canManageDocuments }) {
 
   const handleAddIssue = async () => {
     if (!issueNumber || !issueTitle.trim() || !issueFile) { setMsg("عبّي رقم العدد والعنوان واختر ملف PDF."); return; }
+    const numForMsg = issueNumber;
     setUploading(true);
+    onUploadingChange?.(true);
     setMsg("");
     let url;
     try {
       url = await uploadMagazinePdf(issueFile);
     } catch (e) {
-      setMsg(e.message || "تعذّر رفع الملف، حاول مرة أخرى.");
+      const failMsg = e.message || "تعذّر رفع الملف، حاول مرة أخرى.";
+      setMsg(failMsg);
       setUploading(false);
+      onUploadingChange?.(false);
+      onUploadResult?.(`العدد ${numForMsg}: ${failMsg}`);
       return;
     }
     const created = await insertMagazineIssue({ issue_number: Number(issueNumber), title: issueTitle.trim(), pdf_url: url, published_date: issueDate || null });
@@ -1339,10 +1346,13 @@ function MagazineTab({ canManageDocuments }) {
       setIssues((prev) => [created, ...prev.filter((i) => i.issue_number !== created.issue_number)].sort((a, b) => b.issue_number - a.issue_number));
       setIssueNumber(""); setIssueTitle("الصلة"); setIssueDate(""); setIssueFile(null); setShowAddIssue(false);
       setMsg("تمت إضافة العدد بنجاح.");
+      onUploadResult?.(`✓ اكتمل رفع العدد ${numForMsg} بنجاح.`);
     } else {
       setMsg("تعذّرت الإضافة، حاول مرة أخرى.");
+      onUploadResult?.(`العدد ${numForMsg}: تعذّرت الإضافة، حاول مرة أخرى.`);
     }
     setUploading(false);
+    onUploadingChange?.(false);
   };
 
   const handleAddArticle = async (issueId) => {
@@ -1383,7 +1393,7 @@ function MagazineTab({ canManageDocuments }) {
         <BookOpen size={featured ? 24 : 20} color={T.gold} />
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-        <button onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: 1, title: issue.title })} style={{ ...primaryBtnStyle, marginTop: 0, padding: "7px 14px", fontSize: 12, background: featured ? T.gold : T.ink, color: featured ? T.ink : T.sand }}>
+        <button onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: 1, title: `${issue.title} ${issue.issue_number}` })} style={{ ...primaryBtnStyle, marginTop: 0, padding: "7px 14px", fontSize: 12, background: featured ? T.gold : T.ink, color: featured ? T.ink : T.sand }}>
           قراءة العدد
         </button>
         {canManageDocuments && (
@@ -1394,7 +1404,7 @@ function MagazineTab({ canManageDocuments }) {
             <button onClick={() => { setEditingOffsetFor(editingOffsetFor === issue.id ? null : issue.id); setOffsetValue(String(issue.page_offset || 0)); }} style={{ border: `1px solid ${featured ? T.goldLight : T.line}`, background: "transparent", color: featured ? "#F4EFE3" : T.ink, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
               فارق الصفحات ({issue.page_offset || 0})
             </button>
-            <button onClick={() => setConfirmDeleteIssue({ id: issue.id, title: issue.title })} style={{ border: `1px solid ${featured ? T.clay : T.line}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
+            <button onClick={() => setConfirmDeleteIssue({ id: issue.id, title: `${issue.title} ${issue.issue_number}` })} style={{ border: `1px solid ${featured ? T.clay : T.line}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
               حذف
             </button>
           </>
@@ -1425,7 +1435,7 @@ function MagazineTab({ canManageDocuments }) {
           {articles.filter((a) => a.issue_id === issue.id).map((a) => (
             <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11.5, color: featured ? "#F4EFE3" : T.text, marginBottom: 6 }}>
               <button
-                onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title })}
+                onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: `${issue.title} ${issue.issue_number}` })}
                 style={{ flexShrink: 0, width: 44, border: `1px solid ${T.gold}`, background: "transparent", color: featured ? T.goldLight : T.gold, borderRadius: 8, padding: "4px 4px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700, textAlign: "center" }}
               >
                 {a.page_number || "فتح"}
@@ -1496,7 +1506,7 @@ function MagazineTab({ canManageDocuments }) {
                 <button
                   onClick={() => {
                     const issue = issues.find((i) => i.id === a.issue_id);
-                    if (issue) setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title });
+                    if (issue) setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: `${issue.title} ${issue.issue_number}` });
                   }}
                   style={{ flexShrink: 0, width: 44, border: "none", background: "#123838", color: "#dab94a", borderRadius: 8, padding: "6px 4px", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", textAlign: "center" }}
                 >
@@ -2812,6 +2822,8 @@ function FamilyAppInner({ meId }) {
   const [canManageNews, setCanManageNews] = useState(false);
   const [canManageEvents, setCanManageEvents] = useState(false);
   const [canManageDocuments, setCanManageDocuments] = useState(false);
+  const [magazineUploading, setMagazineUploading] = useState(false);
+  const [magazineUploadMsg, setMagazineUploadMsg] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -2868,6 +2880,38 @@ function FamilyAppInner({ meId }) {
           }}
           title="الرجوع للرئيسية"
         />
+        {(magazineUploading || magazineUploadMsg) && (
+          <div style={{ position: "fixed", top: 96, left: "50%", transform: "translateX(-50%)", zIndex: 55, width: "calc(100% - 32px)", maxWidth: 400 }}>
+            <div
+              onClick={() => !magazineUploading && setMagazineUploadMsg("")}
+              style={{
+                background: magazineUploading ? "#123838" : "#123838",
+                color: "#F4EFE3",
+                border: `1.5px solid ${T.gold}`,
+                borderRadius: 12,
+                padding: "12px 16px",
+                fontSize: 12.5,
+                fontWeight: 700,
+                textAlign: "center",
+                boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                cursor: magazineUploading ? "default" : "pointer",
+              }}
+            >
+              {magazineUploading ? (
+                <>
+                  <Loader2 size={15} style={{ animation: "rosette-spin 1s linear infinite" }} />
+                  جارِ رفع عدد المجلة... تقدر تتصفح باقي التطبيق بحرية، وبتوصلك رسالة هنا لما يخلص.
+                </>
+              ) : (
+                magazineUploadMsg
+              )}
+            </div>
+          </div>
+        )}
         <div style={{ padding: "16px 16px 0" }}>
           {loading ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "70px 0", color: T.muted }}>
@@ -2878,7 +2922,7 @@ function FamilyAppInner({ meId }) {
             <>
               {tab === "news" && <NewsTab news={news} setNews={setNews} canManageNews={canManageNews} />}
               {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
-              {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} />}
+              {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} onUploadingChange={setMagazineUploading} onUploadResult={setMagazineUploadMsg} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
               {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} />}
               {tab === "admins" && (canManageAdmins || canManageTree) && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} canManageAdmins={canManageAdmins} />}
