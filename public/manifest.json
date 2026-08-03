@@ -1,1 +1,24 @@
-
+{
+  "name": "عائلة آل تركي",
+  "short_name": "آل تركي",
+  "description": "الموقع الرسمي لعائلة آل تركي",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4EFE3",
+  "theme_color": "#173634",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logo.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}
