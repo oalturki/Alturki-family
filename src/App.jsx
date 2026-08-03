@@ -307,6 +307,12 @@ async function deleteMagazineIssue(id) {
   return true;
 }
 
+async function updateMagazineIssueOffset(id, offset) {
+  const { error } = await supabase.from("magazine_issues").update({ page_offset: offset }).eq("id", id);
+  if (error) { console.error("updateMagazineIssueOffset failed", error); return false; }
+  return true;
+}
+
 async function insertMagazineArticle(article) {
   const { data, error } = await supabase.from("magazine_articles").insert(article).select().single();
   if (error) { console.error("insertMagazineArticle failed", error); return null; }
@@ -1180,9 +1186,10 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
         {error && (
           <div style={{ textAlign: "center", padding: "60px 20px", color: "#F4EFE3" }}>
             <div style={{ marginBottom: 14 }}>تعذّر عرض العدد داخل الصفحة.</div>
-            <a href={`${pdfUrl}#page=${pageNum}`} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "9px 18px", background: "#c9a227", color: "#0d2b2b", borderRadius: 8, textDecoration: "none", fontWeight: 700, fontSize: 13 }}>
+            <a href={`${pdfUrl}#page=${pageNum}`} style={{ display: "inline-block", padding: "9px 18px", background: "#c9a227", color: "#0d2b2b", borderRadius: 8, textDecoration: "none", fontWeight: 700, fontSize: 13 }}>
               فتح ملف PDF مباشرة{pageNum > 1 ? ` (صفحة ${pageNum})` : ""}
             </a>
+            <div style={{ fontSize: 10.5, color: "#c9b98a", marginTop: 10 }}>يفتح بنفس الصفحة — اضغط سهم الرجوع بالمتصفح للعودة للتطبيق.</div>
           </div>
         )}
         <canvas ref={canvasRef} style={{ display: loading || error ? "none" : "block", margin: "0 auto" }} />
@@ -1216,6 +1223,14 @@ function MagazineTab({ canManageDocuments }) {
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState("");
   const [addArticleFor, setAddArticleFor] = useState(null);
+  const [editingOffsetFor, setEditingOffsetFor] = useState(null);
+  const [offsetValue, setOffsetValue] = useState("");
+  const saveOffset = async (issueId) => {
+    const n = Number(offsetValue) || 0;
+    const ok = await updateMagazineIssueOffset(issueId, n);
+    if (ok) setIssues((prev) => prev.map((i) => (i.id === issueId ? { ...i, page_offset: n } : i)));
+    setEditingOffsetFor(null);
+  };
   const [articleTitle, setArticleTitle] = useState("");
   const [articlePage, setArticlePage] = useState("");
   const [confirmDeleteIssue, setConfirmDeleteIssue] = useState(null);
@@ -1340,7 +1355,7 @@ function MagazineTab({ canManageDocuments }) {
                 <button
                   onClick={() => {
                     const issue = issues.find((i) => i.id === a.issue_id);
-                    if (issue) setReaderIssue({ pdfUrl: issue.pdf_url, startPage: a.page_number || 1, title: issue.title });
+                    if (issue) setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title });
                   }}
                   style={{ marginTop: 6, border: "none", background: "#123838", color: "#dab94a", borderRadius: 8, padding: "5px 12px", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}
                 >
@@ -1392,12 +1407,24 @@ function MagazineTab({ canManageDocuments }) {
                   <button onClick={() => setAddArticleFor(addArticleFor === issue.id ? null : issue.id)} style={{ border: `1px solid ${T.line}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
                     + فهرس
                   </button>
+                  <button onClick={() => { setEditingOffsetFor(editingOffsetFor === issue.id ? null : issue.id); setOffsetValue(String(issue.page_offset || 0)); }} style={{ border: `1px solid ${T.line}`, background: "transparent", color: T.ink, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
+                    فارق الصفحات ({issue.page_offset || 0})
+                  </button>
                   <button onClick={() => setConfirmDeleteIssue({ id: issue.id, title: issue.title })} style={{ border: `1px solid ${T.line}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
                     حذف
                   </button>
                 </>
               )}
             </div>
+            {editingOffsetFor === issue.id && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}`, display: "grid", gap: 6 }}>
+                <div style={{ fontSize: 10.5, color: T.muted, lineHeight: 1.6 }}>
+                  الفارق بين رقم الصفحة المطبوع بالمجلة ورقم صفحة ملف الـPDF الفعلي. مثال: لو ص٥ بالمجلة هي فعليًا الصفحة ٨ بالملف (بسبب الغلاف والفهرس)، اكتب ٣.
+                </div>
+                <input type="number" placeholder="الفارق (مثال: 3)" value={offsetValue} onChange={(e) => setOffsetValue(e.target.value)} style={inputStyle} />
+                <button onClick={() => saveOffset(issue.id)} style={primaryBtnStyle}>حفظ الفارق</button>
+              </div>
+            )}
             {addArticleFor === issue.id && (
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}`, display: "grid", gap: 6 }}>
                 <input placeholder="عنوان الموضوع" value={articleTitle} onChange={(e) => setArticleTitle(e.target.value)} style={inputStyle} />
