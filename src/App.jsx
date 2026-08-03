@@ -5,10 +5,11 @@ import {
   Link2, ChevronDown, ChevronUp, Check,
   Baby, HeartHandshake, Megaphone, Cross, Loader2,
   FileText, Phone, Cake, Shield, UserPlus, Trash2, Save, Pencil,
-  BookOpen, ChevronRight, ChevronLeft, Upload
+  BookOpen, ChevronRight, ChevronLeft, Upload, LogOut, KeyRound
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
+import { updatePassword } from "./auth-linking";
 
 const T = {
   ink: "#173634",
@@ -2327,6 +2328,35 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
   const [showAddDaughter, setShowAddDaughter] = useState(false);
   const [showAddWife, setShowAddWife] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(null); // { type: 'daughter'|'wife', id, name }
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [newPassword2, setNewPassword2] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [pwSuccess, setPwSuccess] = useState("");
+  const [savingPw, setSavingPw] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+
+  const handleChangePassword = async () => {
+    setPwError(""); setPwSuccess("");
+    if (!newPassword.trim() || !newPassword2.trim()) return setPwError("عبّي الحقلين.");
+    if (newPassword.length < 6) return setPwError("كلمة المرور لازم تكون 6 أحرف على الأقل.");
+    if (newPassword !== newPassword2) return setPwError("كلمتا المرور غير متطابقتين.");
+    setSavingPw(true);
+    try {
+      await updatePassword(newPassword);
+      setPwSuccess("تم تغيير كلمة المرور بنجاح.");
+      setNewPassword(""); setNewPassword2("");
+      setTimeout(() => { setShowChangePassword(false); setPwSuccess(""); }, 1500);
+    } catch (e) {
+      setPwError(e.message || "تعذّر تغيير كلمة المرور.");
+    }
+    setSavingPw(false);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
+
   const [showAddBirth, setShowAddBirth] = useState(false);
   const [birthName, setBirthName] = useState("");
   const [birthGender, setBirthGender] = useState("male");
@@ -2822,6 +2852,52 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
               </button>
               <button onClick={() => { setEditingRel(null); setEditRelError(""); }} style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>إلغاء</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 20, paddingTop: 14, borderTop: `1px solid ${T.line}` }}>
+        <SectionTitle>الحساب</SectionTitle>
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 8 }}>
+          <button
+            onClick={() => setShowChangePassword((v) => !v)}
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "transparent", border: "none", padding: "6px 2px", cursor: "pointer", fontFamily: "inherit" }}
+          >
+            <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: T.text, fontWeight: 700 }}>
+              <KeyRound size={16} color={T.gold} /> تغيير كلمة المرور
+            </span>
+            <ChevronDown size={15} color={T.muted} style={{ transform: showChangePassword ? "rotate(180deg)" : "none" }} />
+          </button>
+          {showChangePassword && (
+            <div style={{ display: "grid", gap: 6, paddingTop: 6, borderTop: `1px dashed ${T.line}` }}>
+              <input type="password" placeholder="كلمة المرور الجديدة (6 أحرف فأكثر)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={inputStyle} />
+              <input type="password" placeholder="تأكيد كلمة المرور الجديدة" value={newPassword2} onChange={(e) => setNewPassword2(e.target.value)} style={inputStyle} />
+              {pwError && <div style={{ color: T.clay, fontSize: 11.5, fontWeight: 700 }}>{pwError}</div>}
+              {pwSuccess && <div style={{ color: "#2F7D4F", fontSize: 11.5, fontWeight: 700 }}>{pwSuccess}</div>}
+              <button onClick={handleChangePassword} disabled={savingPw} style={primaryBtnStyle}>
+                {savingPw ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "حفظ كلمة المرور الجديدة"}
+              </button>
+            </div>
+          )}
+          <button
+            onClick={() => setConfirmLogout(true)}
+            style={{ display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "none", padding: "8px 2px", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: T.clay, fontWeight: 700, borderTop: `1px dashed ${T.line}`, paddingTop: 12 }}
+          >
+            <LogOut size={16} /> تسجيل الخروج
+          </button>
+        </div>
+      </div>
+
+      {confirmLogout && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={() => setConfirmLogout(false)}>
+          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 13, color: T.text, marginBottom: 16, textAlign: "center" }}>تأكيد تسجيل الخروج من حسابك؟</div>
+            <button onClick={handleLogout} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
+              تسجيل الخروج
+            </button>
+            <button onClick={() => setConfirmLogout(false)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
+              تراجع
+            </button>
           </div>
         </div>
       )}
