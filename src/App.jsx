@@ -284,15 +284,19 @@ async function fetchMagazineArticles() {
 }
 
 async function uploadMagazinePdf(file) {
-  const path = `${Date.now()}_${file.name}`;
-  const { error } = await supabase.storage.from("magazine").upload(path, file);
-  if (error) { console.error("uploadMagazinePdf failed", error); return null; }
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${Date.now()}_${safeName}`;
+  const { error } = await supabase.storage.from("magazine").upload(path, file, { contentType: file.type || "application/pdf" });
+  if (error) {
+    console.error("uploadMagazinePdf failed", error);
+    throw new Error(error.message || "تعذّر رفع الملف.");
+  }
   const { data } = supabase.storage.from("magazine").getPublicUrl(path);
   return data.publicUrl;
 }
 
 async function insertMagazineIssue(issue) {
-  const { data, error } = await supabase.from("magazine_issues").insert(issue).select().single();
+  const { data, error } = await supabase.from("magazine_issues").upsert(issue, { onConflict: "issue_number" }).select().single();
   if (error) { console.error("insertMagazineIssue failed", error); return null; }
   return data;
 }
@@ -1206,7 +1210,7 @@ function MagazineTab({ canManageDocuments }) {
   const [readerIssue, setReaderIssue] = useState(null);
   const [showAddIssue, setShowAddIssue] = useState(false);
   const [issueNumber, setIssueNumber] = useState("");
-  const [issueTitle, setIssueTitle] = useState("");
+  const [issueTitle, setIssueTitle] = useState("الصلة");
   const [issueDate, setIssueDate] = useState("");
   const [issueFile, setIssueFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -1246,15 +1250,21 @@ function MagazineTab({ canManageDocuments }) {
     if (!issueNumber || !issueTitle.trim() || !issueFile) { setMsg("عبّي رقم العدد والعنوان واختر ملف PDF."); return; }
     setUploading(true);
     setMsg("");
-    const url = await uploadMagazinePdf(issueFile);
-    if (!url) { setMsg("تعذّر رفع الملف، حاول مرة أخرى."); setUploading(false); return; }
+    let url;
+    try {
+      url = await uploadMagazinePdf(issueFile);
+    } catch (e) {
+      setMsg(e.message || "تعذّر رفع الملف، حاول مرة أخرى.");
+      setUploading(false);
+      return;
+    }
     const created = await insertMagazineIssue({ issue_number: Number(issueNumber), title: issueTitle.trim(), pdf_url: url, published_date: issueDate || null });
     if (created) {
-      setIssues((prev) => [created, ...prev].sort((a, b) => b.issue_number - a.issue_number));
-      setIssueNumber(""); setIssueTitle(""); setIssueDate(""); setIssueFile(null); setShowAddIssue(false);
+      setIssues((prev) => [created, ...prev.filter((i) => i.issue_number !== created.issue_number)].sort((a, b) => b.issue_number - a.issue_number));
+      setIssueNumber(""); setIssueTitle("الصلة"); setIssueDate(""); setIssueFile(null); setShowAddIssue(false);
       setMsg("تمت إضافة العدد بنجاح.");
     } else {
-      setMsg("تعذّرت الإضافة — تأكد إن رقم العدد غير مستخدم سابقًا.");
+      setMsg("تعذّرت الإضافة، حاول مرة أخرى.");
     }
     setUploading(false);
   };
@@ -1325,7 +1335,7 @@ function MagazineTab({ canManageDocuments }) {
               <div key={a.id} style={{ padding: "10px 12px", borderBottom: `1px solid ${T.line}` }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>{a.title}</div>
                 <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>
-                  {a.author ? `${a.author} · ` : ""}العدد {a.magazine_issues?.issue_number} — {a.magazine_issues?.title}{a.page_number ? ` · صفحة ${a.page_number}` : ""}
+                  {a.author ? `${a.author} · ` : ""}مجلة {a.magazine_issues?.title} {a.magazine_issues?.issue_number}{a.page_number ? ` · صفحة ${a.page_number}` : ""}
                 </div>
                 <button
                   onClick={() => {
@@ -1347,7 +1357,7 @@ function MagazineTab({ canManageDocuments }) {
       {showAddIssue && canManageDocuments && (
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14, display: "grid", gap: 8 }}>
           <input type="number" placeholder="رقم العدد" value={issueNumber} onChange={(e) => setIssueNumber(e.target.value)} style={inputStyle} />
-          <input placeholder="عنوان العدد" value={issueTitle} onChange={(e) => setIssueTitle(e.target.value)} style={inputStyle} />
+          <input placeholder="اسم المجلة (افتراضي: الصلة)" value={issueTitle} onChange={(e) => setIssueTitle(e.target.value)} style={inputStyle} />
           <input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} style={{ ...inputStyle, minWidth: 0, maxWidth: "100%" }} />
           <label style={{ ...inputStyle, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: issueFile ? T.text : T.muted }}>
             <Upload size={15} color={T.gold} /> {issueFile ? issueFile.name : "اختر ملف PDF للعدد"}
@@ -1368,8 +1378,7 @@ function MagazineTab({ canManageDocuments }) {
           <div key={issue.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>
-                <div style={{ fontSize: 13.5, fontWeight: 800, color: T.ink }}>العدد {issue.issue_number}</div>
-                <div style={{ fontSize: 12.5, color: T.text, marginTop: 2 }}>{issue.title}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 800, color: T.ink }}>مجلة {issue.title} {issue.issue_number}</div>
                 {issue.published_date && <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>{issue.published_date}</div>}
               </div>
               <BookOpen size={20} color={T.gold} />
