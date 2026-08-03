@@ -707,7 +707,13 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       .then(() => { if (!cancelled) setPdfLoading(false); })
       .catch(() => { if (!cancelled) { setPdfLoading(false); setPdfError(true); } });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      // تحرير ذاكرة الكانفاس فور إغلاق العارض — ضروري بوضع "التطبيق المستقل" بآيفون
+      // اللي يدير الذاكرة بصرامة أكبر من المتصفح العادي
+      const canvas = canvasRef.current;
+      if (canvas) { canvas.width = 0; canvas.height = 0; }
+    };
   }, [pdfOpen]);
 
   const handleDownloadPdf = async () => {
@@ -1145,6 +1151,12 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
   }, [pdfUrl]);
 
   useEffect(() => {
+    // تحرير مستند الـPDF بالكامل من الذاكرة عند تحميل عدد جديد أو إغلاق العارض —
+    // ضروري بوضع "التطبيق المستقل" بآيفون اللي يقتل الصفحة كلها لو الذاكرة امتلأت
+    return () => { pdfDoc?.destroy?.(); };
+  }, [pdfDoc]);
+
+  useEffect(() => {
     if (!pdfDoc) return;
     let cancelled = false;
     const safePage = Math.min(Math.max(pageNum, 1), pdfDoc.numPages);
@@ -1152,7 +1164,7 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
       if (cancelled) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const viewport = page.getViewport({ scale: 2 });
+      const viewport = page.getViewport({ scale: 1.6 });
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       canvas.style.width = "100%";
@@ -1160,7 +1172,12 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
       const ctx = canvas.getContext("2d");
       page.render({ canvasContext: ctx, viewport });
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      // تفريغ محتوى الكانفاس بين كل صفحة وأخرى (وعند الإغلاق) لتفادي تراكم الذاكرة
+      const canvas = canvasRef.current;
+      if (canvas) { canvas.width = 0; canvas.height = 0; }
+    };
   }, [pdfDoc, pageNum]);
 
   return (
