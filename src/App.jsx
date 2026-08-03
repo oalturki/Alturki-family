@@ -2561,6 +2561,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    window.location.href = "/";
   };
 
   const [faceIdMsg, setFaceIdMsg] = useState("");
@@ -2886,6 +2887,10 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
             حصرًا لعرض شجرة النسب، وتسهيل التواصل بين أفراد العائلة، وإرسال إشعارات تخص الموقع (ترحيب، تهنئة مولود، تنبيهات إدارية). ما تُستخدم لأي غرض تجاري أو إعلاني.
           </div>
           <div>
+            <div style={{ fontWeight: 700, color: T.ink, marginBottom: 4 }}>لا نبيع بياناتك</div>
+            الموقع خاص بعائلة آل تركي حصرًا، مغلق عن العموم. ما نبيع بياناتك ولا نشاركها مع أي طرف ثالث أو جهة تسويقية أو "شركة شريكة" تحت أي مسمّى — هذي بياناتكم، تبقى بينكم.
+          </div>
+          <div>
             <div style={{ fontWeight: 700, color: T.ink, marginBottom: 4 }}>من يشوف بياناتك</div>
             الجوال والبريد مخفيان افتراضيًا عن باقي العائلة، وأنت المتحكم الوحيد بإظهارهما من "ملفي" ← تعديل. باقي بيانات الشجرة (الاسم والنسب) ظاهرة لكل أعضاء العائلة المسجّلين فقط، وليست عامة على الإنترنت.
           </div>
@@ -2895,7 +2900,11 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
           </div>
           <div>
             <div style={{ fontWeight: 700, color: T.ink, marginBottom: 4 }}>حقوقك</div>
-            تقدر تعدّل أو تحذف بياناتك (أو بيانات بناتك/زوجتك اللي أضفتها) بأي وقت من ملفك الشخصي، أو تتواصل مع الإشراف لأي استفسار أو طلب حذف كامل.
+            تقدر تشوف وتعدّل أو تصحّح أو تحذف بياناتك (أو بيانات بناتك/زوجتك اللي أضفتها) بأي وقت من ملفك الشخصي، أو تتواصل مع الإشراف لأي استفسار أو طلب حذف كامل.
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, color: T.ink, marginBottom: 4 }}>تحديثات هذي السياسة</div>
+            لو تغيّرت هذي السياسة بشكل جوهري، بيتم إشعاركم من تبويب "الأخبار" بالموقع.
           </div>
         </div>
       </div>
