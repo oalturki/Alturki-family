@@ -585,37 +585,68 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
-        <button
-          onClick={() => onNavigate?.("tree")}
-          style={{ textAlign: "right", background: `linear-gradient(155deg, ${T.inkSoft}, ${T.ink})`, border: `1px solid ${T.gold}`, borderRadius: 14, padding: 14, cursor: "pointer", fontFamily: "inherit" }}
-        >
-          <GitBranch size={20} color={T.goldLight} />
-          <div style={{ fontSize: 13, fontWeight: 800, color: T.goldLight, marginTop: 8 }}>شجرة العائلة</div>
-          <div style={{ fontSize: 10.5, color: "#CFE0DC", marginTop: 3 }}>{membersCount ? `${membersCount} فرد` : "استكشف الأنساب"}</div>
-        </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 2px 12px" }}>
+        <div style={{ width: 26, height: 1, background: T.gold, opacity: 0.5 }} />
+        <span style={{ fontSize: 11, color: T.muted, letterSpacing: 0.3 }}>أهلًا بكم في بيت آل تركي الرقمي</span>
+      </div>
+
+      <button
+        onClick={() => onNavigate?.("tree")}
+        style={{
+          position: "relative",
+          overflow: "hidden",
+          display: "block",
+          width: "100%",
+          textAlign: "right",
+          background: `linear-gradient(155deg, ${T.inkSoft}, ${T.ink})`,
+          border: `1.5px solid ${T.gold}`,
+          borderRadius: 16,
+          padding: "18px 16px",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          marginBottom: 10,
+        }}
+      >
+        <div style={{ position: "absolute", left: -14, top: "50%", transform: "translateY(-50%)", opacity: 0.16 }}>
+          <Rosette size={92} color={T.goldLight} />
+        </div>
+        <div style={{ position: "relative" }}>
+          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 21, fontWeight: 700, color: T.goldLight }}>شجرة العائلة</div>
+          <div style={{ fontSize: 11.5, color: "#CFE0DC", marginTop: 5 }}>نسب آل تركي كاملًا، ابحث وتصفّح</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12 }}>
+            <GitBranch size={14} color={T.goldLight} />
+            <span style={{ fontSize: 12, fontWeight: 700, color: T.goldLight }}>{membersCount ? `${membersCount} فردًا` : "استكشف الأنساب"}</span>
+          </div>
+        </div>
+      </button>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
         <button
           onClick={() => onNavigate?.("magazine")}
-          style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, cursor: "pointer", fontFamily: "inherit" }}
+          style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 12px", cursor: "pointer", fontFamily: "inherit" }}
         >
-          <BookOpen size={20} color={T.gold} />
-          <div style={{ fontSize: 13, fontWeight: 800, color: T.ink, marginTop: 8 }}>مجلة الصلة</div>
-          <div style={{ fontSize: 10.5, color: T.muted, marginTop: 3 }}>تصفح كل الأعداد والفهرس</div>
+          <div style={{ width: 34, height: 34, borderRadius: "50%", background: T.sandDark, border: `1.5px solid ${T.gold}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <BookOpen size={16} color={T.gold} />
+          </div>
+          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>مجلة الصلة</div>
+          <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>الأعداد والفهرس الكامل</div>
         </button>
         <button
           onClick={() => onNavigate?.("events")}
-          style={{ gridColumn: "1 / -1", textAlign: "right", display: "flex", alignItems: "center", justifyContent: "space-between", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, cursor: "pointer", fontFamily: "inherit" }}
+          style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 12px", cursor: "pointer", fontFamily: "inherit" }}
         >
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: T.ink, display: "flex", alignItems: "center", gap: 6 }}>
-              <CalendarDays size={17} color={T.gold} /> المناسبات
-            </div>
-            <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>
-              {nextEvent ? `القادمة: ${nextEvent.title} — ${nextEvent.date}` : "لا توجد مناسبات مجدولة حاليًا"}
-            </div>
+          <div style={{ width: 34, height: 34, borderRadius: "50%", background: T.sandDark, border: `1.5px solid ${T.gold}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <CalendarDays size={16} color={T.gold} />
           </div>
-          <ChevronLeft size={16} color={T.muted} />
+          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>المناسبات</div>
+          <div style={{ fontSize: 10, color: T.muted, marginTop: 3, lineHeight: 1.5 }}>
+            {nextEvent ? `القادمة: ${nextEvent.date}` : "لا مناسبات قريبة"}
+          </div>
         </button>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "center", gap: 5, margin: "4px 0 16px", opacity: 0.55 }}>
+        {[0, 1, 2, 3, 4].map((i) => <Rosette key={i} size={13} color={T.gold} />)}
       </div>
 
       <SectionTitle action={canManageNews && (
