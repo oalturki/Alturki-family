@@ -614,9 +614,9 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
         <div style={{ position: "relative" }}>
           <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 21, fontWeight: 700, color: T.goldLight }}>شجرة العائلة</div>
           <div style={{ fontSize: 11.5, color: "#CFE0DC", marginTop: 5 }}>نسب آل تركي كاملًا، ابحث وتصفّح</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12 }}>
-            <GitBranch size={14} color={T.goldLight} />
-            <span style={{ fontSize: 12, fontWeight: 700, color: T.goldLight }}>{membersCount ? `${membersCount} فردًا` : "استكشف الأنساب"}</span>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 12, background: "rgba(217,184,118,0.16)", border: `1px solid ${T.gold}`, borderRadius: 999, padding: "5px 12px" }}>
+            <GitBranch size={13} color={T.goldLight} />
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: T.goldLight }}>{membersCount ? `${membersCount} فردًا` : "استكشف الأنساب"}</span>
           </div>
         </div>
       </button>
@@ -630,7 +630,9 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
             <BookOpen size={16} color={T.gold} />
           </div>
           <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>مجلة الصلة</div>
-          <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>الأعداد والفهرس الكامل</div>
+          <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: T.gold, background: T.sandDark, border: `1px solid ${T.gold}`, borderRadius: 999, padding: "2px 9px", marginTop: 6 }}>
+            ٢٥ عددًا
+          </span>
         </button>
         <button
           onClick={() => onNavigate?.("events")}
@@ -640,9 +642,9 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
             <CalendarDays size={16} color={T.gold} />
           </div>
           <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>المناسبات</div>
-          <div style={{ fontSize: 10, color: T.muted, marginTop: 3, lineHeight: 1.5 }}>
-            {nextEvent ? `القادمة: ${nextEvent.date}` : "لا مناسبات قريبة"}
-          </div>
+          <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: nextEvent ? T.gold : T.muted, background: T.sandDark, border: `1px solid ${nextEvent ? T.gold : T.line}`, borderRadius: 999, padding: "2px 9px", marginTop: 6 }}>
+            {nextEvent ? nextEvent.date : "لا شي قريب"}
+          </span>
         </button>
       </div>
 
@@ -3214,9 +3216,12 @@ function FamilyAppInner({ meId }) {
             const Icon = t.icon;
             const active = tab === t.key;
             return (
-              <button key={t.key} onClick={() => setTab(t.key)} style={{ flex: 1, background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "6px 0", cursor: "pointer", color: active ? T.ink : T.muted, fontFamily: "inherit" }}>
-                <Icon size={19} color={active ? T.gold : T.muted} strokeWidth={active ? 2.4 : 2} />
-                <span style={{ fontSize: 10.5, fontWeight: active ? 700 : 500 }}>{t.label}</span>
+              <button key={t.key} onClick={() => setTab(t.key)} style={{ flex: 1, background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", padding: "3px 0", cursor: "pointer", fontFamily: "inherit" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: active ? "6px 12px" : "6px 4px", borderRadius: 999, background: active ? T.ink : "transparent", transition: "background 0.15s" }}>
+                  <Icon size={18} color={active ? T.goldLight : T.muted} strokeWidth={active ? 2.3 : 2} />
+                  {active && <span style={{ fontSize: 10.5, fontWeight: 700, color: T.goldLight }}>{t.label}</span>}
+                </div>
+                {!active && <span style={{ fontSize: 9.5, fontWeight: 500, color: T.muted, marginTop: 3 }}>{t.label}</span>}
               </button>
             );
           })}
