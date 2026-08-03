@@ -598,7 +598,7 @@ function NewsTab({ news, setNews, canManageNews }) {
               </button>
             ))}
           </div>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="اكتب نص الخبر هنا..." rows={3} style={{ ...inputStyle, resize: "none" }} />
+          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="اكتب نص الخبر هنا..." rows={10} style={{ ...inputStyle, resize: "vertical", minHeight: 180, lineHeight: 1.7 }} />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button onClick={submit} style={{ ...primaryBtnStyle, marginTop: 0, flex: 1 }}>{editingId ? "حفظ التعديل" : "نشر الخبر"}</button>
             <button
@@ -623,7 +623,7 @@ function NewsTab({ news, setNews, canManageNews }) {
                 <Icon size={17} />
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.6 }}>{n.text}</div>
+                <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{n.text}</div>
                 <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{n.type} · {n.date}</div>
               </div>
             </div>
@@ -1676,7 +1676,7 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
           <input placeholder="عنوان المناسبة" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} style={inputStyle} />
           <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} style={inputStyle} />
           <input placeholder="المكان" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} style={inputStyle} />
-          <textarea placeholder="تفاصيل مختصرة" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} style={{ ...inputStyle, resize: "none" }} />
+          <textarea placeholder="تفاصيل مختصرة" rows={8} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} style={{ ...inputStyle, resize: "vertical", minHeight: 140, lineHeight: 1.7 }} />
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={submit} style={{ ...primaryBtnStyle, flex: 1 }}>{editingId ? "حفظ التعديل" : "إضافة المناسبة"}</button>
             <button
@@ -1700,7 +1700,7 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
               <span style={{ display: "flex", alignItems: "center", gap: 4 }}><CalendarDays size={13} /> {ev.date}</span>
               {ev.location && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><MapPin size={13} /> {ev.location}</span>}
             </div>
-            {ev.description && <div style={{ fontSize: 12.5, color: T.text, marginTop: 8, lineHeight: 1.6 }}>{ev.description}</div>}
+            {ev.description && <div style={{ fontSize: 12.5, color: T.text, marginTop: 8, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{ev.description}</div>}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
               <span style={{ fontSize: 11.5, color: T.muted }}>{ev.attendees.length} من العائلة سيحضرون</span>
               <button onClick={() => toggleRSVP(ev.id)} style={{ border: `1px solid ${attending ? T.gold : T.line}`, background: attending ? T.ink : "transparent", color: attending ? T.sand : T.ink, borderRadius: 999, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", fontWeight: 700, display: "flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
