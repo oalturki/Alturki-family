@@ -1378,22 +1378,22 @@ function MagazineTab({ canManageDocuments }) {
             <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: T.muted }}>لا نتائج مطابقة بالفهرس.</div>
           ) : (
             searchResults.map((a) => (
-              <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: `1px solid ${T.line}` }}>
+              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: `1px solid ${T.line}` }}>
+                <button
+                  onClick={() => {
+                    const issue = issues.find((i) => i.id === a.issue_id);
+                    if (issue) setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title });
+                  }}
+                  style={{ flexShrink: 0, width: 44, border: "none", background: "#123838", color: "#dab94a", borderRadius: 8, padding: "6px 4px", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", textAlign: "center" }}
+                >
+                  {a.page_number || "فتح"}
+                </button>
                 <div>
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>{a.title}</div>
                   <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>
                     {a.author ? `${a.author} · ` : ""}مجلة {a.magazine_issues?.title} {a.magazine_issues?.issue_number}
                   </div>
                 </div>
-                <button
-                  onClick={() => {
-                    const issue = issues.find((i) => i.id === a.issue_id);
-                    if (issue) setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title });
-                  }}
-                  style={{ flexShrink: 0, border: "none", background: "#123838", color: "#dab94a", borderRadius: 8, padding: "6px 12px", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  {a.page_number || "فتح"}
-                </button>
               </div>
             ))
           )}
@@ -1467,26 +1467,24 @@ function MagazineTab({ canManageDocuments }) {
             )}
             {articles.filter((a) => a.issue_id === issue.id).length > 0 && (
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, paddingBottom: 8, borderBottom: `2px solid ${T.clay}` }}>
+                  <span style={{ flexShrink: 0, width: 44, fontSize: 10.5, fontWeight: 700, color: T.muted }}>الصفحة</span>
                   <span style={{ flex: 1, fontSize: 10.5, fontWeight: 700, color: T.muted }}>الموضوع</span>
-                  <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: T.muted, paddingLeft: canManageDocuments ? 22 : 0 }}>رقم الصفحة</span>
                 </div>
                 {articles.filter((a) => a.issue_id === issue.id).map((a) => (
-                  <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 11.5, color: T.text, marginBottom: 6 }}>
+                  <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11.5, color: T.text, marginBottom: 6 }}>
+                    <button
+                      onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title })}
+                      style={{ flexShrink: 0, width: 44, border: `1px solid ${T.gold}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "4px 4px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700, textAlign: "center" }}
+                    >
+                      {a.page_number || "فتح"}
+                    </button>
                     <span style={{ flex: 1 }}>{a.title}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                      <button
-                        onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title })}
-                        style={{ border: `1px solid ${T.gold}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "4px 9px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}
-                      >
-                        {a.page_number || "فتح"}
+                    {canManageDocuments && (
+                      <button onClick={() => handleDeleteArticle(a.id)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", flexShrink: 0 }}>
+                        <Trash2 size={12} />
                       </button>
-                      {canManageDocuments && (
-                        <button onClick={() => handleDeleteArticle(a.id)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }}>
-                          <Trash2 size={12} />
-                        </button>
-                      )}
-                    </div>
+                    )}
                   </div>
                 ))}
               </div>
