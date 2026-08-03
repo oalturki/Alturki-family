@@ -524,6 +524,24 @@ function Toast({ message, type = "success", onClose }) {
   );
 }
 
+function ConfirmModal({ onConfirm, onCancel }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onCancel}>
+      <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340, fontFamily: "'Tajawal', sans-serif" }} onClick={(e) => e.stopPropagation()} dir="rtl">
+        <div style={{ fontSize: 12.5, color: T.muted, lineHeight: 1.7, marginBottom: 16, textAlign: "center" }}>
+          الحذف سيكون نهائيًا، ولا يمكن استرجاع المحذوف.
+        </div>
+        <button onClick={onConfirm} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
+          تأكيد الحذف
+        </button>
+        <button onClick={onCancel} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
+          تراجع
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function NewsTab({ news, setNews, canManageNews }) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState("عام");
@@ -2963,6 +2981,42 @@ function FamilyAppInner({ meId }) {
   );
 }
 
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error("App crashed:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div dir="rtl" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 24, background: T.sand, fontFamily: "'Tajawal', sans-serif", textAlign: "center" }}>
+          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 22, color: T.ink, fontWeight: 700 }}>عائلة آل تركي</div>
+          <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.8, maxWidth: 320 }}>
+            صار خطأ غير متوقع بالتطبيق. بياناتك محفوظة بأمان — اضغط الزر تحت لإعادة التحميل.
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            style={{ background: T.ink, color: T.sand, border: "none", borderRadius: 10, padding: "11px 28px", fontSize: 14, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}
+          >
+            إعادة المحاولة
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function FamilyApp() {
-  return <AuthGate>{(me) => <FamilyAppInner meId={me.id} />}</AuthGate>;
+  return (
+    <AppErrorBoundary>
+      <AuthGate>{(me) => <FamilyAppInner meId={me.id} />}</AuthGate>
+    </AppErrorBoundary>
+  );
 }
