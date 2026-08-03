@@ -1392,7 +1392,7 @@ function MagazineTab({ canManageDocuments }) {
                   }}
                   style={{ flexShrink: 0, border: "none", background: "#123838", color: "#dab94a", borderRadius: 8, padding: "6px 12px", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
                 >
-                  {a.page_number ? `ص ${a.page_number}` : "فتح"}
+                  {a.page_number || "فتح"}
                 </button>
               </div>
             ))
@@ -1467,6 +1467,10 @@ function MagazineTab({ canManageDocuments }) {
             )}
             {articles.filter((a) => a.issue_id === issue.id).length > 0 && (
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span style={{ flex: 1, fontSize: 10.5, fontWeight: 700, color: T.muted }}>الموضوع</span>
+                  <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: T.muted, paddingLeft: canManageDocuments ? 22 : 0 }}>رقم الصفحة</span>
+                </div>
                 {articles.filter((a) => a.issue_id === issue.id).map((a) => (
                   <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 11.5, color: T.text, marginBottom: 6 }}>
                     <span style={{ flex: 1 }}>{a.title}</span>
@@ -1475,7 +1479,7 @@ function MagazineTab({ canManageDocuments }) {
                         onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title })}
                         style={{ border: `1px solid ${T.gold}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "4px 9px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}
                       >
-                        {a.page_number ? `ص ${a.page_number}` : "فتح"}
+                        {a.page_number || "فتح"}
                       </button>
                       {canManageDocuments && (
                         <button onClick={() => handleDeleteArticle(a.id)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }}>
