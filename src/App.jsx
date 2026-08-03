@@ -1195,14 +1195,45 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
         <canvas ref={canvasRef} style={{ display: loading || error ? "none" : "block", margin: "0 auto" }} />
       </div>
       {!loading && !error && numPages > 1 && (
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14, padding: "10px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderTop: "1px solid rgba(201,162,39,0.4)" }}>
-          <button onClick={() => setPageNum((p) => Math.min(p + 1, numPages))} disabled={pageNum >= numPages} style={{ border: "1px solid #c9a227", background: "transparent", color: "#dab94a", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", opacity: pageNum >= numPages ? 0.4 : 1 }}>
-            الصفحة السابقة
-          </button>
-          <span style={{ color: "#F4EFE3", fontSize: 12 }}>{pageNum} / {numPages}</span>
-          <button onClick={() => setPageNum((p) => Math.max(p - 1, 1))} disabled={pageNum <= 1} style={{ border: "1px solid #c9a227", background: "transparent", color: "#dab94a", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", opacity: pageNum <= 1 ? 0.4 : 1 }}>
-            الصفحة التالية
-          </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderTop: "1px solid rgba(201,162,39,0.4)" }}>
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 14 }}>
+            <button onClick={() => setPageNum((p) => Math.max(p - 1, 1))} disabled={pageNum <= 1} style={{ border: "1px solid #c9a227", background: "transparent", color: "#dab94a", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", opacity: pageNum <= 1 ? 0.4 : 1 }}>
+              الصفحة السابقة
+            </button>
+            <span style={{ color: "#F4EFE3", fontSize: 12 }}>{pageNum} / {numPages}</span>
+            <button onClick={() => setPageNum((p) => Math.min(p + 1, numPages))} disabled={pageNum >= numPages} style={{ border: "1px solid #c9a227", background: "transparent", color: "#dab94a", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", opacity: pageNum >= numPages ? 0.4 : 1 }}>
+              الصفحة التالية
+            </button>
+          </div>
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
+            <span style={{ color: "#c9b98a", fontSize: 11 }}>اذهب لصفحة:</span>
+            <input
+              key={pageNum}
+              type="number"
+              min={1}
+              max={numPages}
+              defaultValue={pageNum}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const n = Math.min(Math.max(Number(e.target.value) || 1, 1), numPages);
+                  setPageNum(n);
+                }
+              }}
+              onBlur={(e) => {
+                const n = Math.min(Math.max(Number(e.target.value) || 1, 1), numPages);
+                setPageNum(n);
+              }}
+              style={{ width: 64, textAlign: "center", background: "rgba(244,239,227,0.1)", border: "1px solid rgba(201,162,39,0.5)", borderRadius: 8, color: "#F4EFE3", fontSize: 13, padding: "5px 4px" }}
+            />
+            <input
+              type="range"
+              min={1}
+              max={numPages}
+              value={pageNum}
+              onChange={(e) => setPageNum(Number(e.target.value))}
+              style={{ flex: 1, maxWidth: 160 }}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -1436,7 +1467,12 @@ function MagazineTab({ canManageDocuments }) {
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}` }}>
                 {articles.filter((a) => a.issue_id === issue.id).map((a) => (
                   <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, color: T.text, marginBottom: 4 }}>
-                    <span>{a.title}{a.page_number ? ` — ص ${a.page_number}` : ""}</span>
+                    <button
+                      onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title })}
+                      style={{ background: "none", border: "none", color: T.text, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, textAlign: "right", padding: 0, textDecoration: "underline", textDecorationColor: T.line }}
+                    >
+                      {a.title}{a.page_number ? ` — ص ${a.page_number}` : ""}
+                    </button>
                     {canManageDocuments && (
                       <button onClick={() => handleDeleteArticle(a.id)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }}>
                         <Trash2 size={12} />
