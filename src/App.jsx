@@ -1267,6 +1267,7 @@ function MagazineTab({ canManageDocuments }) {
   const [confirmDeleteIssue, setConfirmDeleteIssue] = useState(null);
   const [indexFile, setIndexFile] = useState(null);
   const [uploadingIndex, setUploadingIndex] = useState(false);
+  const [showPrevious, setShowPrevious] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -1328,6 +1329,90 @@ function MagazineTab({ canManageDocuments }) {
     await deleteMagazineArticle(id);
     setArticles((prev) => prev.filter((a) => a.id !== id));
   };
+
+  const renderIssueCard = (issue, featured) => (
+    <div
+      key={issue.id}
+      style={{
+        background: featured ? `linear-gradient(160deg, ${T.ink}, ${T.inkSoft})` : T.card,
+        border: featured ? `1.5px solid ${T.gold}` : `1px solid ${T.line}`,
+        borderRadius: 14,
+        padding: featured ? 18 : 14,
+        marginBottom: 10,
+      }}
+    >
+      {featured && (
+        <div style={{ display: "inline-block", background: T.gold, color: T.ink, fontSize: 10, fontWeight: 800, borderRadius: 999, padding: "3px 10px", marginBottom: 8 }}>
+          العدد الحالي
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: featured ? 16 : 13.5, fontWeight: 800, color: featured ? T.goldLight : T.ink }}>مجلة {issue.title} {issue.issue_number}</div>
+          {issue.published_date && <div style={{ fontSize: 10.5, color: featured ? "#CFE0DC" : T.muted, marginTop: 2 }}>{issue.published_date}</div>}
+        </div>
+        <BookOpen size={featured ? 24 : 20} color={T.gold} />
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+        <button onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: 1, title: issue.title })} style={{ ...primaryBtnStyle, marginTop: 0, padding: "7px 14px", fontSize: 12, background: featured ? T.gold : T.ink, color: featured ? T.ink : T.sand }}>
+          قراءة العدد
+        </button>
+        {canManageDocuments && (
+          <>
+            <button onClick={() => setAddArticleFor(addArticleFor === issue.id ? null : issue.id)} style={{ border: `1px solid ${featured ? T.goldLight : T.line}`, background: "transparent", color: featured ? T.goldLight : T.gold, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
+              + فهرس
+            </button>
+            <button onClick={() => { setEditingOffsetFor(editingOffsetFor === issue.id ? null : issue.id); setOffsetValue(String(issue.page_offset || 0)); }} style={{ border: `1px solid ${featured ? T.goldLight : T.line}`, background: "transparent", color: featured ? "#F4EFE3" : T.ink, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
+              فارق الصفحات ({issue.page_offset || 0})
+            </button>
+            <button onClick={() => setConfirmDeleteIssue({ id: issue.id, title: issue.title })} style={{ border: `1px solid ${featured ? T.clay : T.line}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
+              حذف
+            </button>
+          </>
+        )}
+      </div>
+      {editingOffsetFor === issue.id && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${featured ? "rgba(244,239,227,0.3)" : T.line}`, display: "grid", gap: 6 }}>
+          <div style={{ fontSize: 10.5, color: featured ? "#CFE0DC" : T.muted, lineHeight: 1.6 }}>
+            الفارق بين رقم الصفحة المطبوع بالمجلة ورقم صفحة ملف الـPDF الفعلي. مثال: لو ص٥ بالمجلة هي فعليًا الصفحة ٨ بالملف (بسبب الغلاف والفهرس)، اكتب ٣.
+          </div>
+          <input type="number" placeholder="الفارق (مثال: 3)" value={offsetValue} onChange={(e) => setOffsetValue(e.target.value)} style={inputStyle} />
+          <button onClick={() => saveOffset(issue.id)} style={primaryBtnStyle}>حفظ الفارق</button>
+        </div>
+      )}
+      {addArticleFor === issue.id && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${featured ? "rgba(244,239,227,0.3)" : T.line}`, display: "grid", gap: 6 }}>
+          <input placeholder="عنوان الموضوع" value={articleTitle} onChange={(e) => setArticleTitle(e.target.value)} style={inputStyle} />
+          <input type="number" placeholder="رقم الصفحة (اختياري)" value={articlePage} onChange={(e) => setArticlePage(e.target.value)} style={inputStyle} />
+          <button onClick={() => handleAddArticle(issue.id)} style={primaryBtnStyle}>إضافة للفهرس</button>
+        </div>
+      )}
+      {articles.filter((a) => a.issue_id === issue.id).length > 0 && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${featured ? "rgba(244,239,227,0.3)" : T.line}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, paddingBottom: 8, borderBottom: `2px solid ${T.clay}` }}>
+            <span style={{ flexShrink: 0, width: 44, fontSize: 10.5, fontWeight: 700, color: featured ? "#CFE0DC" : T.muted }}>الصفحة</span>
+            <span style={{ flex: 1, fontSize: 10.5, fontWeight: 700, color: featured ? "#CFE0DC" : T.muted }}>الموضوع</span>
+          </div>
+          {articles.filter((a) => a.issue_id === issue.id).map((a) => (
+            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11.5, color: featured ? "#F4EFE3" : T.text, marginBottom: 6 }}>
+              <button
+                onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title })}
+                style={{ flexShrink: 0, width: 44, border: `1px solid ${T.gold}`, background: "transparent", color: featured ? T.goldLight : T.gold, borderRadius: 8, padding: "4px 4px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700, textAlign: "center" }}
+              >
+                {a.page_number || "فتح"}
+              </button>
+              <span style={{ flex: 1 }}>{a.title}</span>
+              {canManageDocuments && (
+                <button onClick={() => handleDeleteArticle(a.id)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", flexShrink: 0 }}>
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
   const handleDeleteIssue = async () => {
     if (!confirmDeleteIssue) return;
@@ -1422,75 +1507,20 @@ function MagazineTab({ canManageDocuments }) {
       ) : issues.length === 0 ? (
         <EmptyState text="لا توجد أعداد مرفوعة بعد." />
       ) : (
-        issues.map((issue) => (
-          <div key={issue.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: 800, color: T.ink }}>مجلة {issue.title} {issue.issue_number}</div>
-                {issue.published_date && <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>{issue.published_date}</div>}
-              </div>
-              <BookOpen size={20} color={T.gold} />
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-              <button onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: 1, title: issue.title })} style={{ ...primaryBtnStyle, marginTop: 0, padding: "7px 14px", fontSize: 12 }}>
-                قراءة العدد
-              </button>
-              {canManageDocuments && (
-                <>
-                  <button onClick={() => setAddArticleFor(addArticleFor === issue.id ? null : issue.id)} style={{ border: `1px solid ${T.line}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
-                    + فهرس
-                  </button>
-                  <button onClick={() => { setEditingOffsetFor(editingOffsetFor === issue.id ? null : issue.id); setOffsetValue(String(issue.page_offset || 0)); }} style={{ border: `1px solid ${T.line}`, background: "transparent", color: T.ink, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
-                    فارق الصفحات ({issue.page_offset || 0})
-                  </button>
-                  <button onClick={() => setConfirmDeleteIssue({ id: issue.id, title: issue.title })} style={{ border: `1px solid ${T.line}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "7px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
-                    حذف
-                  </button>
-                </>
-              )}
-            </div>
-            {editingOffsetFor === issue.id && (
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}`, display: "grid", gap: 6 }}>
-                <div style={{ fontSize: 10.5, color: T.muted, lineHeight: 1.6 }}>
-                  الفارق بين رقم الصفحة المطبوع بالمجلة ورقم صفحة ملف الـPDF الفعلي. مثال: لو ص٥ بالمجلة هي فعليًا الصفحة ٨ بالملف (بسبب الغلاف والفهرس)، اكتب ٣.
-                </div>
-                <input type="number" placeholder="الفارق (مثال: 3)" value={offsetValue} onChange={(e) => setOffsetValue(e.target.value)} style={inputStyle} />
-                <button onClick={() => saveOffset(issue.id)} style={primaryBtnStyle}>حفظ الفارق</button>
-              </div>
-            )}
-            {addArticleFor === issue.id && (
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}`, display: "grid", gap: 6 }}>
-                <input placeholder="عنوان الموضوع" value={articleTitle} onChange={(e) => setArticleTitle(e.target.value)} style={inputStyle} />
-                <input type="number" placeholder="رقم الصفحة (اختياري)" value={articlePage} onChange={(e) => setArticlePage(e.target.value)} style={inputStyle} />
-                <button onClick={() => handleAddArticle(issue.id)} style={primaryBtnStyle}>إضافة للفهرس</button>
-              </div>
-            )}
-            {articles.filter((a) => a.issue_id === issue.id).length > 0 && (
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${T.line}` }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, paddingBottom: 8, borderBottom: `2px solid ${T.clay}` }}>
-                  <span style={{ flexShrink: 0, width: 44, fontSize: 10.5, fontWeight: 700, color: T.muted }}>الصفحة</span>
-                  <span style={{ flex: 1, fontSize: 10.5, fontWeight: 700, color: T.muted }}>الموضوع</span>
-                </div>
-                {articles.filter((a) => a.issue_id === issue.id).map((a) => (
-                  <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11.5, color: T.text, marginBottom: 6 }}>
-                    <button
-                      onClick={() => setReaderIssue({ pdfUrl: issue.pdf_url, startPage: (a.page_number || 1) + (issue.page_offset || 0), title: issue.title })}
-                      style={{ flexShrink: 0, width: 44, border: `1px solid ${T.gold}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "4px 4px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700, textAlign: "center" }}
-                    >
-                      {a.page_number || "فتح"}
-                    </button>
-                    <span style={{ flex: 1 }}>{a.title}</span>
-                    {canManageDocuments && (
-                      <button onClick={() => handleDeleteArticle(a.id)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", flexShrink: 0 }}>
-                        <Trash2 size={12} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))
+        <>
+          {renderIssueCard(issues[0], true)}
+          {issues.length > 1 && (
+            <button
+              onClick={() => setShowPrevious((v) => !v)}
+              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, color: T.ink, cursor: "pointer", marginBottom: 14 }}
+            >
+              <BookOpen size={15} color={T.gold} />
+              {showPrevious ? "إخفاء الأعداد السابقة" : `الأعداد السابقة (${issues.length - 1})`}
+              {showPrevious ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </button>
+          )}
+          {showPrevious && issues.slice(1).map((issue) => renderIssueCard(issue, false))}
+        </>
       )}
 
       {readerIssue && (
