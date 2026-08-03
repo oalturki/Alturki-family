@@ -543,12 +543,15 @@ function ConfirmModal({ onConfirm, onCancel }) {
   );
 }
 
-function NewsTab({ news, setNews, canManageNews }) {
+function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigate }) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState("عام");
   const [text, setText] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const nextEvent = (events || []).filter((e) => e.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date))[0];
 
   const submit = async () => {
     if (!text.trim()) return;
@@ -582,6 +585,39 @@ function NewsTab({ news, setNews, canManageNews }) {
 
   return (
     <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
+        <button
+          onClick={() => onNavigate?.("tree")}
+          style={{ textAlign: "right", background: `linear-gradient(155deg, ${T.inkSoft}, ${T.ink})`, border: `1px solid ${T.gold}`, borderRadius: 14, padding: 14, cursor: "pointer", fontFamily: "inherit" }}
+        >
+          <GitBranch size={20} color={T.goldLight} />
+          <div style={{ fontSize: 13, fontWeight: 800, color: T.goldLight, marginTop: 8 }}>شجرة العائلة</div>
+          <div style={{ fontSize: 10.5, color: "#CFE0DC", marginTop: 3 }}>{membersCount ? `${membersCount} فرد` : "استكشف الأنساب"}</div>
+        </button>
+        <button
+          onClick={() => onNavigate?.("magazine")}
+          style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, cursor: "pointer", fontFamily: "inherit" }}
+        >
+          <BookOpen size={20} color={T.gold} />
+          <div style={{ fontSize: 13, fontWeight: 800, color: T.ink, marginTop: 8 }}>مجلة الصلة</div>
+          <div style={{ fontSize: 10.5, color: T.muted, marginTop: 3 }}>تصفح كل الأعداد والفهرس</div>
+        </button>
+        <button
+          onClick={() => onNavigate?.("events")}
+          style={{ gridColumn: "1 / -1", textAlign: "right", display: "flex", alignItems: "center", justifyContent: "space-between", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, cursor: "pointer", fontFamily: "inherit" }}
+        >
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: T.ink, display: "flex", alignItems: "center", gap: 6 }}>
+              <CalendarDays size={17} color={T.gold} /> المناسبات
+            </div>
+            <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>
+              {nextEvent ? `القادمة: ${nextEvent.title} — ${nextEvent.date}` : "لا توجد مناسبات مجدولة حاليًا"}
+            </div>
+          </div>
+          <ChevronLeft size={16} color={T.muted} />
+        </button>
+      </div>
+
       <SectionTitle action={canManageNews && (
         <IconButton onClick={() => { setOpen((v) => !v); setEditingId(null); setText(""); setType("عام"); }} active={open}>
           <Plus size={14} /> إضافة خبر
@@ -2913,7 +2949,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 }
 
 const BASE_TABS = [
-  { key: "news", label: "الأخبار", icon: Newspaper },
+  { key: "news", label: "الرئيسية", icon: Newspaper },
   { key: "tree", label: "الشجرة", icon: GitBranch },
   { key: "magazine", label: "المجلة", icon: BookOpen },
   { key: "events", label: "المناسبات", icon: CalendarDays },
@@ -3038,7 +3074,7 @@ function FamilyAppInner({ meId }) {
             </div>
           ) : (
             <>
-              {tab === "news" && <NewsTab news={news} setNews={setNews} canManageNews={canManageNews} />}
+              {tab === "news" && <NewsTab news={news} setNews={setNews} canManageNews={canManageNews} events={events} membersCount={members.filter((m) => m.gender !== "female").length} onNavigate={setTab} />}
               {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
               {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} onUploadingChange={setMagazineUploading} onUploadResult={setMagazineUploadMsg} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
