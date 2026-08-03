@@ -1176,8 +1176,8 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
         {error && (
           <div style={{ textAlign: "center", padding: "60px 20px", color: "#F4EFE3" }}>
             <div style={{ marginBottom: 14 }}>تعذّر عرض العدد داخل الصفحة.</div>
-            <a href={pdfUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "9px 18px", background: "#c9a227", color: "#0d2b2b", borderRadius: 8, textDecoration: "none", fontWeight: 700, fontSize: 13 }}>
-              فتح ملف PDF مباشرة
+            <a href={`${pdfUrl}#page=${pageNum}`} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "9px 18px", background: "#c9a227", color: "#0d2b2b", borderRadius: 8, textDecoration: "none", fontWeight: 700, fontSize: 13 }}>
+              فتح ملف PDF مباشرة{pageNum > 1 ? ` (صفحة ${pageNum})` : ""}
             </a>
           </div>
         )}
