@@ -2329,6 +2329,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
   const [showAddWife, setShowAddWife] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(null); // { type: 'daughter'|'wife', id, name }
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPassword2, setNewPassword2] = useState("");
   const [pwError, setPwError] = useState("");
@@ -2338,14 +2339,19 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
   const handleChangePassword = async () => {
     setPwError(""); setPwSuccess("");
-    if (!newPassword.trim() || !newPassword2.trim()) return setPwError("عبّي الحقلين.");
-    if (newPassword.length < 6) return setPwError("كلمة المرور لازم تكون 6 أحرف على الأقل.");
-    if (newPassword !== newPassword2) return setPwError("كلمتا المرور غير متطابقتين.");
+    if (!currentPassword.trim()) return setPwError("أدخل كلمة المرور الحالية للتأكد إنها فعلاً حسابك.");
+    if (!newPassword.trim() || !newPassword2.trim()) return setPwError("عبّي حقلي كلمة المرور الجديدة.");
+    if (newPassword.length < 6) return setPwError("كلمة المرور الجديدة لازم تكون 6 أحرف على الأقل.");
+    if (newPassword !== newPassword2) return setPwError("كلمتا المرور الجديدتان غير متطابقتين.");
     setSavingPw(true);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.email) throw new Error("تعذّر التحقق من الحساب، حاول تسجيل الدخول من جديد.");
+      const { error: verifyErr } = await supabase.auth.signInWithPassword({ email: user.email, password: currentPassword });
+      if (verifyErr) throw new Error("كلمة المرور الحالية غير صحيحة.");
       await updatePassword(newPassword);
       setPwSuccess("تم تغيير كلمة المرور بنجاح.");
-      setNewPassword(""); setNewPassword2("");
+      setCurrentPassword(""); setNewPassword(""); setNewPassword2("");
       setTimeout(() => { setShowChangePassword(false); setPwSuccess(""); }, 1500);
     } catch (e) {
       setPwError(e.message || "تعذّر تغيير كلمة المرور.");
@@ -2870,6 +2876,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
           </button>
           {showChangePassword && (
             <div style={{ display: "grid", gap: 6, paddingTop: 6, borderTop: `1px dashed ${T.line}` }}>
+              <input type="password" placeholder="كلمة المرور الحالية" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} style={inputStyle} />
               <input type="password" placeholder="كلمة المرور الجديدة (6 أحرف فأكثر)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={inputStyle} />
               <input type="password" placeholder="تأكيد كلمة المرور الجديدة" value={newPassword2} onChange={(e) => setNewPassword2(e.target.value)} style={inputStyle} />
               {pwError && <div style={{ color: T.clay, fontSize: 11.5, fontWeight: 700 }}>{pwError}</div>}
