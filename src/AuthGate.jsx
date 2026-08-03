@@ -172,6 +172,10 @@ export default function AuthGate({ children }) {
         setIsRecovery(true);
         setChecking(false);
       }
+      if (event === "SIGNED_OUT") {
+        setMember(null);
+        setMode("landing");
+      }
     });
 
     (async () => {
@@ -179,12 +183,12 @@ export default function AuthGate({ children }) {
         const m = await getLinkedMember();
         if (m && !isRecoveryRef.current) {
           setMember(m);
-        } else if (!isRecoveryRef.current) {
-          // جلسة موجودة لكن غير مربوطة (تسجيل لم يكتمل) — نظّف واعرض البداية
-          // إلا إذا كانت هذه جلسة استعادة كلمة مرور
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) await supabase.auth.signOut();
         }
+        // ملاحظة: لو ما رجعت getLinkedMember عضوًا، لا نسجّل الخروج تلقائيًا —
+        // قد يكون هذا فشلاً مؤقتًا بالشبكة لا فشلاً حقيقيًا بالربط، وتسجيل
+        // الخروج هنا كان يمسح جلسات صحيحة بدون داعٍ (مشكلة "التذكر").
+        // نكتفي بعرض شاشة الدخول، والجلسة القديمة (إن وُجدت) تُستبدل
+        // تلقائيًا بأول تسجيل دخول ناجح.
       } catch (e) {
         // لا توجد جلسة سابقة
       }
