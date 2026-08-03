@@ -5,11 +5,12 @@ import {
   Link2, ChevronDown, ChevronUp, Check,
   Baby, HeartHandshake, Megaphone, Cross, Loader2,
   FileText, Phone, Cake, Shield, UserPlus, Trash2, Save, Pencil,
-  BookOpen, ChevronRight, ChevronLeft, Upload, LogOut, KeyRound
+  BookOpen, ChevronRight, ChevronLeft, Upload, LogOut, KeyRound,
+  Settings, Fingerprint, Lock, HelpCircle, MessageCircle, ChevronsRight
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
-import { updatePassword } from "./auth-linking";
+import { updatePassword, registerPasskey } from "./auth-linking";
 
 const T = {
   ink: "#173634",
@@ -2384,6 +2385,7 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
 
 function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) {
   const me = members.find((m) => m.id === meId);
+  const [profileView, setProfileView] = useState("menu"); // menu | info | settings
   const [mode, setMode] = useState("view");
   const [form, setForm] = useState(me);
   const [daughterName, setDaughterName] = useState("");
@@ -2428,6 +2430,20 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+  };
+
+  const [faceIdMsg, setFaceIdMsg] = useState("");
+  const [enablingFaceId, setEnablingFaceId] = useState(false);
+  const handleEnableFaceId = async () => {
+    setFaceIdMsg("");
+    setEnablingFaceId(true);
+    try {
+      await registerPasskey();
+      setFaceIdMsg("تم تفعيل الدخول السريع بالبصمة على هذا الجهاز.");
+    } catch (e) {
+      setFaceIdMsg("تعذّر التفعيل على هذا الجهاز. جرّب من إعدادات جهازك إن كانت البصمة مفعّلة أصلًا.");
+    }
+    setEnablingFaceId(false);
   };
 
   const [showAddBirth, setShowAddBirth] = useState(false);
@@ -2591,7 +2607,103 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
     setEditingRel(null);
   };
 
+  const MenuRow = ({ icon: Icon, label, sublabel, onClick, disabled, danger }) => (
+    <button
+      onClick={disabled ? undefined : onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 12, width: "100%", background: "none", border: "none",
+        padding: "13px 2px", cursor: disabled ? "default" : "pointer", fontFamily: "inherit", textAlign: "right",
+        borderBottom: `1px solid ${T.line}`, opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <div style={{ width: 32, height: 32, borderRadius: "50%", background: danger ? "#FBEAEA" : T.sandDark, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <Icon size={15} color={danger ? T.clay : T.gold} />
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: danger ? T.clay : T.text }}>{label}</div>
+        {sublabel && <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>{sublabel}</div>}
+      </div>
+      {!disabled && !danger && <ChevronLeft size={15} color={T.muted} />}
+      {disabled && <span style={{ fontSize: 10, color: T.muted, background: T.sand, border: `1px solid ${T.line}`, borderRadius: 999, padding: "2px 8px" }}>قريبًا</span>}
+    </button>
+  );
+
   if (!form) return <EmptyState text="جارِ تحميل ملفك الشخصي..." />;
+
+  if (profileView === "menu") {
+    return (
+      <div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "10px 0 20px" }}>
+          <Avatar name={form.name} photoUrl={form.photoUrl} gender={form.gender} size={76} />
+          <div style={{ fontSize: 17, fontWeight: 800, color: T.ink, marginTop: 10 }}>{form.name}</div>
+          <div style={{ fontSize: 11.5, color: T.muted, marginTop: 2 }}>{form.nasab}</div>
+          {form.memberNumber && (
+            <div style={{ fontSize: 10.5, color: T.gold, fontWeight: 700, marginTop: 5, background: T.sandDark, borderRadius: 999, padding: "2px 10px" }}>
+              رقم العضوية: {form.memberNumber}
+            </div>
+          )}
+        </div>
+
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "2px 14px", marginBottom: 14 }}>
+          <MenuRow icon={UserCircle2} label="ملفي" sublabel="المعلومات الشخصية، السيرة، الأبناء والبنات" onClick={() => setProfileView("info")} />
+          <MenuRow icon={Settings} label="الإعدادات" sublabel="الخصوصية، الإشعارات، وأكثر" onClick={() => setProfileView("settings")} />
+          <MenuRow icon={Fingerprint} label="بصمة الوجه / الإصبع" sublabel={faceIdMsg || "دخول سريع بدون كلمة مرور"} onClick={handleEnableFaceId} />
+          <MenuRow icon={KeyRound} label="رمز المرور السريع" disabled />
+          <MenuRow icon={Lock} label="تغيير كلمة المرور والبريد" onClick={() => { setProfileView("info"); setShowChangePassword(true); }} />
+        </div>
+
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "2px 14px", marginBottom: 14 }}>
+          <MenuRow icon={FileText} label="دليل المستخدم" disabled />
+          <MenuRow icon={HelpCircle} label="الأسئلة الشائعة" disabled />
+          <MenuRow icon={Shield} label="سياسة الخصوصية" disabled />
+          <MenuRow icon={MessageCircle} label="تواصل معنا" disabled />
+        </div>
+
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "2px 14px" }}>
+          <button
+            onClick={() => setConfirmLogout(true)}
+            style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", background: "none", border: "none", padding: "13px 2px", cursor: "pointer", fontFamily: "inherit", textAlign: "right" }}
+          >
+            <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#FBEAEA", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <LogOut size={15} color={T.clay} />
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: T.clay }}>تسجيل الخروج</span>
+          </button>
+        </div>
+
+        {confirmLogout && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={() => setConfirmLogout(false)}>
+            <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ fontSize: 13, color: T.text, marginBottom: 16, textAlign: "center" }}>تأكيد تسجيل الخروج من حسابك؟</div>
+              <button onClick={handleLogout} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
+                تسجيل الخروج
+              </button>
+              <button onClick={() => setConfirmLogout(false)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
+                تراجع
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (profileView === "settings") {
+    return (
+      <div>
+        <button onClick={() => setProfileView("menu")} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: T.gold, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: 14 }}>
+          <ChevronsRight size={16} /> رجوع
+        </button>
+        <SectionTitle>الإعدادات</SectionTitle>
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "2px 14px" }}>
+          <MenuRow icon={Lock} label="الخصوصية" sublabel="التحكم فيما يظهر من بياناتك للعائلة" onClick={() => { setProfileView("info"); setMode("edit"); }} />
+          <MenuRow icon={Settings} label="حجم الخط" disabled />
+          <MenuRow icon={MessageCircle} label="الرسائل الجماعية" disabled />
+          <MenuRow icon={HelpCircle} label="الإشعارات" disabled />
+        </div>
+      </div>
+    );
+  }
 
   const myDaughters = members.filter((m) => m.fatherId === meId && m.gender === "female");
   const mySons = members.filter((m) => m.fatherId === meId && m.gender !== "female");
@@ -2616,6 +2728,9 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
   return (
     <div>
+      <button onClick={() => setProfileView("menu")} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: T.gold, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: 4 }}>
+        <ChevronsRight size={16} /> رجوع
+      </button>
       <SectionTitle
         action={
           <IconButton onClick={() => setMode(mode === "view" ? "edit" : "view")} active={mode === "edit"}>
@@ -2953,28 +3068,8 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
               </button>
             </div>
           )}
-          <button
-            onClick={() => setConfirmLogout(true)}
-            style={{ display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "none", padding: "8px 2px", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: T.clay, fontWeight: 700, borderTop: `1px dashed ${T.line}`, paddingTop: 12 }}
-          >
-            <LogOut size={16} /> تسجيل الخروج
-          </button>
         </div>
       </div>
-
-      {confirmLogout && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={() => setConfirmLogout(false)}>
-          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontSize: 13, color: T.text, marginBottom: 16, textAlign: "center" }}>تأكيد تسجيل الخروج من حسابك؟</div>
-            <button onClick={handleLogout} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
-              تسجيل الخروج
-            </button>
-            <button onClick={() => setConfirmLogout(false)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
-              تراجع
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
