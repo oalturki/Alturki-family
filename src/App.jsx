@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
-import { updatePassword, registerPasskey } from "./auth-linking";
+import { updatePassword, registerPasskey, normalizeSaudiPhone } from "./auth-linking";
 
 const T = {
   ink: "#173634",
@@ -86,13 +86,22 @@ function mapMemberRow(row) {
 }
 
 async function fetchMembers() {
-  const { data, error } = await supabase
-    .from("members")
-    .select("id, legacy_id, member_number, first_name, father_id, spouse_of, prefilled_email, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, birth_place, occupation, bio, photo_url, phone, user_account_id")
-    .order("created_at", { ascending: true })
-    .range(0, 4999);
-  if (error) { console.error("fetchMembers failed", error); return []; }
-  return data.map(mapMemberRow);
+  const cols = "id, legacy_id, member_number, first_name, father_id, spouse_of, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, birth_place, occupation, bio, photo_url, user_account_id";
+  const pageSize = 1000;
+  const all = [];
+  // جلب كل الأعضاء على صفحات بدل سقف ثابت (كان 5000) يُقتطع بصمت مع نمو العائلة
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("members")
+      .select(cols)
+      .order("created_at", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) { console.error("fetchMembers failed", error); break; }
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+  }
+  return all.map(mapMemberRow);
 }
 
 async function fetchMemberProfiles() {
@@ -101,6 +110,19 @@ async function fetchMemberProfiles() {
   const map = {};
   data.forEach((row) => {
     map[row.member_id] = { socialLinks: row.social_links || {}, visibility: row.visibility || {}, cvUrl: row.cv_url || "" };
+  });
+  return map;
+}
+
+// الجوال والبريد لم يعودا يُقرآن من جدول members مباشرة (صلاحية SELECT عليهما مسحوبة
+// على مستوى العمود). هذه الدالة تستدعي RPC آمنة ترجّع الرقم/البريد فقط لمن يحق له،
+// و has_phone (وجود رقم فقط) للجميع لتظل علامة "جوال مسجّل" بالشجرة تعمل دون كشف الرقم.
+async function fetchMemberContacts() {
+  const { data, error } = await supabase.rpc("member_contacts");
+  if (error) { console.error("fetchMemberContacts failed", error); return {}; }
+  const map = {};
+  (data || []).forEach((r) => {
+    map[r.member_id] = { hasPhone: !!r.has_phone, phone: r.phone || "", email: r.email || "" };
   });
   return map;
 }
@@ -118,7 +140,7 @@ async function insertMember(form) {
   const { data, error } = await supabase
     .from("members")
     .insert({ first_name: form.name, father_id: form.fatherId || null, spouse_of: form.spouseOf || null, prefilled_email: form.prefilledEmail || null, gender: form.gender, region: form.region || null, phone: form.phone || null })
-    .select()
+    .select("id, legacy_id, member_number, first_name, father_id, spouse_of, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, birth_place, occupation, bio, photo_url, user_account_id")
     .single();
   if (error) {
     console.error("insertMember failed", error);
@@ -127,7 +149,11 @@ async function insertMember(form) {
     }
     throw new Error("تعذّرت الإضافة، حاول مرة أخرى.");
   }
-  return mapMemberRow(data);
+  // الجوال/البريد لا يعودان من الاستعلام (العمود مقفول)، فنعيد إرفاق ما أدخله المستخدم محليًا
+  const row = mapMemberRow(data);
+  if (form.phone) row.phone = form.phone;
+  if (form.prefilledEmail) row.prefilledEmail = form.prefilledEmail;
+  return row;
 }
 
 async function updateMemberCore(id, patch) {
@@ -274,7 +300,7 @@ async function sendContactMessage(memberId, message) {
 async function fetchContactMessages() {
   const { data, error } = await supabase
     .from("contact_messages")
-    .select("id, message, status, created_at, sender_member_id, members(first_name, phone)")
+    .select("id, message, status, created_at, sender_member_id, members(first_name)")
     .order("created_at", { ascending: false });
   if (error) { console.error("fetchContactMessages failed", error); return []; }
   return data;
@@ -407,7 +433,7 @@ async function approveBirthRequest(request) {
   const { data: memberData, error: insertErr } = await supabase
     .from("members")
     .insert({ first_name: c.name, father_id: c.father_id, gender: c.gender, birth_date: c.birth_date || null, birth_place: c.birth_place || null })
-    .select()
+    .select("id, legacy_id, member_number, first_name, father_id, spouse_of, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, birth_place, occupation, bio, photo_url, user_account_id")
     .single();
   if (insertErr) { console.error("approveBirthRequest insert failed", insertErr); return null; }
   const { error: updateErr } = await supabase.from("edit_requests").update({ status: "approved", reviewed_by: userData?.user?.id }).eq("id", request.id);
@@ -480,6 +506,12 @@ function enrichMembers(rawMembers, profilesMap) {
 
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email || "").trim());
+}
+
+// يقبل روابط http/https فقط، ويرفض مثل javascript: — للروابط التي يدخلها المستخدم
+function safeExternalUrl(url) {
+  const u = (url || "").trim();
+  return /^https?:\/\//i.test(u) ? u : null;
 }
 
 function formatDate(dateStr, precision) {
@@ -768,7 +800,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
                 )}
                 {n.location_url && (
                   <a
-                    href={n.location_url}
+                    href={safeExternalUrl(n.location_url) || undefined}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 11.5, fontWeight: 700, color: T.gold, textDecoration: "none" }}
@@ -964,7 +996,8 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
     }, 60);
   };
 
-  const norm = (s) => (s || "").replace(/بن/g, " ").replace(/\s+/g, " ").trim();
+  // نحذف «بن» ككلمة مستقلة فقط، حتى لا نُفسد أسماء تحتوي التتابع مثل «بندر» أو «لبنى»
+  const norm = (s) => (s || "").split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
   const searchResults = useMemo(() => {
     const nq = norm(query);
     if (!nq) return [];
@@ -989,10 +1022,16 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const layout = useMemo(() => {
     if (!rootId || !byId[rootId]) return { nodes: [], edges: [], width: 0, height: 0 };
 
+    // نحفظ عرض كل شجرة فرعية (memoization) لتفادي إعادة الحساب O(n²) في الأشجار الكبيرة
+    const widthCache = new Map();
     const subtreeWidth = (id) => {
+      if (widthCache.has(id)) return widthCache.get(id);
       const kids = expanded.has(id) ? (childrenMap[id] || []) : [];
-      if (kids.length === 0) return TREE_NODE_W + TREE_H_GAP;
-      return kids.reduce((sum, kidId) => sum + subtreeWidth(kidId), 0);
+      const w = kids.length === 0
+        ? TREE_NODE_W + TREE_H_GAP
+        : kids.reduce((sum, kidId) => sum + subtreeWidth(kidId), 0);
+      widthCache.set(id, w);
+      return w;
     };
 
     const nodes = [];
@@ -1189,7 +1228,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
             {layout.nodes.map((n) => {
               const m = byId[n.id];
               const isRoot = n.id === rootId;
-              const hasPhone = m?.isAlive !== false && !!m?.phone;
+              const hasPhone = m?.isAlive !== false && !!m?.hasPhone;
               const isDeceased = m?.isAlive === false;
               const w = isRoot ? TREE_NODE_W + 20 : TREE_NODE_W;
               const h = isRoot ? TREE_NODE_H + 14 : TREE_NODE_H;
@@ -1901,12 +1940,12 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
             {(ev.location_url || ev.video_url) && (
               <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
                 {ev.location_url && (
-                  <a href={ev.location_url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: T.gold, textDecoration: "none" }}>
+                  <a href={safeExternalUrl(ev.location_url) || undefined} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: T.gold, textDecoration: "none" }}>
                     <MapPin size={13} /> عرض الموقع على الخريطة
                   </a>
                 )}
                 {ev.video_url && (
-                  <a href={ev.video_url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: T.gold, textDecoration: "none" }}>
+                  <a href={safeExternalUrl(ev.video_url) || undefined} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: T.gold, textDecoration: "none" }}>
                     <Video size={13} /> مشاهدة الفيديو
                   </a>
                 )}
@@ -2018,7 +2057,7 @@ function MemberDetailModal({ member, members, canManageTree, onClose, onSaved })
               </div>
             )}
             {member.cvUrl && (
-              <a href={member.cvUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, padding: "7px 14px", background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 999, color: T.ink, textDecoration: "none", fontSize: 11.5, fontWeight: 700 }}>
+              <a href={safeExternalUrl(member.cvUrl) || undefined} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, padding: "7px 14px", background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 999, color: T.ink, textDecoration: "none", fontSize: 11.5, fontWeight: 700 }}>
                 <FileText size={13} /> عرض السيرة الذاتية
               </a>
             )}
@@ -2205,14 +2244,6 @@ const ADMIN_PERMISSIONS = [
   { key: "manage_admins", label: "إضافة/حذف مشرفين آخرين" },
 ];
 
-function normalizeSaudiPhoneLocal(p) {
-  const digits = p.replace(/\D/g, "");
-  if (p.startsWith("+966")) return "+966" + digits.slice(3);
-  if (digits.startsWith("966")) return "+" + digits;
-  if (digits.startsWith("0")) return "+966" + digits.slice(1);
-  return "+966" + digits;
-}
-
 function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageAdmins, canManageRegistrations }) {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2230,7 +2261,7 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
   const [editingMember, setEditingMember] = useState(null);
   const [savingMember, setSavingMember] = useState(false);
 
-  const normA = (s) => (s || "").replace(/بن/g, " ").replace(/\s+/g, " ").trim();
+  const normA = (s) => (s || "").split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
   const treeSearchResults = useMemo(() => {
     const nq = normA(treeQuery);
     if (!nq) return [];
@@ -2333,11 +2364,12 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
     if (!phone.trim()) return setError("أدخل رقم جوال العضو أول.");
     setBusy(true);
     try {
-      const normalizedPhone = normalizeSaudiPhoneLocal(phone.trim());
-      const { data: member, error: findErr } = await supabase.from("members").select("id, user_account_id, first_name").eq("phone", normalizedPhone).maybeSingle();
+      const normalizedPhone = normalizeSaudiPhone(phone.trim());
+      const { data: rows, error: findErr } = await supabase.rpc("admin_find_member_by_phone", { p_phone: normalizedPhone });
       if (findErr) throw findErr;
-      if (!member) return setError("ما فيه عضو بهذا الرقم بقائمة العائلة.");
-      if (!member.user_account_id) return setError("هذا العضو لسه ما سجّل حساب بالموقع، لازم يسجّل أول.");
+      const member = Array.isArray(rows) ? rows[0] : rows;
+      if (!member) { setBusy(false); return setError("ما فيه عضو بهذا الرقم بقائمة العائلة."); }
+      if (!member.user_account_id) { setBusy(false); return setError("هذا العضو لسه ما سجّل حساب بالموقع، لازم يسجّل أول."); }
       const permsObj = {};
       ADMIN_PERMISSIONS.forEach((p) => { permsObj[p.key] = !!newPerms[p.key]; });
       const { error: insertErr } = await supabase.from("member_roles").insert({ user_id: member.user_account_id, role: "admin", permissions: permsObj });
@@ -2389,7 +2421,7 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
         contactMessages.map((m) => (
           <div key={m.id} style={{ background: T.card, border: `1px solid ${m.status === "new" ? T.gold : T.line}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: T.ink }}>{m.members?.first_name || "عضو"}{m.members?.phone ? ` — ${m.members.phone}` : ""}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: T.ink }}>{m.members?.first_name || "عضو"}{(members.find((x) => x.id === m.sender_member_id)?.phone) ? ` — ${members.find((x) => x.id === m.sender_member_id).phone}` : ""}</span>
               {m.status === "new" && <span style={{ fontSize: 9.5, fontWeight: 700, color: T.gold, background: T.sandDark, borderRadius: 999, padding: "1px 8px" }}>جديدة</span>}
             </div>
             <div style={{ fontSize: 12.5, color: T.text, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{m.message}</div>
@@ -2655,6 +2687,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
   const [pwSuccess, setPwSuccess] = useState("");
   const [savingPw, setSavingPw] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [openFaq, setOpenFaq] = useState(null); // نُقل هنا لأعلى المكوّن (منع مخالفة قواعد الـHooks)
 
   const handleChangePassword = async () => {
     setPwError(""); setPwSuccess("");
@@ -2967,7 +3000,6 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
       { q: "كيف أثبّت الموقع كتطبيق كامل الشاشة؟", a: "بآيفون: من Safari تحديدًا (مو كروم) اضغط زر المشاركة ← \"إضافة إلى الشاشة الرئيسية\"." },
       { q: "كيف أبحث بمجلة الصلة؟", a: "من تبويب \"المجلة\" ← \"الفهرس\"، ابحث بعنوان الموضوع أو اسم الكاتب، ويفتح لك المقالة مباشرة عند صفحتها الصحيحة." },
     ];
-    const [openFaq, setOpenFaq] = useState(null);
     return (
       <div>
         <button onClick={() => setProfileView("menu")} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: T.gold, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: 14 }}>
@@ -3095,7 +3127,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
             </div>
           )}
           {form.cvUrl && (
-            <a href={form.cvUrl} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, padding: "7px 14px", background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 999, color: T.ink, textDecoration: "none", fontSize: 11.5, fontWeight: 700 }}>
+            <a href={safeExternalUrl(form.cvUrl) || undefined} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, padding: "7px 14px", background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 999, color: T.ink, textDecoration: "none", fontSize: 11.5, fontWeight: 700 }}>
               <FileText size={13} /> السيرة الذاتية
             </a>
           )}
@@ -3437,14 +3469,19 @@ function FamilyAppInner({ meId }) {
 
   useEffect(() => {
     (async () => {
-      const [rawMembers, profiles, n, e, treePerm, adminsPerm, newsPerm, eventsPerm, docsPerm, regPerm] = await Promise.all([
-        fetchMembers(), fetchMemberProfiles(), fetchNews(), fetchEvents(),
+      const [rawMembers, profiles, contacts, n, e, treePerm, adminsPerm, newsPerm, eventsPerm, docsPerm, regPerm] = await Promise.all([
+        fetchMembers(), fetchMemberProfiles(), fetchMemberContacts(), fetchNews(), fetchEvents(),
         checkPermission("manage_tree_profiles"), checkPermission("manage_admins"),
         checkPermission("manage_news"), checkPermission("manage_events"),
         checkPermission("manage_documents"), checkPermission("manage_registrations"),
       ]);
+      // دمج الجوال/البريد المسموح بهما (من RPC الآمنة) مع بيانات الأعضاء قبل الإثراء
+      const mergedMembers = rawMembers.map((m) => {
+        const c = contacts[m.id];
+        return c ? { ...m, phone: c.phone, prefilledEmail: c.email, hasPhone: c.hasPhone } : m;
+      });
       setProfilesMap(profiles);
-      setMembers(enrichMembers(rawMembers, profiles));
+      setMembers(enrichMembers(mergedMembers, profiles));
       setNews(n);
       setEvents(e);
       setCanManageTree(treePerm);
@@ -3599,3 +3636,4 @@ export default function FamilyApp() {
     </AppErrorBoundary>
   );
 }
+
