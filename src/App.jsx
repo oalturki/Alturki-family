@@ -607,11 +607,6 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 2px 12px" }}>
-        <div style={{ width: 26, height: 1, background: T.gold, opacity: 0.5 }} />
-        <span style={{ fontSize: 11, color: T.muted, letterSpacing: 0.3 }}>أهلًا بكم في بيت آل تركي الرقمي</span>
-      </div>
-
       <button
         onClick={() => onNavigate?.("tree")}
         style={{
