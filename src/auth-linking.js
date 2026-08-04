@@ -11,7 +11,7 @@ import { supabase } from './supabaseClient';
 // أداة مساعدة: تحويل رقم جوال سعودي لصيغة +966 القياسية
 // تقبل: 0555466973 أو 555466973 أو +966555466973 وتُرجع دائمًا +966555466973
 // ============================================================
-function normalizeSaudiPhone(phone) {
+export function normalizeSaudiPhone(phone) {
   if (!phone) return phone;
   const digits = phone.replace(/\D/g, ''); // إزالة أي رموز غير أرقام
   if (phone.startsWith('+966')) return '+966' + digits.slice(3);
@@ -212,9 +212,11 @@ export async function getLinkedMember() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
+  // نختار أعمدة غير حساسة فقط (لا phone/prefilled_email) لأن صلاحية SELECT عليهما
+  // مسحوبة على مستوى العمود؛ والبوابة تحتاج id فقط لتمرير meId للتطبيق.
   const { data, error } = await supabase
     .from('member_accounts')
-    .select('member_id, members(*)')
+    .select('member_id, members(id, first_name, gender, father_id, member_number)')
     .eq('auth_user_id', user.id)
     .maybeSingle();
 
