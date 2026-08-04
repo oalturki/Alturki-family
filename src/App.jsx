@@ -6,7 +6,7 @@ import {
   Baby, HeartHandshake, Megaphone, Cross, Loader2,
   FileText, Phone, Cake, Shield, UserPlus, Trash2, Save, Pencil,
   BookOpen, ChevronRight, ChevronLeft, Upload, LogOut, KeyRound,
-  Settings, Fingerprint, Lock, HelpCircle, MessageCircle, ChevronsRight
+  Settings, Fingerprint, Lock, HelpCircle, MessageCircle, ChevronsRight, Video
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -201,6 +201,15 @@ async function uploadNewsImage(file) {
   const { error } = await supabase.storage.from("news-images").upload(path, file, { contentType: file.type || "image/jpeg" });
   if (error) { console.error("uploadNewsImage failed", error); return null; }
   const { data } = supabase.storage.from("news-images").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+async function uploadEventImage(file) {
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${Date.now()}_${safeName}`;
+  const { error } = await supabase.storage.from("event-images").upload(path, file, { contentType: file.type || "image/jpeg" });
+  if (error) { console.error("uploadEventImage failed", error); return null; }
+  const { data } = supabase.storage.from("event-images").getPublicUrl(path);
   return data.publicUrl;
 }
 
@@ -1761,29 +1770,51 @@ function MagazineTab({ canManageDocuments, onUploadingChange, onUploadResult }) 
 function EventsTab({ events, setEvents, meId, canManageEvents }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ title: "", date: "", location: "", description: "" });
+  const [imageFile, setImageFile] = useState(null);
+  const [existingImageUrl, setExistingImageUrl] = useState("");
+  const [locationUrl, setLocationUrl] = useState("");
+  const [videoUrl, setVideoUrl] = useState("");
+  const [uploadingImg, setUploadingImg] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
+  const resetForm = () => {
+    setForm({ title: "", date: "", location: "", description: "" });
+    setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); setVideoUrl("");
+  };
+
   const submit = async () => {
     if (!form.title.trim() || !form.date) return;
+    setUploadingImg(true);
+    let imageUrl = existingImageUrl || null;
+    if (imageFile) {
+      const uploaded = await uploadEventImage(imageFile);
+      if (uploaded) imageUrl = uploaded;
+    }
+    const payload = { ...form, image_url: imageUrl, location_url: locationUrl.trim() || null, video_url: videoUrl.trim() || null };
     if (editingId) {
-      const updated = await updateEvent(editingId, form);
+      const updated = await updateEvent(editingId, payload);
       if (updated) {
         const old = events.find((e) => e.id === editingId);
         setEvents(events.map((e) => (e.id === editingId ? { ...updated, attendees: old.attendees } : e)));
       }
     } else {
-      const created = await insertEvent(form);
+      const created = await insertEvent(payload);
       if (created) setEvents([created, ...events]);
     }
-    setForm({ title: "", date: "", location: "", description: "" });
+    resetForm();
     setEditingId(null);
     setOpen(false);
+    setUploadingImg(false);
   };
 
   const startEdit = (ev) => {
     setEditingId(ev.id);
     setForm({ title: ev.title, date: ev.date, location: ev.location || "", description: ev.description || "" });
+    setExistingImageUrl(ev.image_url || "");
+    setImageFile(null);
+    setLocationUrl(ev.location_url || "");
+    setVideoUrl(ev.video_url || "");
     setOpen(true);
   };
 
@@ -1807,7 +1838,7 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
   return (
     <div>
       <SectionTitle action={canManageEvents && (
-        <IconButton onClick={() => { setOpen((v) => !v); setEditingId(null); setForm({ title: "", date: "", location: "", description: "" }); }} active={open}>
+        <IconButton onClick={() => { setOpen((v) => !v); setEditingId(null); resetForm(); }} active={open}>
           <Plus size={14} /> مناسبة جديدة
         </IconButton>
       )}>
@@ -1820,10 +1851,30 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
           <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} style={inputStyle} />
           <input placeholder="المكان" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} style={inputStyle} />
           <textarea placeholder="تفاصيل مختصرة" rows={8} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} style={{ ...inputStyle, resize: "vertical", minHeight: 140, lineHeight: 1.7 }} />
+
+          <input type="url" placeholder="رابط الموقع من خرائط جوجل (اختياري)" value={locationUrl} onChange={(e) => setLocationUrl(e.target.value)} style={inputStyle} />
+          <input type="url" placeholder="رابط فيديو (يوتيوب مثلًا، اختياري)" value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} style={inputStyle} />
+
+          <div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: T.text, cursor: "pointer" }}>
+              <Upload size={14} color={T.gold} />
+              {imageFile ? imageFile.name : existingImageUrl ? "استبدال الصورة الحالية" : "إضافة صورة (اختياري)"}
+              <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files[0])} style={{ display: "none" }} />
+            </label>
+            {existingImageUrl && !imageFile && (
+              <div style={{ marginTop: 8, position: "relative", display: "inline-block" }}>
+                <img src={existingImageUrl} alt="" style={{ maxWidth: 140, borderRadius: 10, display: "block" }} />
+                <button onClick={() => setExistingImageUrl("")} style={{ position: "absolute", top: -6, left: -6, background: T.clay, color: "#fff", border: "none", borderRadius: "50%", width: 20, height: 20, cursor: "pointer", fontSize: 11, lineHeight: 1 }}>×</button>
+              </div>
+            )}
+          </div>
+
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={submit} style={{ ...primaryBtnStyle, flex: 1 }}>{editingId ? "حفظ التعديل" : "إضافة المناسبة"}</button>
+            <button onClick={submit} disabled={uploadingImg} style={{ ...primaryBtnStyle, flex: 1 }}>
+              {uploadingImg ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : editingId ? "حفظ التعديل" : "إضافة المناسبة"}
+            </button>
             <button
-              onClick={() => { setOpen(false); setEditingId(null); setForm({ title: "", date: "", location: "", description: "" }); }}
+              onClick={() => { setOpen(false); setEditingId(null); resetForm(); }}
               style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}
             >
               تراجع
@@ -1844,6 +1895,23 @@ function EventsTab({ events, setEvents, meId, canManageEvents }) {
               {ev.location && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><MapPin size={13} /> {ev.location}</span>}
             </div>
             {ev.description && <div style={{ fontSize: 12.5, color: T.text, marginTop: 8, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{ev.description}</div>}
+            {ev.image_url && (
+              <img src={ev.image_url} alt="" style={{ width: "100%", maxHeight: 260, objectFit: "cover", borderRadius: 10, marginTop: 10, display: "block" }} />
+            )}
+            {(ev.location_url || ev.video_url) && (
+              <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+                {ev.location_url && (
+                  <a href={ev.location_url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: T.gold, textDecoration: "none" }}>
+                    <MapPin size={13} /> عرض الموقع على الخريطة
+                  </a>
+                )}
+                {ev.video_url && (
+                  <a href={ev.video_url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, color: T.gold, textDecoration: "none" }}>
+                    <Video size={13} /> مشاهدة الفيديو
+                  </a>
+                )}
+              </div>
+            )}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
               <span style={{ fontSize: 11.5, color: T.muted }}>{ev.attendees.length} من العائلة سيحضرون</span>
               <button onClick={() => toggleRSVP(ev.id)} style={{ border: `1px solid ${attending ? T.gold : T.line}`, background: attending ? T.ink : "transparent", color: attending ? T.sand : T.ink, borderRadius: 999, padding: "6px 14px", fontSize: 12, fontFamily: "inherit", fontWeight: 700, display: "flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
