@@ -195,6 +195,15 @@ async function fetchNews() {
   return data;
 }
 
+async function uploadNewsImage(file) {
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${Date.now()}_${safeName}`;
+  const { error } = await supabase.storage.from("news-images").upload(path, file, { contentType: file.type || "image/jpeg" });
+  if (error) { console.error("uploadNewsImage failed", error); return null; }
+  const { data } = supabase.storage.from("news-images").getPublicUrl(path);
+  return data.publicUrl;
+}
+
 async function insertNews(item) {
   const { data, error } = await supabase.from("news").insert(item).select().single();
   if (error) { console.error("insertNews failed", error); return null; }
@@ -569,6 +578,10 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
   const [open, setOpen] = useState(false);
   const [type, setType] = useState("عام");
   const [text, setText] = useState("");
+  const [imageFile, setImageFile] = useState(null);
+  const [existingImageUrl, setExistingImageUrl] = useState("");
+  const [locationUrl, setLocationUrl] = useState("");
+  const [uploadingImg, setUploadingImg] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
@@ -577,23 +590,34 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
 
   const submit = async () => {
     if (!text.trim()) return;
+    setUploadingImg(true);
+    let imageUrl = existingImageUrl || null;
+    if (imageFile) {
+      const uploaded = await uploadNewsImage(imageFile);
+      if (uploaded) imageUrl = uploaded;
+    }
+    const payload = { type, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null };
     if (editingId) {
-      const updated = await updateNews(editingId, { type, text: text.trim() });
+      const updated = await updateNews(editingId, payload);
       if (updated) setNews(news.map((n) => (n.id === editingId ? updated : n)));
     } else {
-      const created = await insertNews({ type, text: text.trim(), date: new Date().toISOString().slice(0, 10) });
+      const created = await insertNews({ ...payload, date: new Date().toISOString().slice(0, 10) });
       if (created) setNews([created, ...news]);
     }
-    setText("");
+    setText(""); setImageFile(null); setExistingImageUrl(""); setLocationUrl("");
     setType("عام");
     setEditingId(null);
     setOpen(false);
+    setUploadingImg(false);
   };
 
   const startEdit = (n) => {
     setEditingId(n.id);
     setType(n.type);
     setText(n.text);
+    setExistingImageUrl(n.image_url || "");
+    setImageFile(null);
+    setLocationUrl(n.location_url || "");
     setOpen(true);
   };
 
@@ -669,7 +693,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
       </div>
 
       <SectionTitle action={canManageNews && (
-        <IconButton onClick={() => { setOpen((v) => !v); setEditingId(null); setText(""); setType("عام"); }} active={open}>
+        <IconButton onClick={() => { setOpen((v) => !v); setEditingId(null); setText(""); setType("عام"); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); }} active={open}>
           <Plus size={14} /> إضافة خبر
         </IconButton>
       )}>
@@ -686,10 +710,29 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
             ))}
           </div>
           <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="اكتب نص الخبر هنا..." rows={10} style={{ ...inputStyle, resize: "vertical", minHeight: 180, lineHeight: 1.7 }} />
+
+          <div style={{ marginTop: 8 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: T.text, cursor: "pointer" }}>
+              <Upload size={14} color={T.gold} />
+              {imageFile ? imageFile.name : existingImageUrl ? "استبدال الصورة الحالية" : "إضافة صورة (اختياري)"}
+              <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files[0])} style={{ display: "none" }} />
+            </label>
+            {existingImageUrl && !imageFile && (
+              <div style={{ marginTop: 8, position: "relative", display: "inline-block" }}>
+                <img src={existingImageUrl} alt="" style={{ maxWidth: 140, borderRadius: 10, display: "block" }} />
+                <button onClick={() => setExistingImageUrl("")} style={{ position: "absolute", top: -6, left: -6, background: T.clay, color: "#fff", border: "none", borderRadius: "50%", width: 20, height: 20, cursor: "pointer", fontSize: 11, lineHeight: 1 }}>×</button>
+              </div>
+            )}
+          </div>
+
+          <input type="url" placeholder="رابط الموقع من خرائط جوجل (اختياري)" value={locationUrl} onChange={(e) => setLocationUrl(e.target.value)} style={{ ...inputStyle, marginTop: 8 }} />
+
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button onClick={submit} style={{ ...primaryBtnStyle, marginTop: 0, flex: 1 }}>{editingId ? "حفظ التعديل" : "نشر الخبر"}</button>
+            <button onClick={submit} disabled={uploadingImg} style={{ ...primaryBtnStyle, marginTop: 0, flex: 1 }}>
+              {uploadingImg ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : editingId ? "حفظ التعديل" : "نشر الخبر"}
+            </button>
             <button
-              onClick={() => { setOpen(false); setEditingId(null); setText(""); setType("عام"); }}
+              onClick={() => { setOpen(false); setEditingId(null); setText(""); setType("عام"); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); }}
               style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}
             >
               تراجع
@@ -711,6 +754,19 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{n.text}</div>
+                {n.image_url && (
+                  <img src={n.image_url} alt="" style={{ width: "100%", maxHeight: 260, objectFit: "cover", borderRadius: 10, marginTop: 10, display: "block" }} />
+                )}
+                {n.location_url && (
+                  <a
+                    href={n.location_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 11.5, fontWeight: 700, color: T.gold, textDecoration: "none" }}
+                  >
+                    <MapPin size={13} /> عرض الموقع على الخريطة
+                  </a>
+                )}
                 <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{n.type} · {n.date}</div>
               </div>
             </div>
