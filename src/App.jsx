@@ -475,6 +475,21 @@ function nasabString(chain, maxGen = 4) {
   return chain.slice(0, maxGen).map((m) => m.name).join(" بن ");
 }
 
+// توحيد الحروف ذات الصفة الواحدة حتى لا يفرّق البحث بينها:
+// همزات القطع/الوصل (أ إ آ ٱ ← ا)، الواو/الياء المهموزة (ؤ ← و، ئ ← ي)،
+// الهمزة المفردة تُحذف، التاء المربوطة (ة ← ه)، والألف المقصورة (ى ← ي)،
+// مع إزالة التشكيل والتطويل.
+function normalizeArabicLetters(s) {
+  return (s || "")
+    .replace(/[ً-ْٰـ]/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ؤ/g, "و")
+    .replace(/ئ/g, "ي")
+    .replace(/ء/g, "")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي");
+}
+
 function fullNasabString(chain) {
   return chain.map((m) => m.name).join(" بن ");
 }
@@ -861,7 +876,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [selectedNode, setSelectedNode] = useState(null);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [pdfOpen, setPdfOpen] = useState(false);
-  const [showInteractive, setShowInteractive] = useState(false);
+  const [showInteractive, setShowInteractive] = useState(true);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState(false);
   const canvasRef = useRef(null);
@@ -997,7 +1012,8 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   };
 
   // نحذف «بن» ككلمة مستقلة فقط، حتى لا نُفسد أسماء تحتوي التتابع مثل «بندر» أو «لبنى»
-  const norm = (s) => (s || "").split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
+  // ونوحّد الحروف ذات الصفة الواحدة (الهمزات، التاء المربوطة، الألف المقصورة) قبل المقارنة
+  const norm = (s) => normalizeArabicLetters(s).split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
   const searchResults = useMemo(() => {
     const nq = norm(query);
     if (!nq) return [];
@@ -1169,7 +1185,17 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         <>
       <div style={{ position: "relative", marginBottom: 14 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث عن فرد بالاسم..." style={{ ...inputStyle, padding: "9px 38px 9px 12px" }} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث عن فرد بالاسم..." style={{ ...inputStyle, padding: "9px 38px 9px 36px" }} />
+        {query && (
+          <button
+            onClick={() => setQuery("")}
+            title="مسح البحث"
+            aria-label="مسح البحث"
+            style={{ position: "absolute", left: 8, top: 7, background: "transparent", border: "none", cursor: "pointer", color: T.muted, padding: 4, display: "flex", alignItems: "center" }}
+          >
+            <X size={15} />
+          </button>
+        )}
       </div>
 
       {query.trim() && (
@@ -2261,7 +2287,7 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
   const [editingMember, setEditingMember] = useState(null);
   const [savingMember, setSavingMember] = useState(false);
 
-  const normA = (s) => (s || "").split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
+  const normA = (s) => normalizeArabicLetters(s).split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
   const treeSearchResults = useMemo(() => {
     const nq = normA(treeQuery);
     if (!nq) return [];
