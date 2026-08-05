@@ -82,11 +82,13 @@ function mapMemberRow(row) {
     photoUrl: row.photo_url || "",
     phone: row.phone || "",
     userAccountId: row.user_account_id || null,
+    faceConsent: row.face_consent || false,
+    faceConsentAt: row.face_consent_at || null,
   };
 }
 
 async function fetchMembers() {
-  const cols = "id, legacy_id, member_number, first_name, father_id, spouse_of, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, birth_place, occupation, bio, photo_url, user_account_id";
+  const cols = "id, legacy_id, member_number, first_name, father_id, spouse_of, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, birth_place, occupation, bio, photo_url, user_account_id, face_consent, face_consent_at";
   const pageSize = 1000;
   const all = [];
   // جلب كل الأعضاء على صفحات بدل سقف ثابت (كان 5000) يُقتطع بصمت مع نمو العائلة
@@ -159,7 +161,7 @@ async function insertMember(form) {
 async function updateMemberCore(id, patch) {
   const { error } = await supabase
     .from("members")
-    .update({ occupation: patch.job, bio: patch.bio, region: patch.region, photo_url: patch.photoUrl, birth_place: patch.birthPlace })
+    .update({ occupation: patch.job, bio: patch.bio, region: patch.region, photo_url: patch.photoUrl, birth_place: patch.birthPlace, face_consent: !!patch.faceConsent, face_consent_at: patch.faceConsent ? (patch.faceConsentAt || new Date().toISOString()) : null })
     .eq("id", id);
   if (error) console.error("updateMemberCore failed", error);
 }
@@ -3161,18 +3163,25 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
           <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>البيانات الأساسية</div>
             {form.gender !== "female" && (
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <Avatar name={form.name} photoUrl={form.photoUrl} gender={form.gender} size={54} />
-                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 999, padding: "7px 14px", fontSize: 12, fontWeight: 700, color: T.ink, cursor: photoUploading ? "default" : "pointer", opacity: photoUploading ? 0.7 : 1 }}>
-                    {photoUploading ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : <Upload size={14} />}
-                    {photoUploading ? "جارِ الرفع..." : (form.photoUrl ? "تغيير الصورة" : "اختر صورة من جهازك")}
-                    <input type="file" accept="image/*" disabled={photoUploading} onChange={(e) => { handlePhotoUpload(e.target.files && e.target.files[0]); e.target.value = ""; }} style={{ display: "none" }} />
-                  </label>
-                  {form.photoUrl && !photoUploading && (
-                    <button type="button" onClick={() => setForm({ ...form, photoUrl: "" })} style={{ background: "none", border: "none", color: T.clay, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", textAlign: "right", padding: 0 }}>إزالة الصورة</button>
-                  )}
-                  {photoErr && <span style={{ fontSize: 11, color: T.clay }}>{photoErr}</span>}
+              <div style={{ display: "grid", gap: 10 }}>
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 11.5, color: T.text, lineHeight: 1.7, cursor: "pointer", background: T.sand, border: `1px solid ${form.faceConsent ? T.gold : T.line}`, borderRadius: 10, padding: "10px 12px" }}>
+                  <input type="checkbox" checked={!!form.faceConsent} onChange={(e) => setForm({ ...form, faceConsent: e.target.checked, faceConsentAt: e.target.checked ? (form.faceConsentAt || new Date().toISOString()) : null })} style={{ marginTop: 3, flexShrink: 0 }} />
+                  <span>أوافق على استخدام صورتي داخل تطبيق العائلة: لعرضها في الشجرة وملفي، وللتعرّف الآلي على الوجه (مقارنةً بصور أفراد العائلة فقط) بهدف معرفة الأسماء في اللقاءات. لا تُشارك صوري أو بياناتي خارج التطبيق، ويمكنني سحب الموافقة وإزالة صورتي في أي وقت.</span>
+                </label>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <Avatar name={form.name} photoUrl={form.photoUrl} gender={form.gender} size={54} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 999, padding: "7px 14px", fontSize: 12, fontWeight: 700, color: T.ink, cursor: (photoUploading || !form.faceConsent) ? "not-allowed" : "pointer", opacity: (photoUploading || !form.faceConsent) ? 0.55 : 1 }}>
+                      {photoUploading ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : <Upload size={14} />}
+                      {photoUploading ? "جارِ الرفع..." : (form.photoUrl ? "تغيير الصورة" : "اختر صورة من جهازك")}
+                      <input type="file" accept="image/*" disabled={photoUploading || !form.faceConsent} onChange={(e) => { handlePhotoUpload(e.target.files && e.target.files[0]); e.target.value = ""; }} style={{ display: "none" }} />
+                    </label>
+                    {!form.faceConsent && <span style={{ fontSize: 11, color: T.muted }}>فعّل الموافقة أعلاه لتتمكن من رفع صورتك.</span>}
+                    {form.photoUrl && !photoUploading && (
+                      <button type="button" onClick={() => setForm({ ...form, photoUrl: "" })} style={{ background: "none", border: "none", color: T.clay, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", textAlign: "right", padding: 0 }}>إزالة الصورة</button>
+                    )}
+                    {photoErr && <span style={{ fontSize: 11, color: T.clay }}>{photoErr}</span>}
+                  </div>
                 </div>
               </div>
             )}
