@@ -230,6 +230,15 @@ async function uploadNewsImage(file) {
   return data.publicUrl;
 }
 
+async function uploadMemberPhoto(file) {
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${Date.now()}_${safeName}`;
+  const { error } = await supabase.storage.from("member-photos").upload(path, file, { contentType: file.type || "image/jpeg" });
+  if (error) { console.error("uploadMemberPhoto failed", error); return null; }
+  const { data } = supabase.storage.from("member-photos").getPublicUrl(path);
+  return data.publicUrl;
+}
+
 async function uploadEventImage(file) {
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const path = `${Date.now()}_${safeName}`;
@@ -2765,6 +2774,19 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
   const [savingPw, setSavingPw] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [openFaq, setOpenFaq] = useState(null); // نُقل هنا لأعلى المكوّن (منع مخالفة قواعد الـHooks)
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoErr, setPhotoErr] = useState("");
+
+  const handlePhotoUpload = async (file) => {
+    if (!file) return;
+    if (!file.type || !file.type.startsWith("image/")) { setPhotoErr("اختر ملف صورة."); return; }
+    if (file.size > 5 * 1024 * 1024) { setPhotoErr("حجم الصورة كبير — الحد ٥ ميغابايت."); return; }
+    setPhotoErr(""); setPhotoUploading(true);
+    const url = await uploadMemberPhoto(file);
+    if (url) setForm((f) => ({ ...f, photoUrl: url }));
+    else setPhotoErr("تعذّر رفع الصورة، حاول مجدداً.");
+    setPhotoUploading(false);
+  };
 
   const handleChangePassword = async () => {
     setPwError(""); setPwSuccess("");
@@ -3217,7 +3239,22 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         <>
           <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, display: "grid", gap: 10, marginBottom: 14 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>البيانات الأساسية</div>
-            {form.gender !== "female" && <input placeholder="رابط الصورة الشخصية (اختياري)" value={form.photoUrl || ""} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} style={inputStyle} />}
+            {form.gender !== "female" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <Avatar name={form.name} photoUrl={form.photoUrl} gender={form.gender} size={54} />
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 999, padding: "7px 14px", fontSize: 12, fontWeight: 700, color: T.ink, cursor: photoUploading ? "default" : "pointer", opacity: photoUploading ? 0.7 : 1 }}>
+                    {photoUploading ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : <Upload size={14} />}
+                    {photoUploading ? "جارِ الرفع..." : (form.photoUrl ? "تغيير الصورة" : "اختر صورة من جهازك")}
+                    <input type="file" accept="image/*" disabled={photoUploading} onChange={(e) => { handlePhotoUpload(e.target.files && e.target.files[0]); e.target.value = ""; }} style={{ display: "none" }} />
+                  </label>
+                  {form.photoUrl && !photoUploading && (
+                    <button type="button" onClick={() => setForm({ ...form, photoUrl: "" })} style={{ background: "none", border: "none", color: T.clay, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", textAlign: "right", padding: 0 }}>إزالة الصورة</button>
+                  )}
+                  {photoErr && <span style={{ fontSize: 11, color: T.clay }}>{photoErr}</span>}
+                </div>
+              </div>
+            )}
             <input type="date" placeholder="تاريخ الميلاد" value={form.birthDate || ""} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} style={{ ...inputStyle, minWidth: 0, maxWidth: "100%" }} />
             <input placeholder="مكان الميلاد" value={form.birthPlace || ""} onChange={(e) => setForm({ ...form, birthPlace: e.target.value })} style={inputStyle} />
             <input placeholder="مدينة الإقامة الحالية" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} style={inputStyle} />
