@@ -2425,6 +2425,28 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
   const [confirmDeleteMember, setConfirmDeleteMember] = useState(null);
   const [editingMember, setEditingMember] = useState(null);
   const [savingMember, setSavingMember] = useState(false);
+  const [actEmail, setActEmail] = useState("");
+  const [actQuery, setActQuery] = useState("");
+  const [actMember, setActMember] = useState(null);
+  const [actBusy, setActBusy] = useState(false);
+  const [actMsg, setActMsg] = useState("");
+  const [actErr, setActErr] = useState("");
+
+  const handleActivateAccount = async () => {
+    setActErr(""); setActMsg("");
+    if (!actEmail.trim()) { setActErr("أدخل بريد الحساب."); return; }
+    if (!actMember) { setActErr("اختر العضو المراد ربطه."); return; }
+    setActBusy(true);
+    try {
+      const { data, error } = await supabase.rpc("admin_activate_account", { p_email: actEmail.trim(), p_member_id: actMember.id });
+      if (error) throw new Error(error.message || "تعذّر التفعيل.");
+      setActMsg((data && data.message) || "تم تفعيل الحساب.");
+      setActEmail(""); setActQuery(""); setActMember(null);
+    } catch (e) {
+      setActErr(e.message || "تعذّر التفعيل.");
+    }
+    setActBusy(false);
+  };
 
   const normA = (s) => normalizeArabicLetters(s).split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
   const treeSearchResults = useMemo(() => {
@@ -2708,6 +2730,43 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
           </div>
         ))
       )}
+        </>
+      )}
+
+      {canManageRegistrations && (
+        <>
+      <SectionTitle>تفعيل حساب عضو (بدون رسائل)</SectionTitle>
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: T.muted, marginBottom: 10, lineHeight: 1.7 }}>يربط حساباً مسجّلاً (بالبريد) بملف عضو مباشرةً دون رمز تحقق — للتجارب قبل تفعيل الرسائل.</div>
+        <input type="email" placeholder="بريد الحساب المسجّل" value={actEmail} onChange={(e) => setActEmail(e.target.value)} style={inputStyle} />
+        {actMember ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 10, background: T.sandDark, borderRadius: 10, padding: "8px 12px" }}>
+            <span style={{ fontSize: 12.5, color: T.ink, fontWeight: 700, wordBreak: "break-word" }}>{actMember.nasab || actMember.name}</span>
+            <button onClick={() => { setActMember(null); setActQuery(""); }} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", flexShrink: 0 }}><X size={16} /></button>
+          </div>
+        ) : (
+          <div style={{ marginTop: 10 }}>
+            <input placeholder="ابحث عن العضو بالاسم..." value={actQuery} onChange={(e) => setActQuery(e.target.value)} style={inputStyle} />
+            {actQuery.trim().length >= 2 && (
+              <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, marginTop: 6, maxHeight: 220, overflow: "auto", background: T.card }}>
+                {members.filter((m) => normA(m.nasab || m.name).includes(normA(actQuery))).slice(0, 8).map((m) => (
+                  <div key={m.id} onClick={() => setActMember(m)} style={{ padding: "8px 12px", borderBottom: `1px solid ${T.line}`, cursor: "pointer", fontSize: 12.5, color: T.text }}>
+                    {m.nasab || m.name}{m.memberNumber ? ` ‹${m.memberNumber}›` : ""}
+                  </div>
+                ))}
+                {members.filter((m) => normA(m.nasab || m.name).includes(normA(actQuery))).length === 0 && (
+                  <div style={{ padding: 10, fontSize: 12, color: T.muted, textAlign: "center" }}>لا نتائج.</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        <button onClick={handleActivateAccount} disabled={actBusy} style={{ ...primaryBtnStyle, marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          {actBusy ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : <Check size={14} />} تفعيل الحساب
+        </button>
+        {actErr && <div style={{ color: T.clay, fontSize: 12, marginTop: 8 }}>{actErr}</div>}
+        {actMsg && <div style={{ color: "#3A7D5C", fontSize: 12, marginTop: 8 }}>{actMsg}</div>}
+      </div>
         </>
       )}
 
