@@ -850,10 +850,10 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
   );
 }
 
-const TREE_NODE_W = 96;
+const TREE_NODE_W = 78;
 const TREE_NODE_H = 58;
-const TREE_H_GAP = 16;
-const TREE_V_GAP = 54;
+const TREE_H_GAP = 14;
+const TREE_V_GAP = 50;
 
 const TT = {
   tealDark: "#0d2b2b",
@@ -870,10 +870,59 @@ const TT = {
   text: "#16241f",
 };
 
+// بطاقة سريعة تظهر عند لمس أي فرد بالشجرة: صورة + اسم أول + مدينة + جوال (إن أتيح) + أزرار
+function TreeMemberPopup({ member, onClose, onOpenProfile, onLocate }) {
+  const phone = (member.isAlive && member.phone && member.phoneVisible) ? member.phone : "";
+  const waDigits = phone ? phone.replace(/[^0-9]/g, "") : "";
+  const btn = (bg, color, border) => ({
+    flex: 1, minWidth: 120, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+    borderRadius: 12, padding: "11px 8px", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit",
+    cursor: "pointer", border: border ? `1px solid ${border}` : "none", background: bg, color,
+  });
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 55 }} onClick={onClose}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.card, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto", fontFamily: "'Tajawal', sans-serif" }}>
+        <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "20px 18px 16px", textAlign: "center", position: "relative" }}>
+          <button onClick={onClose} style={{ position: "absolute", left: 12, top: 12, background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
+            <Avatar name={member.name} photoUrl={member.photoUrl} gender={member.gender} size={82} />
+          </div>
+          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 20, fontWeight: 700, color: "#fff" }}>{member.name}</div>
+          {member.nasab && member.nasab !== member.name && (
+            <div style={{ fontSize: 11.5, color: "#CFE0DC", marginTop: 3 }}>{member.nasab}</div>
+          )}
+          {!member.isAlive && <div style={{ fontSize: 12, color: TT.gold400, fontWeight: 700, marginTop: 6 }}>متوفّى رحمه الله</div>}
+        </div>
+        <div style={{ padding: "14px 18px 18px" }}>
+          {member.region && <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 14, color: T.text, padding: "8px 0", borderBottom: `1px dashed ${T.line}` }}><MapPin size={16} color={T.gold} /> {member.region}</div>}
+          {phone && <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 14, color: T.text, padding: "8px 0", borderBottom: `1px dashed ${T.line}` }}><Phone size={16} color={T.gold} /> <span style={{ direction: "ltr" }}>{phone}</span></div>}
+          {!member.region && !phone && (
+            <div style={{ fontSize: 12.5, color: T.muted, textAlign: "center", padding: "8px 0" }}>
+              {member.isAlive ? "لا تتوفّر مدينة أو جوال ظاهر لهذا الفرد." : "—"}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 9, marginTop: 14, flexWrap: "wrap" }}>
+            <button onClick={onOpenProfile} style={btn(TT.teal800, "#fff")}><FileText size={15} /> الملف الشخصي</button>
+            <button onClick={onLocate} style={btn(T.sandDark, T.ink, T.line)}><MapPin size={15} /> موقعه بالشجرة</button>
+          </div>
+          {phone && (
+            <div style={{ display: "flex", gap: 9, marginTop: 9 }}>
+              <a href={`tel:${phone}`} style={{ ...btn(T.gold, "#fff"), textDecoration: "none" }}><Phone size={15} /> اتصال</a>
+              <a href={`https://wa.me/${waDigits}`} target="_blank" rel="noopener noreferrer" style={{ ...btn("#25863f", "#fff"), textDecoration: "none" }}>واتساب</a>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
   const [selectedNode, setSelectedNode] = useState(null);
+  const [detailId, setDetailId] = useState(null);
+  const [profileMember, setProfileMember] = useState(null);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [pdfOpen, setPdfOpen] = useState(false);
   const [showInteractive, setShowInteractive] = useState(true);
@@ -1241,98 +1290,100 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         <EmptyState text="تعذّر تحديد جذر الشجرة." />
       ) : (
         <div ref={svgWrapRef} style={{ overflow: "auto", border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, padding: 16, maxHeight: "60vh" }}>
-          <svg width={Math.max(layout.width, 260)} height={layout.height + 20} style={{ display: "block", margin: "0 auto" }}>
-            {layout.edges.map((e, i) => (
-              <path
-                key={i}
-                d={`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1 + e.y2) / 2}, ${e.x2} ${(e.y1 + e.y2) / 2}, ${e.x2} ${e.y2}`}
-                stroke={TT.line}
-                strokeWidth={1.6}
-                fill="none"
-              />
-            ))}
+          <div style={{ position: "relative", width: Math.max(layout.width, 260), height: layout.height + 30, margin: "0 auto" }}>
+            <svg width={Math.max(layout.width, 260)} height={layout.height + 30} style={{ position: "absolute", top: 0, right: 0, pointerEvents: "none" }}>
+              {layout.edges.map((e, i) => (
+                <path
+                  key={i}
+                  d={`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1 + e.y2) / 2}, ${e.x2} ${(e.y1 + e.y2) / 2}, ${e.x2} ${e.y2}`}
+                  stroke={TT.line}
+                  strokeWidth={1.6}
+                  fill="none"
+                />
+              ))}
+            </svg>
             {layout.nodes.map((n) => {
               const m = byId[n.id];
               const isRoot = n.id === rootId;
               const hasPhone = m?.isAlive !== false && !!m?.hasPhone;
               const isDeceased = m?.isAlive === false;
-              const w = isRoot ? TREE_NODE_W + 20 : TREE_NODE_W;
-              const h = isRoot ? TREE_NODE_H + 14 : TREE_NODE_H;
               const isSelected = selectedNode === n.id;
-
-              let fill = TT.sand100;
-              let stroke = TT.teal800;
-              let strokeWidth = 1.6;
-              let dash = "0";
-              if (isRoot) {
-                fill = TT.teal900;
-                stroke = TT.gold500;
-                strokeWidth = 2;
-              } else if (hasPhone) {
-                fill = TT.hasPhoneFill;
-                stroke = TT.teal700;
-              }
-              if (isDeceased) {
-                stroke = TT.deceasedLine;
-                dash = "4 3";
-              }
-              if (isSelected) {
-                stroke = TT.gold500;
-                strokeWidth = 2.4;
-              }
-
+              const av = isRoot ? 56 : 46;
+              let ring = TT.teal800;
+              if (isRoot) ring = TT.gold500;
+              else if (hasPhone) ring = "#2e9c63";
+              if (isSelected) ring = TT.gold500;
+              const nm = m?.name || "";
               return (
-                <g
+                <div
                   key={n.id}
                   data-node-id={n.id}
-                  transform={`translate(${n.x - w / 2}, ${n.y})`}
-                  onClick={() => { setSelectedNode(n.id); if (n.hasChildren) toggle(n.id); }}
-                  style={{ cursor: n.hasChildren ? "pointer" : "default" }}
+                  style={{ position: "absolute", left: n.x - TREE_NODE_W / 2, top: n.y, width: TREE_NODE_W, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}
                 >
-                  <rect
-                    width={w}
-                    height={h}
-                    rx={12}
-                    fill={fill}
-                    stroke={stroke}
-                    strokeWidth={strokeWidth}
-                    strokeDasharray={dash}
-                  />
-                  <text
-                    x={w / 2}
-                    y={h / 2 - 2}
-                    textAnchor="middle"
-                    fontSize={isRoot ? 13.5 : 11.5}
-                    fontWeight={isRoot ? 800 : 600}
-                    fill={isRoot ? TT.gold400 : TT.text}
-                    fontFamily="'Tajawal', sans-serif"
+                  <div
+                    onClick={() => { setSelectedNode(n.id); setDetailId(n.id); }}
+                    style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%" }}
                   >
-                    {(m?.name || "").length > 12 ? m.name.slice(0, 11) + "…" : m?.name}
-                  </text>
-                  {n.hasChildren && !expanded.has(n.id) && (
-                    <text x={w / 2} y={h - 6} textAnchor="middle" fontSize={9} fill={TT.teal700} fontFamily="'Tajawal', sans-serif">
-                      اضغط للتوسيع
-                    </text>
+                    <div style={{ width: av, height: av, borderRadius: "50%", background: isRoot ? TT.teal900 : T.card, border: `2px ${isDeceased ? "dashed" : "solid"} ${ring}`, boxShadow: hasPhone && !isSelected && !isRoot ? `0 0 0 3px ${TT.hasPhoneFill}` : "none", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+                      {m?.photoUrl && m?.gender !== "female" ? (
+                        <img src={m.photoUrl} alt={nm} style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />
+                      ) : (
+                        <div style={{ width: "100%", height: "100%", borderRadius: "50%", background: `linear-gradient(155deg, ${T.inkSoft}, ${T.ink})`, color: T.goldLight, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: av * 0.42 }}>
+                          {nm ? nm[0] : ""}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ fontSize: isRoot ? 12.5 : 11.5, fontWeight: 700, color: isDeceased ? T.muted : T.ink, textAlign: "center", lineHeight: 1.25, maxWidth: TREE_NODE_W, wordBreak: "break-word" }}>
+                      {nm.length > 12 ? nm.slice(0, 11) + "…" : nm}
+                    </div>
+                  </div>
+                  {n.hasChildren && (
+                    <div
+                      onClick={(ev) => { ev.stopPropagation(); setSelectedNode(n.id); toggle(n.id); }}
+                      title={expanded.has(n.id) ? "طيّ الأبناء" : "عرض الأبناء"}
+                      style={{ cursor: "pointer", width: 20, height: 20, borderRadius: "50%", background: expanded.has(n.id) ? TT.teal800 : T.sandDark, border: `1px solid ${expanded.has(n.id) ? TT.teal800 : T.line}`, color: expanded.has(n.id) ? "#fff" : T.ink, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, lineHeight: 1, marginTop: 1 }}
+                    >
+                      {expanded.has(n.id) ? "▴" : "▾"}
+                    </div>
                   )}
-                </g>
+                </div>
               );
             })}
-          </svg>
+          </div>
         </div>
       )}
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, justifyContent: "center", marginTop: 10, fontSize: 11, color: T.muted }}>
+      <div style={{ textAlign: "center", fontSize: 11, color: T.muted, marginTop: 10 }}>المس صورة أي فرد لعرض بطاقته · اضغط ▾ لعرض الأبناء</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, justifyContent: "center", marginTop: 8, fontSize: 11, color: T.muted }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 4, background: TT.hasPhoneFill, border: `1.4px solid ${TT.teal700}` }} /> جوال مسجّل
+          <span style={{ width: 13, height: 13, borderRadius: "50%", background: T.card, border: `2px solid #2e9c63`, boxShadow: `0 0 0 2px ${TT.hasPhoneFill}` }} /> جوال مسجّل
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.4px solid ${TT.teal800}` }} /> على قيد الحياة
+          <span style={{ width: 13, height: 13, borderRadius: "50%", background: T.card, border: `2px solid ${TT.teal800}` }} /> على قيد الحياة
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 4, border: `1.4px dashed ${TT.deceasedLine}` }} /> متوفى رحمه الله
+          <span style={{ width: 13, height: 13, borderRadius: "50%", background: T.card, border: `2px dashed ${TT.deceasedLine}` }} /> متوفى رحمه الله
         </span>
       </div>
       </>
+      )}
+
+      {detailId && byId[detailId] && (
+        <TreeMemberPopup
+          member={byId[detailId]}
+          onClose={() => setDetailId(null)}
+          onOpenProfile={() => { const mm = byId[detailId]; setDetailId(null); setProfileMember(mm); }}
+          onLocate={() => { const id = detailId; setDetailId(null); goToMember(id); }}
+        />
+      )}
+      {profileMember && (
+        <MemberDetailModal
+          member={profileMember}
+          members={members}
+          canManageTree={canManageTree}
+          onClose={() => setProfileMember(null)}
+          onSaved={(updated) => { setMembers((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x))); setProfileMember(null); }}
+        />
       )}
     </div>
   );
