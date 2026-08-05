@@ -2982,7 +2982,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
     try {
       const desc = await urlToFaceDescriptor(form.photoUrl);
       if (!desc) { setFaceStatus("لم يُكتشف وجه واضح في الصورة — جرّب صورة أوضح للوجه."); setPhotoUploading(false); return; }
-      const { error } = await supabase.from("face_embeddings").upsert({ member_id: form.id, embedding: descriptorToVector(desc), updated_at: new Date().toISOString() });
+      const { error } = await supabase.rpc("save_my_face_embedding", { p_embedding: descriptorToVector(desc) });
       if (error) { setFaceStatus("تعذّر حفظ البصمة: " + (error.message || "خطأ")); setPhotoUploading(false); return; }
       setForm((f) => ({ ...f, faceEnrolled: true, faceDescriptor: desc }));
       setFaceStatus("تم حفظ بصمة وجهك ✓");
@@ -3069,8 +3069,8 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         await supabase.from("face_embeddings").delete().eq("member_id", form.id);
         enrolled = false;
       } else if (form.faceDescriptor) {
-        const { error: eErr } = await supabase.from("face_embeddings").upsert({ member_id: form.id, embedding: descriptorToVector(form.faceDescriptor), updated_at: new Date().toISOString() });
-        if (eErr) console.error("face embedding upsert failed", eErr);
+        const { error: eErr } = await supabase.rpc("save_my_face_embedding", { p_embedding: descriptorToVector(form.faceDescriptor) });
+        if (eErr) console.error("face embedding save failed", eErr);
         enrolled = !eErr;
       }
     } catch (e) { console.error("face embedding sync failed", e); }
