@@ -932,9 +932,9 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [selectedNode, setSelectedNode] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [profileMember, setProfileMember] = useState(null);
+  const centeredRef = useRef(false);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [pdfOpen, setPdfOpen] = useState(false);
-  const [showInteractive, setShowInteractive] = useState(true);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState(false);
   const canvasRef = useRef(null);
@@ -1142,9 +1142,20 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
     return { nodes, edges, width, height };
   }, [rootId, byId, childrenMap, expanded]);
 
+  // تمركز الجذر «تركي» أفقياً في منتصف الصفحة عند أول عرض
+  useEffect(() => {
+    if (centeredRef.current) return;
+    const c = svgWrapRef.current;
+    if (c && layout.width > 0) {
+      c.scrollLeft = (c.scrollWidth - c.clientWidth) / 2;
+      centeredRef.current = true;
+    }
+  }, [layout.width]);
+
   return (
     <div>
-      <div style={{ marginTop: 4, marginBottom: 16, borderRadius: 14, overflow: "hidden", border: `1px solid ${TT.gold500}`, boxShadow: "0 3px 10px rgba(13,43,43,0.15)" }}>
+      {/* المربّع الزخرفي */}
+      <div style={{ marginTop: 4, marginBottom: 10, borderRadius: 14, overflow: "hidden", border: `1px solid ${TT.gold500}`, boxShadow: "0 3px 10px rgba(13,43,43,0.15)" }}>
         <img
           src="/Nasab-Frame.jpeg"
           alt="نسب آل تركي من ذرية تركي بن إبراهيم بن سليمان بن حماد بن عامر البدراني الدوسري، المتوفى عام ١١١٧هـ رحمه الله"
@@ -1152,112 +1163,30 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         />
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        <button
-          onClick={() => setPdfOpen(true)}
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 6,
-            padding: "14px 8px",
-            background: "linear-gradient(160deg, #123838, #0d2b2b)",
-            color: "#F4EFE3",
-            border: "1px solid #c9a227",
-            borderRadius: 14,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          <FileText size={20} color="#dab94a" />
-          <span style={{ fontSize: 12.5, fontWeight: 800 }}>الشجرة المصورة</span>
-          <span style={{ fontSize: 10, color: "#c9b98a" }}>الطبعة الثالثة، ١٤٤٧هـ</span>
-        </button>
-        <button
-          onClick={() => setShowInteractive((v) => !v)}
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 6,
-            padding: "14px 8px",
-            background: showInteractive ? T.sandDark : T.card,
-            color: T.ink,
-            border: `1px solid ${showInteractive ? T.gold : T.line}`,
-            borderRadius: 14,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          <GitBranch size={20} color={T.gold} />
-          <span style={{ fontSize: 12.5, fontWeight: 800 }}>الشجرة التفاعلية</span>
-          <span style={{ fontSize: 10, color: T.muted }}>{showInteractive ? "إخفاء" : "بيانات حية، بحث وتفرّع"}</span>
-        </button>
-      </div>
-
-      {pdfOpen && (
-        <div style={{ position: "fixed", inset: 0, background: "#0d2b2b", zIndex: 70, display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderBottom: "2px solid #c9a227" }}>
-            <button
-              onClick={handleDownloadPdf}
-              style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}
-            >
-              تحميل
-            </button>
-            <span style={{ color: "#dab94a", fontSize: 13, fontWeight: 700 }}>الشجرة المصورة</span>
-            <button
-              onClick={() => setPdfOpen(false)}
-              style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}
-            >
-              <X size={16} /> إغلاق
-            </button>
-          </div>
-          <div style={{ flex: 1, overflow: "auto", padding: 8 }}>
-            {pdfLoading && (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "80px 0", color: "#F4EFE3" }}>
-                <Loader2 size={24} style={{ animation: "rosette-spin 1.2s linear infinite" }} />
-                <span style={{ fontSize: 13 }}>جارِ تحميل الشجرة...</span>
-              </div>
-            )}
-            {pdfError && (
-              <div style={{ textAlign: "center", padding: "60px 20px", color: "#F4EFE3" }}>
-                <div style={{ marginBottom: 14 }}>تعذّر عرض الشجرة داخل الصفحة (قد يكون بسبب الشبكة أو المتصفح).</div>
-                <a
-                  href="/Family-Tree.pdf"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ display: "inline-block", padding: "9px 18px", background: "#c9a227", color: "#0d2b2b", borderRadius: 8, textDecoration: "none", fontWeight: 700, fontSize: 13 }}
-                >
-                  فتح ملف PDF مباشرة
-                </a>
-              </div>
-            )}
-            <canvas ref={canvasRef} style={{ display: pdfLoading || pdfError ? "none" : "block", margin: "0 auto" }} />
-          </div>
-        </div>
-      )}
-
-      {showInteractive && (
-        <>
-      <div style={{ position: "relative", marginBottom: 14 }}>
+      {/* مستطيل البحث */}
+      <div style={{ position: "relative", marginBottom: 10 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث عن فرد بالاسم..." style={{ ...inputStyle, padding: "9px 38px 9px 36px" }} />
         {query && (
-          <button
-            onClick={() => setQuery("")}
-            title="مسح البحث"
-            aria-label="مسح البحث"
-            style={{ position: "absolute", left: 8, top: 7, background: "transparent", border: "none", cursor: "pointer", color: T.muted, padding: 4, display: "flex", alignItems: "center" }}
-          >
+          <button onClick={() => setQuery("")} title="مسح البحث" aria-label="مسح البحث" style={{ position: "absolute", left: 8, top: 7, background: "transparent", border: "none", cursor: "pointer", color: T.muted, padding: 4, display: "flex", alignItems: "center" }}>
             <X size={15} />
           </button>
         )}
       </div>
 
+      {/* تبويبان: التفاعلية (نشطة) + المصوّرة (زر يفتح النافذة) */}
+      <div style={{ display: "flex", gap: 5, background: T.sandDark, borderRadius: 12, padding: 4, marginBottom: 12 }}>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 8px", background: TT.teal800, color: "#fff", borderRadius: 9, fontSize: 12.5, fontWeight: 800, boxShadow: "0 1px 3px rgba(13,43,43,0.2)" }}>
+          <GitBranch size={16} color={TT.gold400} /> الشجرة التفاعلية
+        </div>
+        <button onClick={() => setPdfOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 8px", background: "transparent", color: T.ink, border: "none", borderRadius: 9, fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+          <FileText size={16} color={T.gold} /> الشجرة المصوّرة
+        </button>
+      </div>
+
+      {/* نتائج البحث */}
       {query.trim() && (
-        <div style={{ border: `1px solid ${TT.gold500}`, borderRadius: 14, background: T.card, marginBottom: 14, overflow: "auto", maxHeight: "50vh" }}>
+        <div style={{ border: `1px solid ${TT.gold500}`, borderRadius: 14, background: T.card, marginBottom: 12, overflow: "auto", maxHeight: "50vh" }}>
           {searchResults.length === 0 ? (
             <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: T.muted }}>لا نتائج مطابقة.</div>
           ) : (
@@ -1266,20 +1195,12 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 12.5, fontWeight: 700, color: T.text, wordBreak: "break-word" }}>{label}</span>
                   {rm.fullNasab && rm.fullNasab !== label && (
-                    <button
-                      onClick={() => setExpandedResults((prev) => { const n = new Set(prev); n.has(rm.id) ? n.delete(rm.id) : n.add(rm.id); return n; })}
-                      title="إظهار النسب كامل"
-                      style={{ border: `1px solid ${T.line}`, background: "transparent", borderRadius: 8, padding: "2px 5px", cursor: "pointer", color: T.muted, display: "flex", alignItems: "center" }}
-                    >
+                    <button onClick={() => setExpandedResults((prev) => { const n = new Set(prev); n.has(rm.id) ? n.delete(rm.id) : n.add(rm.id); return n; })} title="إظهار النسب كامل" style={{ border: `1px solid ${T.line}`, background: "transparent", borderRadius: 8, padding: "2px 5px", cursor: "pointer", color: T.muted, display: "flex", alignItems: "center" }}>
                       <ChevronDown size={13} style={{ transform: expandedResults.has(rm.id) ? "rotate(180deg)" : "none" }} />
                     </button>
                   )}
                 </div>
-                <button
-                  onClick={() => goToMember(rm.id)}
-                  title="الذهاب لمكانه بالشجرة"
-                  style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}
-                >
+                <button onClick={() => goToMember(rm.id)} title="الذهاب لمكانه بالشجرة" style={{ border: "none", background: TT.teal800, color: "#fff", borderRadius: 8, padding: "4px 9px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}>
                   <MapPin size={12} /> الموقع بالشجرة
                 </button>
                 {expandedResults.has(rm.id) && (
@@ -1291,24 +1212,15 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 10, opacity: 0.8 }}>
-        {[0, 1, 2, 3, 4].map((i) => <Rosette key={i} size={18} color={T.gold} />)}
-      </div>
-
+      {/* الشجرة التفاعلية — «تركي» في المنتصف */}
       {!rootId ? (
         <EmptyState text="تعذّر تحديد جذر الشجرة." />
       ) : (
-        <div ref={svgWrapRef} style={{ overflow: "auto", border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, padding: 16, maxHeight: "60vh" }}>
+        <div ref={svgWrapRef} style={{ overflow: "auto", border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, padding: 16, maxHeight: "62vh" }}>
           <div style={{ position: "relative", width: Math.max(layout.width, 260), height: layout.height + 30, margin: "0 auto" }}>
             <svg width={Math.max(layout.width, 260)} height={layout.height + 30} style={{ position: "absolute", top: 0, right: 0, pointerEvents: "none" }}>
               {layout.edges.map((e, i) => (
-                <path
-                  key={i}
-                  d={`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1 + e.y2) / 2}, ${e.x2} ${(e.y1 + e.y2) / 2}, ${e.x2} ${e.y2}`}
-                  stroke={TT.line}
-                  strokeWidth={1.6}
-                  fill="none"
-                />
+                <path key={i} d={`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1 + e.y2) / 2}, ${e.x2} ${(e.y1 + e.y2) / 2}, ${e.x2} ${e.y2}`} stroke={TT.line} strokeWidth={1.6} fill="none" />
               ))}
             </svg>
             {layout.nodes.map((n) => {
@@ -1324,15 +1236,8 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
               if (isSelected) ring = TT.gold500;
               const nm = m?.name || "";
               return (
-                <div
-                  key={n.id}
-                  data-node-id={n.id}
-                  style={{ position: "absolute", left: n.x - TREE_NODE_W / 2, top: n.y, width: TREE_NODE_W, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}
-                >
-                  <div
-                    onClick={() => { setSelectedNode(n.id); setDetailId(n.id); }}
-                    style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%" }}
-                  >
+                <div key={n.id} data-node-id={n.id} style={{ position: "absolute", left: n.x - TREE_NODE_W / 2, top: n.y, width: TREE_NODE_W, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                  <div onClick={() => { setSelectedNode(n.id); setDetailId(n.id); }} style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%" }}>
                     <div style={{ width: av, height: av, borderRadius: "50%", background: isRoot ? TT.teal900 : T.card, border: `2px ${isDeceased ? "dashed" : "solid"} ${ring}`, boxShadow: hasPhone && !isSelected && !isRoot ? `0 0 0 3px ${TT.hasPhoneFill}` : "none", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
                       {m?.photoUrl && m?.gender !== "female" ? (
                         <img src={m.photoUrl} alt={nm} style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />
@@ -1342,16 +1247,12 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
                         </div>
                       )}
                     </div>
-                    <div style={{ fontSize: isRoot ? 12.5 : 11.5, fontWeight: 700, color: isDeceased ? T.muted : T.ink, textAlign: "center", lineHeight: 1.25, maxWidth: TREE_NODE_W, wordBreak: "break-word" }}>
+                    <div style={{ fontSize: isRoot ? 12.5 : 11.5, fontWeight: isRoot ? 800 : 700, color: isDeceased ? T.muted : T.ink, textAlign: "center", lineHeight: 1.25, maxWidth: TREE_NODE_W, wordBreak: "break-word" }}>
                       {nm.length > 12 ? nm.slice(0, 11) + "…" : nm}
                     </div>
                   </div>
                   {n.hasChildren && (
-                    <div
-                      onClick={(ev) => { ev.stopPropagation(); setSelectedNode(n.id); toggle(n.id); }}
-                      title={expanded.has(n.id) ? "طيّ الأبناء" : "عرض الأبناء"}
-                      style={{ cursor: "pointer", width: 20, height: 20, borderRadius: "50%", background: expanded.has(n.id) ? TT.teal800 : T.sandDark, border: `1px solid ${expanded.has(n.id) ? TT.teal800 : T.line}`, color: expanded.has(n.id) ? "#fff" : T.ink, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, lineHeight: 1, marginTop: 1 }}
-                    >
+                    <div onClick={(ev) => { ev.stopPropagation(); setSelectedNode(n.id); toggle(n.id); }} title={expanded.has(n.id) ? "طيّ الأبناء" : "عرض الأبناء"} style={{ cursor: "pointer", width: 20, height: 20, borderRadius: "50%", background: expanded.has(n.id) ? TT.teal800 : T.sandDark, border: `1px solid ${expanded.has(n.id) ? TT.teal800 : T.line}`, color: expanded.has(n.id) ? "#fff" : T.ink, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, lineHeight: 1, marginTop: 1 }}>
                       {expanded.has(n.id) ? "▴" : "▾"}
                     </div>
                   )}
@@ -1362,6 +1263,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         </div>
       )}
 
+      {/* المفتاح */}
       <div style={{ textAlign: "center", fontSize: 11, color: T.muted, marginTop: 10 }}>المس صورة أي فرد لعرض بطاقته · اضغط ▾ لعرض الأبناء</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, justifyContent: "center", marginTop: 8, fontSize: 11, color: T.muted }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -1374,25 +1276,44 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
           <span style={{ width: 13, height: 13, borderRadius: "50%", background: T.card, border: `2px dashed ${TT.deceasedLine}` }} /> متوفى رحمه الله
         </span>
       </div>
-      </>
+
+      {/* نافذة الشجرة المصوّرة */}
+      {pdfOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "#0d2b2b", zIndex: 70, display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderBottom: "2px solid #c9a227" }}>
+            <button onClick={handleDownloadPdf} style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}>
+              تحميل
+            </button>
+            <span style={{ color: "#dab94a", fontSize: 13, fontWeight: 700 }}>الشجرة المصوّرة</span>
+            <button onClick={() => setPdfOpen(false)} style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}>
+              <X size={16} /> إغلاق
+            </button>
+          </div>
+          <div style={{ flex: 1, overflow: "auto", padding: 8 }}>
+            {pdfLoading && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "80px 0", color: "#F4EFE3" }}>
+                <Loader2 size={24} style={{ animation: "rosette-spin 1.2s linear infinite" }} />
+                <span style={{ fontSize: 13 }}>جارِ تحميل الشجرة...</span>
+              </div>
+            )}
+            {pdfError && (
+              <div style={{ textAlign: "center", padding: "60px 20px", color: "#F4EFE3" }}>
+                <div style={{ marginBottom: 14 }}>تعذّر عرض الشجرة داخل الصفحة (قد يكون بسبب الشبكة أو المتصفح).</div>
+                <a href="/Family-Tree.pdf" target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "9px 18px", background: "#c9a227", color: "#0d2b2b", borderRadius: 8, textDecoration: "none", fontWeight: 700, fontSize: 13 }}>
+                  فتح ملف PDF مباشرة
+                </a>
+              </div>
+            )}
+            <canvas ref={canvasRef} style={{ display: pdfLoading || pdfError ? "none" : "block", margin: "0 auto" }} />
+          </div>
+        </div>
       )}
 
       {detailId && byId[detailId] && (
-        <TreeMemberPopup
-          member={byId[detailId]}
-          onClose={() => setDetailId(null)}
-          onOpenProfile={() => { const mm = byId[detailId]; setDetailId(null); setProfileMember(mm); }}
-          onLocate={() => { const id = detailId; setDetailId(null); goToMember(id); }}
-        />
+        <TreeMemberPopup member={byId[detailId]} onClose={() => setDetailId(null)} onOpenProfile={() => { const mm = byId[detailId]; setDetailId(null); setProfileMember(mm); }} onLocate={() => { const id = detailId; setDetailId(null); goToMember(id); }} />
       )}
       {profileMember && (
-        <MemberDetailModal
-          member={profileMember}
-          members={members}
-          canManageTree={canManageTree}
-          onClose={() => setProfileMember(null)}
-          onSaved={(updated) => { setMembers((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x))); setProfileMember(null); }}
-        />
+        <MemberDetailModal member={profileMember} members={members} canManageTree={canManageTree} onClose={() => setProfileMember(null)} onSaved={(updated) => { setMembers((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x))); setProfileMember(null); }} />
       )}
     </div>
   );
