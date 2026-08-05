@@ -6,7 +6,8 @@ import {
   Baby, HeartHandshake, Megaphone, Cross, Loader2,
   FileText, Phone, Cake, Shield, UserPlus, Trash2, Save, Pencil,
   BookOpen, ChevronRight, ChevronLeft, Upload, LogOut, KeyRound,
-  Settings, Fingerprint, Lock, HelpCircle, MessageCircle, ChevronsRight, Video
+  Settings, Fingerprint, Lock, HelpCircle, MessageCircle, ChevronsRight, Video,
+  Camera, ImagePlus
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -239,6 +240,45 @@ async function uploadMemberPhoto(file) {
   if (error) { console.error("uploadMemberPhoto failed", error); return null; }
   const { data } = supabase.storage.from("member-photos").getPublicUrl(path);
   return data.publicUrl;
+}
+
+// ===== التعرّف على الوجه (face-api.js يُحمَّل من CDN عند الحاجة فقط) =====
+const FACE_LIB_URL = "https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js";
+const FACE_MODELS_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
+let _faceReady = null;
+function ensureFaceApi() {
+  if (_faceReady) return _faceReady;
+  _faceReady = (async () => {
+    if (!window.faceapi) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = FACE_LIB_URL; s.async = true;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error("تعذّر تحميل مكتبة التعرّف على الوجه"));
+        document.head.appendChild(s);
+      });
+    }
+    const fa = window.faceapi;
+    if (!fa) throw new Error("تعذّر تهيئة مكتبة التعرّف");
+    await fa.nets.ssdMobilenetv1.loadFromUri(FACE_MODELS_URL);
+    await fa.nets.faceLandmark68Net.loadFromUri(FACE_MODELS_URL);
+    await fa.nets.faceRecognitionNet.loadFromUri(FACE_MODELS_URL);
+    return fa;
+  })().catch((e) => { _faceReady = null; throw e; });
+  return _faceReady;
+}
+// يُعيد مصفوفة 128 من صورة، أو null إذا لم يُكتشف وجه
+async function fileToFaceDescriptor(file) {
+  const fa = await ensureFaceApi();
+  const img = await fa.bufferToImage(file);
+  const det = await fa.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+  return det ? Array.from(det.descriptor) : null;
+}
+function descriptorToVector(d) { return "[" + d.join(",") + "]"; }
+// المسافة 0 = تطابق تام، ~0.6 = الحد. نحوّلها لنسبة ثقة تقريبية
+function distanceToConfidence(dist) {
+  const c = Math.round((1 - dist / 0.6) * 100);
+  return Math.max(0, Math.min(100, c));
 }
 
 async function uploadEventImage(file) {
@@ -928,12 +968,120 @@ function TreeMemberPopup({ member, onClose, onOpenProfile, onLocate }) {
   );
 }
 
+// شاشة «مَن هذا؟» — تعرّف على فرد بصورة/كاميرا بمقارنتها ببصمات العائلة
+function WhoIsThisModal({ members, onClose, onOpenMember }) {
+  const [phase, setPhase] = useState("idle"); // idle | working | done | error
+  const [msg, setMsg] = useState("");
+  const [preview, setPreview] = useState("");
+  const [results, setResults] = useState([]);
+  const byId = useMemo(() => Object.fromEntries(members.map((m) => [m.id, m])), [members]);
+
+  const handleImage = async (file) => {
+    if (!file) return;
+    if (!file.type || !file.type.startsWith("image/")) { setPhase("error"); setMsg("اختر صورة صحيحة."); return; }
+    try { setPreview(URL.createObjectURL(file)); } catch (e) {}
+    setResults([]); setPhase("working"); setMsg("جارِ تحميل نموذج التعرّف وتحليل الوجه...");
+    try {
+      const desc = await fileToFaceDescriptor(file);
+      if (!desc) { setPhase("error"); setMsg("لم يُكتشف وجه واضح — جرّب صورة أقرب وأوضح للوجه، بإضاءة جيدة."); return; }
+      const { data, error } = await supabase.rpc("match_faces", { query_embedding: descriptorToVector(desc), match_count: 3, max_distance: 0.6 });
+      if (error) { console.error(error); setPhase("error"); setMsg("تعذّر البحث في القاعدة. حاول مجدداً."); return; }
+      const cands = (data || []).map((r) => ({ member: byId[r.member_id], confidence: distanceToConfidence(r.distance) })).filter((c) => c.member);
+      setResults(cands); setPhase("done");
+      setMsg(cands.length ? "" : "لم يُتعرّف على الوجه — قد لا يكون الشخص قد رفع صورته وفعّل موافقته بعد.");
+    } catch (e) {
+      console.error(e); setPhase("error"); setMsg((e && e.message) ? e.message : "حدث خطأ أثناء التحليل.");
+    }
+  };
+
+  const pickBtn = (label, icon, capture) => (
+    <label style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "16px 10px", background: T.sand, border: `1px solid ${T.line}`, borderRadius: 14, cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: T.ink }}>
+      {icon}
+      {label}
+      <input type="file" accept="image/*" {...(capture ? { capture } : {})} onChange={(e) => { handleImage(e.target.files && e.target.files[0]); e.target.value = ""; }} style={{ display: "none" }} />
+    </label>
+  );
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }} onClick={onClose}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.card, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", fontFamily: "'Tajawal', sans-serif" }}>
+        <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif" }}>مَن هذا؟</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
+        </div>
+        <div style={{ padding: 18 }}>
+          {preview && (
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+              <img src={preview} alt="الصورة" style={{ width: 120, height: 120, borderRadius: 14, objectFit: "cover", border: `2px solid ${TT.gold500}` }} />
+            </div>
+          )}
+
+          {phase === "idle" && (
+            <>
+              <div style={{ fontSize: 12.5, color: T.muted, textAlign: "center", marginBottom: 14, lineHeight: 1.7 }}>التقط صورة للوجه أو اخترها، ويُقارَن بصور العائلة لعرض الأرجح. القرار النهائي لك.</div>
+              <div style={{ display: "flex", gap: 10 }}>
+                {pickBtn("التقاط بالكاميرا", <Camera size={22} color={T.gold} />, "environment")}
+                {pickBtn("اختيار صورة", <ImagePlus size={22} color={T.gold} />)}
+              </div>
+            </>
+          )}
+
+          {phase === "working" && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "24px 0", color: T.muted }}>
+              <Loader2 size={26} style={{ animation: "rosette-spin 1.1s linear infinite", color: T.gold }} />
+              <span style={{ fontSize: 12.5 }}>{msg}</span>
+              <span style={{ fontSize: 10.5, color: T.muted }}>أول مرة قد تأخذ لحظات لتحميل النموذج.</span>
+            </div>
+          )}
+
+          {phase === "error" && (
+            <div style={{ textAlign: "center", padding: "10px 0" }}>
+              <div style={{ fontSize: 13, color: T.clay, marginBottom: 14, lineHeight: 1.7 }}>{msg}</div>
+              <button onClick={() => { setPhase("idle"); setPreview(""); setMsg(""); }} style={{ background: TT.teal800, color: "#fff", border: "none", borderRadius: 10, padding: "9px 18px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>حاول مجدداً</button>
+            </div>
+          )}
+
+          {phase === "done" && (
+            <>
+              {results.length === 0 ? (
+                <div style={{ fontSize: 13, color: T.muted, textAlign: "center", padding: "10px 0", lineHeight: 1.8 }}>{msg}</div>
+              ) : (
+                <div style={{ display: "grid", gap: 10 }}>
+                  <div style={{ fontSize: 12, color: T.muted, textAlign: "center" }}>الأرجح (اضغط للتأكيد وفتح الملف):</div>
+                  {results.map(({ member: m, confidence }, i) => (
+                    <button key={m.id} onClick={() => onOpenMember(m)} style={{ display: "flex", alignItems: "center", gap: 12, textAlign: "right", background: i === 0 ? TT.hasPhoneFill : T.sand, border: `1px solid ${i === 0 ? "#2e9c63" : T.line}`, borderRadius: 14, padding: "10px 12px", cursor: "pointer", fontFamily: "inherit" }}>
+                      <Avatar name={m.name} photoUrl={m.photoUrl} gender={m.gender} size={48} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 800, color: T.ink }}>{m.name}</div>
+                        <div style={{ fontSize: 11, color: T.muted, wordBreak: "break-word" }}>{m.nasab}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                          <div style={{ flex: 1, height: 6, borderRadius: 999, background: T.sandDark, overflow: "hidden" }}>
+                            <div style={{ width: `${confidence}%`, height: "100%", background: confidence >= 70 ? "#1b7a3d" : confidence >= 45 ? TT.gold500 : T.clay }} />
+                          </div>
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color: T.muted }}>{confidence}%</span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                  <div style={{ fontSize: 10.5, color: T.muted, textAlign: "center", lineHeight: 1.7 }}>ملاحظة: التشابه العائلي قد يخلط بين الأقارب — تأكّد بنفسك قبل الاعتماد على النتيجة.</div>
+                </div>
+              )}
+              <button onClick={() => { setPhase("idle"); setPreview(""); setMsg(""); setResults([]); }} style={{ width: "100%", marginTop: 14, background: "transparent", color: TT.teal800, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>صورة أخرى</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
   const [selectedNode, setSelectedNode] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [profileMember, setProfileMember] = useState(null);
+  const [whoOpen, setWhoOpen] = useState(false);
   const centeredRef = useRef(false);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -1186,6 +1334,11 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         </button>
       </div>
 
+      {/* زر التعرّف بالصورة */}
+      <button onClick={() => setWhoOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px", marginBottom: 12, background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, fontSize: 13, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+        <Camera size={17} color={TT.gold400} /> مَن هذا؟ — تعرّف بالصورة
+      </button>
+
       {/* نتائج البحث */}
       {query.trim() && (
         <div style={{ border: `1px solid ${TT.gold500}`, borderRadius: 14, background: T.card, marginBottom: 12, overflow: "auto", maxHeight: "50vh" }}>
@@ -1316,6 +1469,9 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       )}
       {profileMember && (
         <MemberDetailModal member={profileMember} members={members} canManageTree={canManageTree} onClose={() => setProfileMember(null)} onSaved={(updated) => { setMembers((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x))); setProfileMember(null); }} />
+      )}
+      {whoOpen && (
+        <WhoIsThisModal members={members} onClose={() => setWhoOpen(false)} onOpenMember={(m) => { setWhoOpen(false); setProfileMember(m); }} />
       )}
     </div>
   );
@@ -2699,15 +2855,24 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
   const [openFaq, setOpenFaq] = useState(null); // نُقل هنا لأعلى المكوّن (منع مخالفة قواعد الـHooks)
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoErr, setPhotoErr] = useState("");
+  const [faceStatus, setFaceStatus] = useState("");
 
   const handlePhotoUpload = async (file) => {
     if (!file) return;
     if (!file.type || !file.type.startsWith("image/")) { setPhotoErr("اختر ملف صورة."); return; }
     if (file.size > 5 * 1024 * 1024) { setPhotoErr("حجم الصورة كبير — الحد ٥ ميغابايت."); return; }
-    setPhotoErr(""); setPhotoUploading(true);
+    setPhotoErr(""); setFaceStatus(""); setPhotoUploading(true);
     const url = await uploadMemberPhoto(file);
-    if (url) setForm((f) => ({ ...f, photoUrl: url }));
-    else setPhotoErr("تعذّر رفع الصورة، حاول مجدداً.");
+    if (url) {
+      setForm((f) => ({ ...f, photoUrl: url }));
+      // تجهيز بصمة الوجه للتعرّف — أفضل جهد، لا يمنع نجاح الرفع
+      try {
+        setFaceStatus("جارِ تجهيز التعرّف على الوجه...");
+        const desc = await fileToFaceDescriptor(file);
+        if (desc) { setForm((f) => ({ ...f, faceDescriptor: desc })); setFaceStatus("تم تجهيز التعرّف على وجهك ✓"); }
+        else { setForm((f) => ({ ...f, faceDescriptor: null })); setFaceStatus("لم يُكتشف وجه واضح — ستظهر صورتك لكن قد لا تُستخدم للتعرّف. جرّب صورة أوضح."); }
+      } catch (e) { setForm((f) => ({ ...f, faceDescriptor: null })); setFaceStatus("تعذّر تجهيز التعرّف الآن (قد تكون الشبكة) — صورتك حُفظت."); }
+    } else setPhotoErr("تعذّر رفع الصورة، حاول مجدداً.");
     setPhotoUploading(false);
   };
 
@@ -2781,6 +2946,14 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
       emailVisible: form.emailVisible,
       cvUrl: form.cvUrl,
     });
+    // مزامنة بصمة الوجه: حفظ عند وجود موافقة+صورة+بصمة جديدة، وحذف عند سحب الموافقة أو إزالة الصورة
+    try {
+      if (!form.faceConsent || !form.photoUrl) {
+        await supabase.from("face_embeddings").delete().eq("member_id", form.id);
+      } else if (form.faceDescriptor) {
+        await supabase.from("face_embeddings").upsert({ member_id: form.id, embedding: descriptorToVector(form.faceDescriptor), updated_at: new Date().toISOString() });
+      }
+    } catch (e) { console.error("face embedding sync failed", e); }
     const newProfilesMap = {
       ...profilesMap,
       [form.id]: {
@@ -3181,6 +3354,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                       <button type="button" onClick={() => setForm({ ...form, photoUrl: "" })} style={{ background: "none", border: "none", color: T.clay, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", textAlign: "right", padding: 0 }}>إزالة الصورة</button>
                     )}
                     {photoErr && <span style={{ fontSize: 11, color: T.clay }}>{photoErr}</span>}
+                    {faceStatus && <span style={{ fontSize: 11, color: faceStatus.includes("✓") ? "#1b7a3d" : T.muted }}>{faceStatus}</span>}
                   </div>
                 </div>
               </div>
