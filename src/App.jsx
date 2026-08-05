@@ -85,11 +85,12 @@ function mapMemberRow(row) {
     userAccountId: row.user_account_id || null,
     faceConsent: row.face_consent || false,
     faceConsentAt: row.face_consent_at || null,
+    faceEnrolled: row.face_enrolled || false,
   };
 }
 
 async function fetchMembers() {
-  const cols = "id, legacy_id, member_number, first_name, father_id, spouse_of, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, birth_place, occupation, bio, photo_url, user_account_id, face_consent, face_consent_at";
+  const cols = "id, legacy_id, member_number, first_name, father_id, spouse_of, gender, is_alive, birth_date, birth_date_precision, death_date, death_date_precision, region, birth_place, occupation, bio, photo_url, user_account_id, face_consent, face_consent_at, face_enrolled";
   const pageSize = 1000;
   const all = [];
   // جلب كل الأعضاء على صفحات بدل سقف ثابت (كان 5000) يُقتطع بصمت مع نمو العائلة
@@ -271,6 +272,15 @@ function ensureFaceApi() {
 async function fileToFaceDescriptor(file) {
   const fa = await ensureFaceApi();
   const img = await fa.bufferToImage(file);
+  const det = await fa.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+  return det ? Array.from(det.descriptor) : null;
+}
+// يحسب البصمة من صورة محفوظة (رابط) — لإعادة المحاولة دون رفع جديد
+async function urlToFaceDescriptor(url) {
+  const fa = await ensureFaceApi();
+  const res = await fetch(url);
+  const blob = await res.blob();
+  const img = await fa.bufferToImage(blob);
   const det = await fa.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
   return det ? Array.from(det.descriptor) : null;
 }
@@ -604,6 +614,24 @@ function Avatar({ name, photoUrl, gender, size = 44 }) {
     <div style={{ width: size, height: size, borderRadius: "50%", background: `linear-gradient(155deg, ${T.inkSoft}, ${T.ink})`, color: T.goldLight, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: size * 0.36, flexShrink: 0, border: `1.5px solid ${T.gold}` }}>
       {initials}
     </div>
+  );
+}
+
+// حالة صورة/بصمة العضو (٣ حالات)
+function faceState(member) {
+  if (member && member.faceConsent && member.faceEnrolled) return { color: "#1b7a3d", sym: "✓", label: "وافق وبصمته محفوظة" };
+  if (member && member.faceConsent) return { color: "#E08A2E", sym: "!", label: "وافق ولا توجد بصمة بعد" };
+  return { color: "#c0392b", sym: "✕", label: "لم يوافق على استخدام صورته" };
+}
+// علامة حالة على الصورة: خضراء (وافق+بصمة) · برتقالية (وافق بلا بصمة) · حمراء (لم يوافق)
+function FaceBadge({ member }) {
+  if (!member || member.gender === "female") return null;
+  const s = faceState(member);
+  return (
+    <span title={s.label}
+      style={{ position: "absolute", bottom: -2, insetInlineStart: -2, width: 18, height: 18, borderRadius: "50%", background: s.color, border: "2px solid #fff", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 900, lineHeight: 1 }}>
+      {s.sym}
+    </span>
   );
 }
 
@@ -2633,6 +2661,11 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
         <input value={treeQuery} onChange={(e) => setTreeQuery(e.target.value)} placeholder="ابحث عن عضو لتعديله أو حذفه..." style={{ ...inputStyle, padding: "9px 38px 9px 12px" }} />
       </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, fontSize: 10.5, color: T.muted, marginBottom: 10 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: "#1b7a3d" }} /> وافق وبصمته محفوظة</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: "#E08A2E" }} /> وافق بلا بصمة</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: "#c0392b" }} /> لم يوافق</span>
+      </div>
       {treeQuery.trim() && (
         <div style={{ border: `1px solid ${T.line}`, borderRadius: 12, background: T.card, marginBottom: 16, overflow: "auto", maxHeight: "45vh" }}>
           {treeSearchResults.length === 0 ? (
@@ -2644,6 +2677,12 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
                 <div style={{ fontSize: 10, color: T.muted, marginTop: 1 }}>
                   {m.memberNumber ? `#${m.memberNumber}` : ""}{m.gender === "female" ? " · أنثى" : ""}{m.region ? ` · ${m.region}` : ""}
                 </div>
+                {m.gender !== "female" && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, fontSize: 10, color: T.muted }}>
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: faceState(m).color, flexShrink: 0 }} />
+                    {faceState(m).label}{m.photoUrl ? " · له صورة" : " · بلا صورة"}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                   <button
                     onClick={() => setEditingMember({ id: m.id, name: m.name, region: m.region || "", birthDate: m.birthDate || "", birthPlace: m.birthPlace || "" })}
@@ -2930,8 +2969,26 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         const desc = await fileToFaceDescriptor(file);
         if (desc) { setForm((f) => ({ ...f, faceDescriptor: desc })); setFaceStatus("تم تجهيز التعرّف على وجهك ✓"); }
         else { setForm((f) => ({ ...f, faceDescriptor: null })); setFaceStatus("لم يُكتشف وجه واضح — ستظهر صورتك لكن قد لا تُستخدم للتعرّف. جرّب صورة أوضح."); }
-      } catch (e) { setForm((f) => ({ ...f, faceDescriptor: null })); setFaceStatus("تعذّر تجهيز التعرّف الآن (قد تكون الشبكة) — صورتك حُفظت."); }
+      } catch (e) { setForm((f) => ({ ...f, faceDescriptor: null })); setFaceStatus("تعذّر تجهيز التعرّف الآن: " + ((e && e.message) || "خطأ") + " — صورتك حُفظت، جرّب «إعادة المحاولة» بعد الحفظ."); }
     } else setPhotoErr("تعذّر رفع الصورة، حاول مجدداً.");
+    setPhotoUploading(false);
+  };
+
+  // إعادة حساب البصمة من الصورة المحفوظة (يُظهر سبب الفشل الحقيقي)
+  const handleReEnroll = async () => {
+    if (!form.photoUrl) { setFaceStatus("لا توجد صورة."); return; }
+    if (!form.faceConsent) { setFaceStatus("فعّل الموافقة أولاً."); return; }
+    setPhotoErr(""); setPhotoUploading(true); setFaceStatus("جارِ إعادة تجهيز التعرّف...");
+    try {
+      const desc = await urlToFaceDescriptor(form.photoUrl);
+      if (!desc) { setFaceStatus("لم يُكتشف وجه واضح في الصورة — جرّب صورة أوضح للوجه."); setPhotoUploading(false); return; }
+      const { error } = await supabase.from("face_embeddings").upsert({ member_id: form.id, embedding: descriptorToVector(desc), updated_at: new Date().toISOString() });
+      if (error) { setFaceStatus("تعذّر حفظ البصمة: " + (error.message || "خطأ")); setPhotoUploading(false); return; }
+      setForm((f) => ({ ...f, faceEnrolled: true, faceDescriptor: desc }));
+      setFaceStatus("تم حفظ بصمة وجهك ✓");
+    } catch (e) {
+      setFaceStatus("تعذّر: " + ((e && e.message) || "خطأ غير معروف"));
+    }
     setPhotoUploading(false);
   };
 
@@ -3006,13 +3063,18 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
       cvUrl: form.cvUrl,
     });
     // مزامنة بصمة الوجه: حفظ عند وجود موافقة+صورة+بصمة جديدة، وحذف عند سحب الموافقة أو إزالة الصورة
+    let enrolled = form.faceEnrolled;
     try {
       if (!form.faceConsent || !form.photoUrl) {
         await supabase.from("face_embeddings").delete().eq("member_id", form.id);
+        enrolled = false;
       } else if (form.faceDescriptor) {
-        await supabase.from("face_embeddings").upsert({ member_id: form.id, embedding: descriptorToVector(form.faceDescriptor), updated_at: new Date().toISOString() });
+        const { error: eErr } = await supabase.from("face_embeddings").upsert({ member_id: form.id, embedding: descriptorToVector(form.faceDescriptor), updated_at: new Date().toISOString() });
+        if (eErr) console.error("face embedding upsert failed", eErr);
+        enrolled = !eErr;
       }
     } catch (e) { console.error("face embedding sync failed", e); }
+    form.faceEnrolled = enrolled;
     const newProfilesMap = {
       ...profilesMap,
       [form.id]: {
@@ -3357,7 +3419,10 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
       </SectionTitle>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <Avatar name={form.name} photoUrl={form.photoUrl} gender={form.gender} size={56} />
+        <span style={{ position: "relative", display: "inline-block", flexShrink: 0 }}>
+          <Avatar name={form.name} photoUrl={form.photoUrl} gender={form.gender} size={56} />
+          <FaceBadge member={form} />
+        </span>
         <div>
           <div style={{ fontSize: 16, fontWeight: 800, color: T.ink }}>{form.name}</div>
           <div style={{ fontSize: 12, color: T.muted }}>{form.nasab}</div>
@@ -3401,7 +3466,10 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                   <span>أوافق على استخدام صورتي داخل تطبيق العائلة: لعرضها في الشجرة وملفي، وللتعرّف الآلي على الوجه (مقارنةً بصور أفراد العائلة فقط) بهدف معرفة الأسماء في اللقاءات. لا تُشارك صوري أو بياناتي خارج التطبيق، ويمكنني سحب الموافقة وإزالة صورتي في أي وقت.</span>
                 </label>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <Avatar name={form.name} photoUrl={form.photoUrl} gender={form.gender} size={54} />
+                  <span style={{ position: "relative", display: "inline-block", flexShrink: 0 }}>
+                    <Avatar name={form.name} photoUrl={form.photoUrl} gender={form.gender} size={54} />
+                    <FaceBadge member={form} />
+                  </span>
                   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                     <label style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 999, padding: "7px 14px", fontSize: 12, fontWeight: 700, color: T.ink, cursor: (photoUploading || !form.faceConsent) ? "not-allowed" : "pointer", opacity: (photoUploading || !form.faceConsent) ? 0.55 : 1 }}>
                       {photoUploading ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : <Upload size={14} />}
@@ -3409,6 +3477,11 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
                       <input type="file" accept="image/*" disabled={photoUploading || !form.faceConsent} onChange={(e) => { handlePhotoUpload(e.target.files && e.target.files[0]); e.target.value = ""; }} style={{ display: "none" }} />
                     </label>
                     {!form.faceConsent && <span style={{ fontSize: 11, color: T.muted }}>فعّل الموافقة أعلاه لتتمكن من رفع صورتك.</span>}
+                    {form.photoUrl && form.faceConsent && !form.faceEnrolled && !photoUploading && (
+                      <button type="button" onClick={handleReEnroll} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#c0392b", border: "none", color: "#fff", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", borderRadius: 8, padding: "5px 10px", alignSelf: "flex-start" }}>
+                        <Camera size={13} /> حفظ بصمة الوجه الآن
+                      </button>
+                    )}
                     {form.photoUrl && !photoUploading && (
                       <button type="button" onClick={() => setForm({ ...form, photoUrl: "" })} style={{ background: "none", border: "none", color: T.clay, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", textAlign: "right", padding: 0 }}>إزالة الصورة</button>
                     )}
