@@ -997,6 +997,112 @@ function TreeMemberPopup({ member, onClose, onOpenProfile, onLocate }) {
 }
 
 // شاشة «مَن هذا؟» — تعرّف على فرد بصورة/كاميرا بمقارنتها ببصمات العائلة
+// ===== حاسبة القرابة =====
+function chainIds(id, byId) {
+  const s = []; let c = id; const seen = new Set();
+  while (c && !seen.has(c)) { seen.add(c); s.push(c); c = byId[c] ? byId[c].fatherId : null; }
+  return s; // [id, الأب, ... الجذر]
+}
+function kinTerm(xu, yu) {
+  const anc = ["", "الأب", "الجدّ", "جدّ الأب", "الجدّ الأعلى"];
+  const desc = ["", "الابن", "الحفيد", "ابن الحفيد", "حفيد الحفيد"];
+  if (xu === 0) return yu < anc.length ? anc[yu] : `جدّ أعلى (${yu} أجيال)`;
+  if (yu === 0) return xu < desc.length ? desc[xu] : `من الذرّية (${xu} أجيال)`;
+  if (xu === 1 && yu === 1) return "الأخ";
+  if (xu === 1 && yu === 2) return "العمّ";
+  if (xu === 2 && yu === 1) return "ابن الأخ";
+  if (xu === 1 && yu >= 3) { const of = ["", "", "", "الأب", "الجدّ", "جدّ الأب"][yu]; return of ? `عمّ ${of}` : "عمّ الجدّ الأعلى"; }
+  if (yu === 1 && xu >= 3) return `من ذرّية الأخ (${xu - 1} أجيال)`;
+  const deg = Math.min(xu, yu) - 1;
+  if (xu === yu) return deg === 1 ? "ابن العمّ" : `ابن العمّ من الدرجة ${deg}`;
+  const diff = Math.abs(xu - yu);
+  if (xu < yu) { const of = ["", "", "الأب", "الجدّ", "جدّ الأب"][diff + 1] || "جدّه"; return deg === 1 ? `ابن عمّ ${of}` : `ابن عمّ ${of} (درجة ${deg})`; }
+  return `من ذرّية ابن العمّ (${diff} أجيال · درجة ${deg})`;
+}
+function computeKinship(idA, idB, byId) {
+  if (!idA || !idB) return null;
+  if (idA === idB) return { same: true };
+  const A = chainIds(idA, byId), B = chainIds(idB, byId);
+  const Bi = new Map(B.map((x, i) => [x, i]));
+  let ua = -1, ub = -1, lca = null;
+  for (let i = 0; i < A.length; i++) { if (Bi.has(A[i])) { ua = i; ub = Bi.get(A[i]); lca = A[i]; break; } }
+  if (!lca) return { none: true };
+  return { lca, ua, ub, aToB: kinTerm(ua, ub), bToA: kinTerm(ub, ua) };
+}
+
+function KinshipPicker({ members, value, onPick, placeholder }) {
+  const [q, setQ] = useState("");
+  const normA = (s) => normalizeArabicLetters(s).split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
+  const matches = q.trim().length >= 2 ? members.filter((m) => normA(m.nasab || m.name).includes(normA(q))).slice(0, 7) : [];
+  if (value) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: T.sandDark, borderRadius: 10, padding: "9px 12px" }}>
+      <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink, wordBreak: "break-word" }}>{value.nasab || value.name}</span>
+      <button onClick={() => { onPick(null); setQ(""); }} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer", flexShrink: 0 }}><X size={16} /></button>
+    </div>
+  );
+  return (
+    <div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} style={inputStyle} />
+      {q.trim().length >= 2 && (
+        <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, marginTop: 6, maxHeight: 200, overflow: "auto", background: T.card }}>
+          {matches.length === 0 ? <div style={{ padding: 10, fontSize: 12, color: T.muted, textAlign: "center" }}>لا نتائج.</div> :
+            matches.map((m) => (
+              <div key={m.id} onClick={() => onPick(m)} style={{ padding: "8px 12px", borderBottom: `1px solid ${T.line}`, cursor: "pointer", fontSize: 12.5, color: T.text }}>
+                {m.nasab || m.name}{m.memberNumber ? ` ‹${m.memberNumber}›` : ""}
+              </div>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KinshipModal({ members, onClose }) {
+  const byId = useMemo(() => Object.fromEntries(members.map((m) => [m.id, m])), [members]);
+  const [A, setA] = useState(null);
+  const [B, setB] = useState(null);
+  const res = (A && B) ? computeKinship(A.id, B.id, byId) : null;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }} onClick={onClose}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.card, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto", fontFamily: "'Tajawal', sans-serif" }}>
+        <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif" }}>حاسبة القرابة</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
+        </div>
+        <div style={{ padding: 18 }}>
+          <div style={{ fontSize: 12.5, color: T.muted, marginBottom: 12, lineHeight: 1.7 }}>اختر شخصين، فتُحسب صلتهما، والجدّ المشترك، ودرجة القرابة.</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 5 }}>الشخص الأول</div>
+          <KinshipPicker members={members} value={A} onPick={setA} placeholder="ابحث عن الشخص الأول..." />
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, margin: "12px 0 5px" }}>الشخص الثاني</div>
+          <KinshipPicker members={members} value={B} onPick={setB} placeholder="ابحث عن الشخص الثاني..." />
+
+          {res && (
+            <div style={{ marginTop: 16, background: T.sand, border: `1px solid ${TT.gold500}`, borderRadius: 14, padding: 16, textAlign: "center" }}>
+              {res.same ? (
+                <div style={{ fontSize: 14, color: T.clay, fontWeight: 700 }}>الشخصان واحد.</div>
+              ) : res.none ? (
+                <div style={{ fontSize: 14, color: T.clay }}>لا يوجد جدّ مشترك في الشجرة.</div>
+              ) : (
+                <>
+                  <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 17, color: TT.teal800, lineHeight: 1.8 }}>
+                    <b>{A.name}</b> هو <span style={{ color: TT.teal900, fontWeight: 800 }}>{res.aToB}</span> لـ <b>{B.name}</b>
+                  </div>
+                  <div style={{ fontSize: 13, color: T.text, marginTop: 4 }}>و <b>{B.name}</b> هو <span style={{ fontWeight: 800 }}>{res.bToA}</span> لـ <b>{A.name}</b></div>
+                  <div style={{ borderTop: `1px dashed ${T.line}`, marginTop: 12, paddingTop: 12, fontSize: 13, color: T.text }}>
+                    <div>الجدّ المشترك: <b style={{ color: T.gold }}>{byId[res.lca] ? byId[res.lca].name : ""}</b></div>
+                    <div style={{ fontSize: 11.5, color: T.muted, marginTop: 3, wordBreak: "break-word" }}>{byId[res.lca] ? byId[res.lca].nasab : ""}</div>
+                    <div style={{ fontSize: 12, color: T.muted, marginTop: 8 }}>يلتقيان عنده: {A.name} يبعد {res.ua} {res.ua === 1 ? "جيلاً" : "أجيال"}، و{B.name} يبعد {res.ub} {res.ub === 1 ? "جيلاً" : "أجيال"}.</div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WhoIsThisModal({ members, onClose, onOpenMember }) {
   const [phase, setPhase] = useState("idle"); // idle | working | done | error
   const [msg, setMsg] = useState("");
@@ -1110,6 +1216,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [detailId, setDetailId] = useState(null);
   const [profileMember, setProfileMember] = useState(null);
   const [whoOpen, setWhoOpen] = useState(false);
+  const [kinOpen, setKinOpen] = useState(false);
   const centeredRef = useRef(false);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -1362,10 +1469,15 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         </button>
       </div>
 
-      {/* زر التعرّف بالصورة */}
-      <button onClick={() => setWhoOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px", marginBottom: 12, background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, fontSize: 13, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
-        <Camera size={17} color={TT.gold400} /> مَن هذا؟ — تعرّف بالصورة
-      </button>
+      {/* أدوات: التعرّف بالصورة + حاسبة القرابة */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button onClick={() => setWhoOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "10px 8px", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+          <Camera size={16} color={TT.gold400} /> مَن هذا؟
+        </button>
+        <button onClick={() => setKinOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "10px 8px", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+          <GitBranch size={16} color={TT.gold400} /> حاسبة القرابة
+        </button>
+      </div>
 
       {/* نتائج البحث */}
       {query.trim() && (
@@ -1500,6 +1612,9 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       )}
       {whoOpen && (
         <WhoIsThisModal members={members} onClose={() => setWhoOpen(false)} onOpenMember={(m) => { setWhoOpen(false); setProfileMember(m); }} />
+      )}
+      {kinOpen && (
+        <KinshipModal members={members} onClose={() => setKinOpen(false)} />
       )}
     </div>
   );
