@@ -3809,9 +3809,9 @@ function InboxOverlay({ uid, items, onClose, reload }) {
   };
   return (
     <div style={{ position: "fixed", inset: 0, background: T.sand, zIndex: 95, display: "flex", flexDirection: "column", maxWidth: 430, margin: "0 auto" }}>
-      <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 2 }}>
+      <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "calc(env(safe-area-inset-top, 0px) + 16px) 18px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 2 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: TT.gold500, fontWeight: 800, fontSize: 15 }}><Inbox size={18} /> صندوق الوارد</div>
-        <button onClick={onClose} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer" }}><X size={22} /></button>
+        <button onClick={onClose} aria-label="إغلاق" style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={22} /></button>
       </div>
       <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
         {openItem ? (
