@@ -9,7 +9,7 @@ import {
   Settings, Fingerprint, Lock, HelpCircle, MessageCircle, ChevronsRight, Video,
   Camera, ImagePlus, QrCode,
   Trophy, Sparkles, RotateCcw, Gamepad2,
-  Download, Sun, ScrollText, ListTree
+  Download, Sun, ScrollText, ListTree, Eye
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -1061,7 +1061,7 @@ function FamilyMapModal({ members, onClose }) {
   }, [counts]);
   return (
     <div style={{ position: "fixed", inset: 0, background: TT.tealDark, zIndex: 70, display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, borderBottom: `2px solid ${TT.gold500}` }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, borderBottom: `2px solid ${TT.gold500}` }}>
         <span style={{ color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif" }}>خريطة توزيع العائلة</span>
         <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}><X size={16} /> إغلاق</button>
       </div>
@@ -1292,7 +1292,10 @@ function RelationGameModal({ members, onClose }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} onClick={onClose}>
       <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.sand, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 460, maxHeight: "92vh", overflowY: "auto", fontFamily: "'Tajawal', sans-serif" }}>
         <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 2 }}>
-          <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif", display: "flex", alignItems: "center", gap: 8 }}><Gamepad2 size={18} color={TT.gold400} /> اختبر صلتك</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif", display: "flex", alignItems: "center", gap: 8 }}><Gamepad2 size={18} color={TT.gold400} /> اختبر صلتك</span>
+            <span style={{ color: "#cfe0dc", fontSize: 12, fontWeight: 700 }}>هل تعرف ابن عمك؟</span>
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ display: "flex", alignItems: "center", gap: 4, color: TT.gold400, fontSize: 13, fontWeight: 800 }}><Sparkles size={14} /> {streak}</span>
             <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
@@ -1891,13 +1894,15 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [fanOpen, setFanOpen] = useState(false);
   const centeredRef = useRef(false);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
-  const [pdfOpen, setPdfOpen] = useState(false);
+  const [treeView, setTreeView] = useState("interactive"); // interactive | pictorial
+  const [picTab, setPicTab] = useState("view"); // view | download
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState(false);
   const canvasRef = useRef(null);
 
   useEffect(() => {
-    if (!pdfOpen) return;
+    if (treeView !== "pictorial" || picTab !== "view") return;
     let cancelled = false;
     setPdfLoading(true);
     setPdfError(false);
@@ -1946,7 +1951,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       const canvas = canvasRef.current;
       if (canvas) { canvas.width = 0; canvas.height = 0; }
     };
-  }, [pdfOpen]);
+  }, [treeView, picTab]);
 
   const handleDownloadPdf = async () => {
     try {
@@ -2160,58 +2165,112 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         />
       </div>
 
-      {/* عبارة الإعداد والتصحيح تحت الرأسية */}
-      <div style={{ maxWidth: 470, margin: "0 auto 12px", padding: "0 8px", textAlign: "center", fontSize: 10.5, color: T.muted, lineHeight: 1.75 }}>
-        أعدّ الشجرة في طبعتها الأولى عام ١٣٩٨هـ العمّ <span style={{ color: T.ink, fontWeight: 700 }}>حمد بن عبدالله بن حمد التركي</span> رحمه الله، وأتمّها وصحّحها في طبعاتها اللاحقة <span style={{ color: T.ink, fontWeight: 700 }}>أ.د. محمد بن تركي بن سليمان التركي</span>.
+      {/* عبارة الإعداد والتصحيح تحت الرأسية — سطران ثابتان يصغران حسب عرض الشاشة */}
+      <div style={{ margin: "0 auto 12px", padding: "0 6px", textAlign: "center", color: T.muted, lineHeight: 1.9 }}>
+        <div style={{ whiteSpace: "nowrap", fontSize: "clamp(6.5px, 2.35vw, 10.5px)", overflow: "hidden" }}>
+          أعدّ الشجرة في طبعتها الأولى عام ١٣٩٨هـ العمّ <span style={{ color: T.ink, fontWeight: 700 }}>حمد بن عبدالله بن حمد التركي</span> رحمه الله،
+        </div>
+        <div style={{ whiteSpace: "nowrap", fontSize: "clamp(6.5px, 2.35vw, 10.5px)", overflow: "hidden" }}>
+          وأتمّها وصحّحها في طبعاتها اللاحقة <span style={{ color: T.ink, fontWeight: 700 }}>أ.د. محمد بن تركي بن سليمان التركي</span>.
+        </div>
       </div>
 
-      {/* مستطيل البحث */}
+      {/* مستطيل البحث — للشجرة التفاعلية فقط */}
+      {treeView === "interactive" && (
       <div style={{ position: "relative", marginBottom: 10 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث عن فرد بالاسم..." style={{ ...inputStyle, padding: "9px 38px 9px 36px" }} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث بالاسم" style={{ ...inputStyle, padding: "9px 38px 9px 36px" }} />
         {query && (
           <button onClick={() => setQuery("")} title="مسح البحث" aria-label="مسح البحث" style={{ position: "absolute", left: 8, top: 7, background: "transparent", border: "none", cursor: "pointer", color: T.muted, padding: 4, display: "flex", alignItems: "center" }}>
             <X size={15} />
           </button>
         )}
       </div>
+      )}
 
-      {/* المبدّل الرئيسي لطريقة العرض: التفاعلية / المصوّرة — عنصرٌ داكن مميّز يعلو بقية الأدوات */}
-      <div style={{ display: "flex", background: T.ink, borderRadius: 14, padding: 5, gap: 5, marginBottom: 16, boxShadow: "0 4px 14px rgba(23,54,52,0.22)" }}>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "13px 8px", background: T.card, color: T.ink, borderRadius: 10, fontSize: 13.5, fontWeight: 800, boxShadow: "0 2px 7px rgba(0,0,0,0.22)" }}>
-          <GitBranch size={17} color={T.gold} /> الشجرة التفاعلية
+      {/* المبدّل الرئيسي المصغّر: التفاعلية / المصوّرة */}
+      <div style={{ display: "flex", background: T.ink, borderRadius: 11, padding: 4, gap: 4, marginBottom: 10, boxShadow: "0 3px 10px rgba(23,54,52,0.2)" }}>
+        {[["interactive", "الشجرة التفاعلية", <GitBranch size={15} />], ["pictorial", "الشجرة المصوّرة", <FileText size={15} />]].map(([key, lbl, icn]) => {
+          const on = treeView === key;
+          return (
+            <button key={key} onClick={() => setTreeView(key)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 6px", background: on ? T.card : "transparent", color: on ? T.ink : "#efe7d5", border: "none", borderRadius: 8, fontSize: 12, fontWeight: on ? 800 : 700, fontFamily: "inherit", cursor: "pointer", boxShadow: on ? "0 2px 6px rgba(0,0,0,0.2)" : "none" }}>
+              {React.cloneElement(icn, { color: on ? T.gold : TT.gold400 })} {lbl}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* أدوات الشجرة — قابلة للطي، تفتح للأسفل */}
+      <div style={{ marginBottom: 10 }}>
+        <button onClick={() => setToolsOpen((o) => !o)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontFamily: "inherit" }}>
+          <span style={{ fontSize: 12, fontWeight: 800, color: T.ink }}>أدوات الشجرة</span>
+          <ChevronDown size={16} color={T.gold} style={{ transform: toolsOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+        </button>
+        {toolsOpen && (
+          <div style={{ marginTop: 7 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+              {[
+                ["مَن هذا؟", <Camera size={16} color={T.gold} />, () => setWhoOpen(true)],
+                ["حاسبة القرابة", <GitBranch size={16} color={T.gold} />, () => setKinOpen(true)],
+                ["الخريطة", <MapPin size={16} color={T.gold} />, () => setMapOpen(true)],
+                ["الإحصاءات", <Newspaper size={16} color={T.gold} />, () => setStatsOpen(true)],
+                ["المخطط الشعاعي", <Sun size={16} color={T.gold} />, () => setFanOpen(true)],
+                ["تصدير", <FileText size={16} color={T.gold} />, () => setExportOpen(true)],
+              ].map(([lbl, icn, fn], i) => (
+                <button key={i} onClick={fn} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, padding: "8px 3px", minHeight: 52, background: T.card, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, fontSize: 10, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+                  {icn}
+                  <span style={{ textAlign: "center", lineHeight: 1.15 }}>{lbl}</span>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setGameOpen(true)} style={{ width: "100%", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "9px 8px", background: `linear-gradient(160deg, ${T.gold}, #9c7238)`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 10, fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+              <Gamepad2 size={15} color="#fff" /> اختبر صلتك
+            </button>
+          </div>
+        )}
+      </div>
+
+      {treeView === "pictorial" ? (
+        <div style={{ border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, overflow: "hidden", marginBottom: 8 }}>
+          <div style={{ display: "flex", gap: 4, padding: 6, background: T.sandDark }}>
+            {[["view", "عرض", <Eye size={15} />], ["download", "تحميل", <Download size={15} />]].map(([key, lbl, icn]) => {
+              const on = picTab === key;
+              return (
+                <button key={key} onClick={() => setPicTab(key)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 6px", background: on ? TT.teal800 : "transparent", color: on ? "#fff" : T.ink, border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: on ? 800 : 700, fontFamily: "inherit", cursor: "pointer" }}>
+                  {React.cloneElement(icn, { color: on ? TT.gold400 : T.gold })} {lbl}
+                </button>
+              );
+            })}
+          </div>
+          {picTab === "view" ? (
+            <div style={{ overflow: "auto", maxHeight: "64vh", padding: 8, background: "#fff", display: "flex", justifyContent: "center" }}>
+              {pdfLoading && (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "70px 0", color: TT.teal800 }}>
+                  <Loader2 size={24} style={{ animation: "rosette-spin 1.2s linear infinite" }} />
+                  <span style={{ fontSize: 13 }}>جارِ تحميل الشجرة...</span>
+                </div>
+              )}
+              {pdfError && (
+                <div style={{ textAlign: "center", padding: "50px 20px", color: T.text }}>
+                  <div style={{ marginBottom: 14, fontSize: 13 }}>تعذّر عرض الشجرة داخل الصفحة (قد يكون بسبب الشبكة أو المتصفح).</div>
+                  <a href="/Family-Tree.pdf" target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "9px 18px", background: T.gold, color: "#fff", borderRadius: 8, textDecoration: "none", fontWeight: 700, fontSize: 13 }}>فتح ملف PDF مباشرة</a>
+                </div>
+              )}
+              <canvas ref={canvasRef} style={{ display: pdfLoading || pdfError ? "none" : "block", maxWidth: "100%", height: "auto" }} />
+            </div>
+          ) : (
+            <div style={{ padding: "28px 22px", textAlign: "center", background: T.card }}>
+              <FileText size={42} color={T.gold} />
+              <div style={{ fontSize: 13, color: T.text, margin: "12px 0 18px", lineHeight: 1.9 }}>حمّل الشجرة المصوّرة الكاملة (ملف PDF عالي الدقّة) لحفظها أو طباعتها.</div>
+              <button onClick={handleDownloadPdf} style={{ width: "100%", maxWidth: 300, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, fontSize: 14, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+                <Download size={17} color={TT.gold400} /> تحميل الشجرة (PDF)
+              </button>
+              <a href="/Family-Tree.pdf" target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", marginTop: 12, fontSize: 12, color: T.gold, fontWeight: 700, textDecoration: "none" }}>أو فتحها في صفحة جديدة ↗</a>
+            </div>
+          )}
         </div>
-        <button onClick={() => setPdfOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "13px 8px", background: "transparent", color: "#efe7d5", border: "none", borderRadius: 10, fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
-          <FileText size={17} color={TT.gold400} /> الشجرة المصوّرة
-        </button>
-      </div>
-
-      {/* أدوات الشجرة (ثانوية) — شبكة موحّدة هادئة تحت المبدّل */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 2px 8px" }}>
-        <span style={{ fontSize: 11.5, fontWeight: 800, color: T.muted }}>أدوات الشجرة</span>
-        <span style={{ flex: 1, height: 1, background: T.line }} />
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 14 }}>
-        {[
-          ["مَن هذا؟", <Camera size={18} color={T.gold} />, () => setWhoOpen(true)],
-          ["حاسبة القرابة", <GitBranch size={18} color={T.gold} />, () => setKinOpen(true)],
-          ["الخريطة", <MapPin size={18} color={T.gold} />, () => setMapOpen(true)],
-          ["الإحصاءات", <Newspaper size={18} color={T.gold} />, () => setStatsOpen(true)],
-          ["المخطط الشعاعي", <Sun size={18} color={T.gold} />, () => setFanOpen(true)],
-          ["تصدير", <FileText size={18} color={T.gold} />, () => setExportOpen(true)],
-        ].map(([lbl, icn, fn], i) => (
-          <button key={i} onClick={fn} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, padding: "11px 4px", minHeight: 66, background: T.card, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 12, fontSize: 11, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
-            {icn}
-            <span style={{ textAlign: "center", lineHeight: 1.2 }}>{lbl}</span>
-          </button>
-        ))}
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <button onClick={() => setGameOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 8px", background: `linear-gradient(160deg, ${T.gold}, #9c7238)`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 2px 8px rgba(180,137,74,0.3)" }}>
-          <Gamepad2 size={17} color="#fff" /> اختبر صلتك — لعبة خمّن الشخص
-        </button>
-      </div>
-
+      ) : (
+      <>
       {/* نتائج البحث */}
       {query.trim() && (
         <div style={{ border: `1px solid ${TT.gold500}`, borderRadius: 14, background: T.card, marginBottom: 12, overflow: "auto", maxHeight: "50vh" }}>
@@ -2313,37 +2372,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
           <span style={{ width: 13, height: 13, borderRadius: "50%", background: T.card, border: `2px dashed ${TT.deceasedLine}` }} /> متوفى رحمه الله
         </span>
       </div>
-
-      {/* نافذة الشجرة المصوّرة */}
-      {pdfOpen && (
-        <div style={{ position: "fixed", inset: 0, background: "#0d2b2b", zIndex: 70, display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderBottom: "2px solid #c9a227" }}>
-            <button onClick={handleDownloadPdf} style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}>
-              تحميل
-            </button>
-            <span style={{ color: "#dab94a", fontSize: 13, fontWeight: 700 }}>الشجرة المصوّرة</span>
-            <button onClick={() => setPdfOpen(false)} style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}>
-              <X size={16} /> إغلاق
-            </button>
-          </div>
-          <div style={{ flex: 1, overflow: "auto", padding: 8 }}>
-            {pdfLoading && (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "80px 0", color: "#F4EFE3" }}>
-                <Loader2 size={24} style={{ animation: "rosette-spin 1.2s linear infinite" }} />
-                <span style={{ fontSize: 13 }}>جارِ تحميل الشجرة...</span>
-              </div>
-            )}
-            {pdfError && (
-              <div style={{ textAlign: "center", padding: "60px 20px", color: "#F4EFE3" }}>
-                <div style={{ marginBottom: 14 }}>تعذّر عرض الشجرة داخل الصفحة (قد يكون بسبب الشبكة أو المتصفح).</div>
-                <a href="/Family-Tree.pdf" target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "9px 18px", background: "#c9a227", color: "#0d2b2b", borderRadius: 8, textDecoration: "none", fontWeight: 700, fontSize: 13 }}>
-                  فتح ملف PDF مباشرة
-                </a>
-              </div>
-            )}
-            <canvas ref={canvasRef} style={{ display: pdfLoading || pdfError ? "none" : "block", margin: "0 auto" }} />
-          </div>
-        </div>
+      </>
       )}
 
       {detailId && byId[detailId] && (
@@ -2456,7 +2485,7 @@ function MagazineReader({ pdfUrl, startPage, title, onClose }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#0d2b2b", zIndex: 70, display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderBottom: "2px solid #c9a227" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px", background: "linear-gradient(160deg, #123838, #0d2b2b)", borderBottom: "2px solid #c9a227" }}>
         <a
           href={pdfUrl}
           download={`${title}.pdf`}
