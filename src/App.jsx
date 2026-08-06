@@ -7,7 +7,8 @@ import {
   FileText, Phone, Cake, Shield, UserPlus, Trash2, Save, Pencil,
   BookOpen, ChevronRight, ChevronLeft, Upload, LogOut, KeyRound,
   Settings, Fingerprint, Lock, HelpCircle, MessageCircle, ChevronsRight, Video,
-  Camera, ImagePlus, QrCode
+  Camera, ImagePlus, QrCode,
+  Trophy, Sparkles, RotateCcw, Gamepad2
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -1201,6 +1202,204 @@ function ExportModal({ members, onClose }) {
   );
 }
 
+// ===== لعبة «اختبر صلتك» — خمّن الشخص =====
+function fourPartName(m) {
+  return (m.fullNasab || m.nasab || m.name).split(" بن ").slice(0, 4).join(" بن ");
+}
+function shuffleArr(a) {
+  const r = a.slice();
+  for (let i = r.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [r[i], r[j]] = [r[j], r[i]];
+  }
+  return r;
+}
+const WIN_PHRASES = ["أحسنت! صلةٌ موصولة 🎉", "عين الصواب! 👏", "ما شاء الله، تعرفهم حق المعرفة 🌿", "إجابة موفّقة! ✨", "بارك الله فيك، صحيحة! 🎯"];
+const LOSE_PHRASES = ["للأسف! 🥴", "قريبة… لكن ليست هي 😅", "لا بأس، تُعرف الرجال بمجالسها 🤍", "خانك التوفيق هذه المرة 🙈"];
+
+function RelationGameModal({ members, onClose }) {
+  const pools = useMemo(() => {
+    const males = members.filter((m) => m.gender !== "female");
+    const photoMembers = males.filter((m) => m.photoUrl && m.faceConsent);
+    return { males, photoMembers };
+  }, [members]);
+
+  const [q, setQ] = useState(null);
+  const [phase, setPhase] = useState("play"); // play | correct | wrong
+  const [chosen, setChosen] = useState(null);
+  const [streak, setStreak] = useState(0);
+  const [best, setBest] = useState(0);
+  const [rounds, setRounds] = useState(0);
+  const lastRef = useRef(null);
+
+  const buildQuestion = () => {
+    const { males, photoMembers } = pools;
+    if (photoMembers.length === 0) return null;
+    // اختيار الشخص الصحيح (تجنّب تكرار نفس الشخص مباشرةً)
+    let answer = photoMembers[Math.floor(Math.random() * photoMembers.length)];
+    if (photoMembers.length > 1 && lastRef.current) {
+      let guard = 0;
+      while (answer.id === lastRef.current && guard < 8) { answer = photoMembers[Math.floor(Math.random() * photoMembers.length)]; guard++; }
+    }
+    lastRef.current = answer.id;
+    const canFaces = photoMembers.length >= 3;
+    const mode = canFaces && Math.random() < 0.5 ? "faces" : "names";
+    if (mode === "faces") {
+      const others = shuffleArr(photoMembers.filter((m) => m.id !== answer.id)).slice(0, 2);
+      const opts = shuffleArr([answer, ...others]).map((m) => ({ member: m, correct: m.id === answer.id }));
+      return { mode, answer, prompt: fourPartName(answer), options: opts };
+    }
+    // mode names: نعرض الصورة ونطلب الاسم الرباعي الصحيح
+    const correctName = fourPartName(answer);
+    const distractors = [];
+    const seen = new Set([correctName]);
+    const shuffledMales = shuffleArr(males);
+    for (const m of shuffledMales) {
+      if (distractors.length >= 2) break;
+      const nm = fourPartName(m);
+      if (!seen.has(nm)) { seen.add(nm); distractors.push(nm); }
+    }
+    const opts = shuffleArr([correctName, ...distractors]).map((t) => ({ text: t, correct: t === correctName }));
+    return { mode, answer, options: opts };
+  };
+
+  useEffect(() => { setQ(buildQuestion()); /* eslint-disable-next-line */ }, []);
+
+  const choose = (opt) => {
+    if (phase !== "play") return;
+    setChosen(opt);
+    setRounds((r) => r + 1);
+    if (opt.correct) {
+      setPhase("correct");
+      setStreak((s) => { const n = s + 1; setBest((b) => Math.max(b, n)); return n; });
+    } else {
+      setPhase("wrong");
+      setBest((b) => Math.max(b, streak));
+    }
+  };
+  const next = () => { setChosen(null); setPhase("play"); setQ(buildQuestion()); };
+  const restart = () => { setStreak(0); setRounds(0); lastRef.current = null; setChosen(null); setPhase("play"); setQ(buildQuestion()); };
+
+  const winPhrase = useMemo(() => WIN_PHRASES[Math.floor(Math.random() * WIN_PHRASES.length)], [phase === "correct" ? rounds : 0]);
+  const losePhrase = useMemo(() => LOSE_PHRASES[Math.floor(Math.random() * LOSE_PHRASES.length)], [phase === "wrong" ? rounds : 0]);
+
+  const shell = (inner) => (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} onClick={onClose}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.sand, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 460, maxHeight: "92vh", overflowY: "auto", fontFamily: "'Tajawal', sans-serif" }}>
+        <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 2 }}>
+          <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif", display: "flex", alignItems: "center", gap: 8 }}><Gamepad2 size={18} color={TT.gold400} /> اختبر صلتك</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4, color: TT.gold400, fontSize: 13, fontWeight: 800 }}><Sparkles size={14} /> {streak}</span>
+            <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
+          </div>
+        </div>
+        <div style={{ padding: 16 }}>{inner}</div>
+      </div>
+    </div>
+  );
+
+  if (!q) {
+    return shell(
+      <div style={{ textAlign: "center", padding: "24px 8px" }}>
+        <Camera size={40} color={T.gold} />
+        <div style={{ fontSize: 15, fontWeight: 800, color: T.ink, margin: "12px 0 6px" }}>لا توجد صور كافية بعد</div>
+        <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.8 }}>تحتاج اللعبة صوراً لأفراد العائلة. شجّع الجميع على رفع صورهم (بموافقتهم) من الملف الشخصي، وستُفتح اللعبة تلقائياً 🌿</div>
+      </div>
+    );
+  }
+
+  const optBg = (opt) => {
+    if (phase === "play") return T.card;
+    if (opt.correct) return "#e7f6ec";
+    if (chosen === opt) return "#fbe6e2";
+    return T.card;
+  };
+  const optBorder = (opt) => {
+    if (phase === "play") return T.line;
+    if (opt.correct) return "#1b7a3d";
+    if (chosen === opt) return "#c0392b";
+    return T.line;
+  };
+
+  return shell(
+    <div>
+      {/* الاحتفاء / خيبة الأمل */}
+      {phase === "correct" && (
+        <div style={{ textAlign: "center", background: "linear-gradient(160deg,#1b7a3d,#12602f)", color: "#fff", borderRadius: 14, padding: "12px 14px", marginBottom: 14, border: `1px solid ${TT.gold500}` }}>
+          <div style={{ fontSize: 26, marginBottom: 2 }}>🎉</div>
+          <div style={{ fontSize: 15, fontWeight: 800 }}>{winPhrase}</div>
+          <div style={{ fontSize: 12, color: "#d9f2e1", marginTop: 3 }}>سلسلتك الآن: {streak} {streak >= 5 ? "🔥" : ""}</div>
+        </div>
+      )}
+      {phase === "wrong" && (
+        <div style={{ textAlign: "center", background: "linear-gradient(160deg,#a24936,#7d3627)", color: "#fff", borderRadius: 14, padding: "12px 14px", marginBottom: 14, border: `1px solid ${TT.gold500}` }}>
+          <div style={{ fontSize: 26, marginBottom: 2 }}>😅</div>
+          <div style={{ fontSize: 15, fontWeight: 800 }}>{losePhrase}</div>
+          <div style={{ fontSize: 12.5, color: "#f4ded7", marginTop: 4 }}>الصحيح: <b>{fourPartName(q.answer)}</b></div>
+        </div>
+      )}
+
+      {/* السؤال */}
+      {q.mode === "names" ? (
+        <>
+          <div style={{ textAlign: "center", fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 12 }}>مَن هذا؟ اختر اسمه الرباعي:</div>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+            <div style={{ borderRadius: "50%", border: `3px solid ${TT.gold500}`, padding: 3, background: T.card, boxShadow: "0 4px 14px rgba(13,43,43,0.18)" }}>
+              <Avatar name={q.answer.name} photoUrl={q.answer.photoUrl} gender={q.answer.gender} size={130} />
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 9 }}>
+            {q.options.map((opt, i) => (
+              <button key={i} onClick={() => choose(opt)} disabled={phase !== "play"} style={{ textAlign: "right", background: optBg(opt), border: `1.5px solid ${optBorder(opt)}`, borderRadius: 12, padding: "13px 15px", cursor: phase === "play" ? "pointer" : "default", fontFamily: "inherit", fontSize: 13.5, fontWeight: 700, color: T.ink, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ wordBreak: "break-word" }}>{opt.text}</span>
+                {phase !== "play" && opt.correct && <Check size={18} color="#1b7a3d" />}
+                {phase !== "play" && chosen === opt && !opt.correct && <X size={18} color="#c0392b" />}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ textAlign: "center", fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 4 }}>أيّ الصور لـ:</div>
+          <div style={{ textAlign: "center", fontSize: 15, fontWeight: 800, color: TT.teal800, marginBottom: 14, fontFamily: "'Aref Ruqaa', serif", wordBreak: "break-word" }}>{q.prompt}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
+            {q.options.map((opt, i) => (
+              <button key={i} onClick={() => choose(opt)} disabled={phase !== "play"} style={{ background: optBg(opt), border: `2px solid ${optBorder(opt)}`, borderRadius: 14, padding: 8, cursor: phase === "play" ? "pointer" : "default", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                <Avatar name={opt.member.name} photoUrl={opt.member.photoUrl} gender={opt.member.gender} size={78} />
+                {phase !== "play" && opt.correct && <span style={{ fontSize: 11, fontWeight: 800, color: "#1b7a3d" }}>هو ✓</span>}
+                {phase !== "play" && chosen === opt && !opt.correct && <span style={{ fontSize: 11, fontWeight: 800, color: "#c0392b" }}>ليس هو</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* أزرار المتابعة */}
+      <div style={{ marginTop: 18 }}>
+        {phase === "correct" && (
+          <button onClick={next} style={{ width: "100%", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, padding: "13px", fontSize: 14, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            التالي <ChevronLeft size={18} />
+          </button>
+        )}
+        {phase === "wrong" && (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: T.card, border: `1px solid ${TT.gold500}`, borderRadius: 12, padding: "10px", marginBottom: 10 }}>
+              <Trophy size={18} color={T.gold} />
+              <span style={{ fontSize: 13.5, fontWeight: 800, color: T.ink }}>انتهت الجولة · أطول سلسلة: {best}</span>
+            </div>
+            <button onClick={restart} style={{ width: "100%", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, padding: "13px", fontSize: 14, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <RotateCcw size={17} /> العب مجدّداً
+            </button>
+          </div>
+        )}
+        {phase === "play" && (
+          <div style={{ textAlign: "center", fontSize: 11.5, color: T.muted }}>سلسلتك الحالية: {streak} · أطول سلسلة: {best}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ===== حاسبة القرابة =====
 function chainIds(id, byId) {
   const s = []; let c = id; const seen = new Set();
@@ -1424,6 +1623,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [mapOpen, setMapOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [gameOpen, setGameOpen] = useState(false);
   const centeredRef = useRef(false);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -1721,6 +1921,11 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
           <FileText size={15} color={T.gold} /> تصدير
         </button>
       </div>
+      <div style={{ marginBottom: 12 }}>
+        <button onClick={() => setGameOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 8px", background: `linear-gradient(160deg, ${T.gold}, #9c7238)`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 2px 8px rgba(180,137,74,0.3)" }}>
+          <Gamepad2 size={17} color="#fff" /> اختبر صلتك — لعبة خمّن الشخص
+        </button>
+      </div>
 
       {/* نتائج البحث */}
       {query.trim() && (
@@ -1867,6 +2072,9 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       )}
       {exportOpen && (
         <ExportModal members={members} onClose={() => setExportOpen(false)} />
+      )}
+      {gameOpen && (
+        <RelationGameModal members={members} onClose={() => setGameOpen(false)} />
       )}
     </div>
   );
