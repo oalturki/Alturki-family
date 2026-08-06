@@ -754,6 +754,13 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [reading, setReading] = useState(null);
+  const [issueCount, setIssueCount] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.from("magazine_issues").select("id", { count: "exact", head: true }).then(({ count }) => { if (!cancelled) setIssueCount(count ?? null); });
+    return () => { cancelled = true; };
+  }, []);
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const nextEvent = (events || []).filter((e) => e.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date))[0];
@@ -850,7 +857,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
           </div>
           <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>مجلة الصلة</div>
           <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: T.gold, background: T.sandDark, border: `1px solid ${T.gold}`, borderRadius: 999, padding: "2px 9px", marginTop: 6 }}>
-            ٢٥ عددًا
+            {issueCount != null ? `${issueCount} عددًا` : "تصفّح الأعداد"}
           </span>
         </button>
         <button
