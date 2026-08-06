@@ -1431,8 +1431,10 @@ function mixToWhite(hex, t) {
   r = Math.round(r + (255 - r) * t); g = Math.round(g + (255 - g) * t); b = Math.round(b + (255 - b) * t);
   return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
 }
-const FAN_PALETTE = ["#1a4d4d", "#B4894A", "#A24936", "#1b7a3d", "#6b5b95", "#2e7d8c", "#c9a227", "#8a5a44", "#4a7c59", "#9c6b3f", "#556b2f", "#7a4d6b"];
-const GEN_ACCENT = ["#1a4d4d", "#B4894A", "#A24936", "#1b7a3d", "#6b5b95", "#2e7d8c", "#8a5a44", "#4a7c59"];
+// درجات الأخضر والأزرق والبني والذهبي (بلا أحمر/أسود) لتلوين فروع المخطط الشعاعي
+const FAN_PALETTE = ["#1a4d4d", "#B4894A", "#2e6f9e", "#1b7a3d", "#6f4e37", "#2e7d8c", "#c9a227", "#8a5a44", "#4a7c59", "#3a7d8c", "#556b2f", "#9c7a4a"];
+// درجات الأخضر والأزرق والبني فقط لتمييز الأجيال (تجنّب الأحمر والأسود)
+const GEN_ACCENT = ["#1a4d4d", "#8a5a44", "#2e6f9e", "#3d7a4e", "#6f4e37", "#3a7d8c", "#557a3a", "#9c7a4a"];
 
 // بطاقة مصغّرة تظهر عند لمس أي فرد داخل قوائم الذرّية: صورة + نسب + مدينة + رابط لملفه، قابلة للإغلاق
 function MiniMemberCard({ member, members, onClose }) {
@@ -1544,7 +1546,7 @@ function DescRow({ r, onPick }) {
   return (
     <button onClick={onPick} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", textAlign: "right", cursor: "pointer", fontFamily: "inherit", padding: "9px 8px", paddingInlineStart: (r.depth - 1) * 22 + 8, background: mixToWhite(acc, 0.88), borderInlineStart: `3px solid ${acc}`, border: "none", borderRadius: "0 8px 8px 0" }}>
       <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: acc, borderRadius: 6, padding: "1px 6px", flexShrink: 0 }}>ج{r.depth}</span>
-      <span style={{ width: 6, height: 6, borderRadius: "50%", background: dead ? T.clay : acc, flexShrink: 0 }} />
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: dead ? T.muted : acc, flexShrink: 0 }} />
       <span style={{ fontSize: 13.5, fontWeight: r.depth === 1 ? 800 : 600, color: dead ? T.muted : T.ink }}>{r.member.name}</span>
       {r.member.region && <span style={{ fontSize: 10, color: T.muted }}>· {r.member.region}</span>}
       <ChevronLeft size={14} color={T.muted} style={{ marginInlineStart: "auto", flexShrink: 0 }} />
