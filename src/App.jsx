@@ -1802,6 +1802,17 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
     }
   };
 
+  // طيّ الشجرة بالكامل والرجوع للحالة الأولى (تركي وأبناؤه)
+  const collapseTree = () => {
+    setExpanded(new Set([rootId]));
+    setSelectedNode(null);
+    centeredRef.current = false;
+    setTimeout(() => {
+      const c = svgWrapRef.current;
+      if (c) { c.scrollTop = 0; c.scrollLeft = (c.scrollWidth - c.clientWidth) / 2; }
+    }, 60);
+  };
+
   const layout = useMemo(() => {
     if (!rootId || !byId[rootId]) return { nodes: [], edges: [], width: 0, height: 0 };
 
@@ -1959,7 +1970,15 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       {!rootId ? (
         <EmptyState text="تعذّر تحديد جذر الشجرة." />
       ) : (
-        <div ref={svgWrapRef} style={{ overflow: "auto", border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, padding: 16, maxHeight: "62vh" }}>
+        <>
+        {expanded.size > 1 && (
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
+            <button onClick={collapseTree} style={{ display: "flex", alignItems: "center", gap: 6, background: T.card, color: T.ink, border: `1px solid ${T.gold}`, borderRadius: 999, padding: "7px 16px", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 1px 4px rgba(13,43,43,0.08)" }}>
+              <ChevronsRight size={15} color={T.gold} style={{ transform: "rotate(90deg)" }} /> طيّ الشجرة
+            </button>
+          </div>
+        )}
+        <div ref={svgWrapRef} style={{ overflow: "auto", border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, padding: "16px 16px 130px", maxHeight: "62vh" }}>
           <div style={{ position: "relative", width: Math.max(layout.width, 260), height: layout.height + 30, margin: "0 auto" }}>
             <svg width={Math.max(layout.width, 260)} height={layout.height + 30} style={{ position: "absolute", top: 0, right: 0, pointerEvents: "none" }}>
               {layout.edges.map((e, i) => (
@@ -2004,6 +2023,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
             })}
           </div>
         </div>
+        </>
       )}
 
       {/* المفتاح */}
