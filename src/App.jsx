@@ -1212,7 +1212,7 @@ function escXml(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").re
 function localPhone(p) { p = (p || "").trim(); if (p.startsWith("+966")) return "0" + p.slice(4); if (p.startsWith("966")) return "0" + p.slice(3); return p; }
 async function directoryToPdf(list) {
   const j = await ensureJsPdf();
-  const PW = 595, PH = 842, M = 34, rowH = 30;
+  const PW = 595, PH = 842, M = 30, cardH = 46, gap = 8, rowH = cardH + gap;
   const pdf = new j.jsPDF({ unit: "pt", format: "a4" });
   const rasterize = (svg) => new Promise((resolve, reject) => {
     const url = "data:image/svg+xml;charset=utf-8;base64," + btoa(unescape(encodeURIComponent(svg)));
@@ -1220,32 +1220,34 @@ async function directoryToPdf(list) {
     img.onload = () => {
       const scale = 2;
       const c = document.createElement("canvas"); c.width = PW * scale; c.height = PH * scale;
-      const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+      const ctx = c.getContext("2d"); ctx.fillStyle = "#F4EFE3"; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
       resolve(c.toDataURL("image/png"));
     };
     img.onerror = reject; img.src = url;
   });
-  const firstTop = M + 52, otherTop = M + 18;
-  const rowsPage1 = Math.floor((PH - firstTop - 28) / rowH);
-  const rowsOther = Math.floor((PH - otherTop - 28) / rowH);
+  const clip = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + "…" : (s || ""));
+  const firstTop = M + 56, otherTop = M + 14;
+  const rowsPage1 = Math.floor((PH - firstTop - 26) / rowH);
+  const rowsOther = Math.floor((PH - otherTop - 26) / rowH);
   const pages = []; let idx = 0;
   while (idx < list.length) { const cap = pages.length === 0 ? rowsPage1 : rowsOther; pages.push(list.slice(idx, idx + cap)); idx += cap; }
   const totalPages = pages.length || 1;
   for (let p = 0; p < pages.length; p++) {
     const chunk = pages[p]; const isFirst = p === 0; const top = isFirst ? firstTop : otherTop;
-    let body = `<rect width="${PW}" height="${PH}" fill="#ffffff"/>`;
+    let body = `<rect width="${PW}" height="${PH}" fill="#F4EFE3"/>`;
     if (isFirst) {
-      body += `<text x="${PW / 2}" y="${M + 24}" text-anchor="middle" font-size="22" font-weight="700" fill="#173634">دليل هاتف عائلة آل تركي</text>`;
-      body += `<text x="${PW / 2}" y="${M + 44}" text-anchor="middle" font-size="11" fill="#6B7370">${list.length} رقماً · اضغط على الرقم للاتصال</text>`;
+      body += `<text x="${PW / 2}" y="${M + 28}" text-anchor="middle" font-size="23" font-weight="700" fill="#173634">دليل هاتف عائلة آل تركي</text>`;
+      body += `<text x="${PW / 2}" y="${M + 48}" text-anchor="middle" font-size="11" fill="#6B7370">${list.length} رقماً · اضغط على أي بطاقة للاتصال</text>`;
     }
-    body += `<line x1="${M}" y1="${top - 6}" x2="${PW - M}" y2="${top - 6}" stroke="#B4894A" stroke-width="1.2"/>`;
     chunk.forEach((x, i) => {
       const ry = top + i * rowH;
-      body += `<text x="${PW - M}" y="${ry + 19}" text-anchor="end" font-size="13" fill="#1F2A28">${escXml(x.nm)}</text>`;
-      body += `<text x="${M}" y="${ry + 19}" text-anchor="start" font-size="13" fill="#1a4d4d" direction="ltr">${escXml(localPhone(x.phone))}</text>`;
-      body += `<line x1="${M}" y1="${ry + rowH - 6}" x2="${PW - M}" y2="${ry + rowH - 6}" stroke="#EDE6D4"/>`;
+      body += `<rect x="${M}" y="${ry}" width="${PW - 2 * M}" height="${cardH}" rx="10" fill="#FFFDF8" stroke="#E4DCC6" stroke-width="1"/>`;
+      body += `<text x="${PW - M - 14}" y="${ry + 20}" text-anchor="end" font-size="13.5" font-weight="700" fill="#1F2A28">${escXml(clip(x.nm, 52))}</text>`;
+      body += `<text x="${PW - M - 14}" y="${ry + 37}" text-anchor="end" font-size="12.5" fill="#1a4d4d" direction="ltr">${escXml(localPhone(x.phone))}</text>`;
+      body += `<circle cx="${M + 22}" cy="${ry + cardH / 2}" r="12" fill="#B4894A"/>`;
+      body += `<text x="${M + 22}" y="${ry + cardH / 2 + 4}" text-anchor="middle" font-size="12" fill="#ffffff">☎</text>`;
     });
-    body += `<text x="${PW / 2}" y="${PH - 14}" text-anchor="middle" font-size="10" fill="#6B7370">صفحة ${p + 1} من ${totalPages}</text>`;
+    body += `<text x="${PW / 2}" y="${PH - 14}" text-anchor="middle" font-size="10" fill="#6B7370">صفحة ${p + 1} من ${totalPages} · عائلة آل تركي</text>`;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PW}" height="${PH}" viewBox="0 0 ${PW} ${PH}" font-family="sans-serif">${body}</svg>`;
     const png = await rasterize(svg);
     if (p > 0) pdf.addPage();
@@ -1253,7 +1255,7 @@ async function directoryToPdf(list) {
     chunk.forEach((x, i) => {
       const ry = top + i * rowH;
       const digits = (x.phone || "").replace(/[^0-9+]/g, "");
-      if (digits) pdf.link(M, ry, (PW / 2 - M), rowH, { url: "tel:" + digits });
+      if (digits) pdf.link(M, ry, (PW - 2 * M), cardH, { url: "tel:" + digits });
     });
   }
   pdf.save("دليل_الهاتف_عائلة_آل_تركي.pdf");
@@ -1272,11 +1274,13 @@ function PhoneDirectoryModal({ members, onClose }) {
       if (error) { setErr("تعذّر تحميل الدليل الآن."); setList([]); return; }
       const rows = (data || []).map((r) => {
         const m = byId[r.member_id];
+        const full = (m && (m.fullNasab || m.nasab || m.name)) || r.name || "";
         return {
           id: r.member_id,
           phone: r.phone || "",
           region: (m && m.region) || r.region || "",
-          nm: (m && (m.fullNasab || m.nasab || m.name)) || r.name || "",
+          nm: full.split(" بن ").slice(0, 5).join(" بن "), // خماسي فقط
+          full,
           sortName: (m && m.name) || r.name || "",
         };
       }).filter((x) => x.phone);
@@ -1288,7 +1292,8 @@ function PhoneDirectoryModal({ members, onClose }) {
 
   const nq = normalizeArabicLetters(q).trim();
   const all = list || [];
-  const shown = nq ? all.filter((x) => normalizeArabicLetters(x.nm).includes(nq)) : all;
+  // البحث أبجديّاً من الاسم الأول: يطابق بدايةَ النسب (الاسم ثم أبيه…)
+  const shown = nq ? all.filter((x) => normalizeArabicLetters(x.full).startsWith(nq)) : all;
   const lp = (p) => localPhone(p);
   const [saving, setSaving] = useState(false);
   const download = async () => {
