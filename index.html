@@ -2,7 +2,8 @@
 <html lang="ar" dir="rtl">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- بدون viewport-fit=cover: الصفحة تبدأ تحت شريط الحالة ولا تمتد خلفه -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>عائلة آل تركي</title>
 
     <!-- ربط ملف تعريف التطبيق (PWA) -->
@@ -13,7 +14,8 @@
 
     <!-- إعدادات آيفون/Safari لفتح الموقع كتطبيق كامل الشاشة بدون شريط المتصفح -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- default بدل black-translucent: شريط الحالة يبقى فوق المحتوى لا خلفه -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="تطبيق العائلة" />
     <link rel="apple-touch-icon" href="/logo.jpg" />
   </head>
