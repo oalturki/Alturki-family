@@ -9,7 +9,8 @@ import {
   Settings, Fingerprint, Lock, HelpCircle, MessageCircle, ChevronsRight, Video,
   Camera, ImagePlus, QrCode,
   Trophy, Sparkles, RotateCcw, Gamepad2,
-  Download, Sun, ScrollText, ListTree, Eye, Clock, Heart, Share2
+  Download, Sun, ScrollText, ListTree, Eye, Clock,
+  Bell, Send, Inbox, Users2
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -142,6 +143,65 @@ async function sendFamilyEmail(payload) {
   } catch (e) {
     console.error("sendFamilyEmail failed", e);
   }
+}
+
+/* ============ صندوق الوارد والرسائل الجماعية ============ */
+async function fetchInbox(uid) {
+  if (!uid) return [];
+  const { data, error } = await supabase
+    .from("inbox")
+    .select("id, read_at, created_at, broadcasts(id, title, body, created_at, deleted)")
+    .eq("recipient_account_id", uid)
+    .order("created_at", { ascending: false });
+  if (error) { console.error("fetchInbox failed", error); return []; }
+  return (data || []).filter((r) => r.broadcasts && !r.broadcasts.deleted);
+}
+async function markInboxRead(inboxId) {
+  await supabase.from("inbox").update({ read_at: new Date().toISOString() }).eq("id", inboxId);
+}
+async function fetchReplies(inboxId) {
+  const { data, error } = await supabase.from("inbox_replies").select("*").eq("inbox_id", inboxId).order("created_at", { ascending: true });
+  if (error) { console.error("fetchReplies failed", error); return []; }
+  return data || [];
+}
+async function sendReply(inboxId, bodyText, fromAdmin) {
+  const { error } = await supabase.from("inbox_replies").insert({ inbox_id: inboxId, body: bodyText, from_admin: !!fromAdmin });
+  if (error) { console.error("sendReply failed", error); return false; }
+  if (fromAdmin) await supabase.from("inbox").update({ read_at: null }).eq("id", inboxId); // إعادة تفعيل غير مقروء عند العضو
+  return true;
+}
+async function fetchAllBroadcasts() {
+  const { data, error } = await supabase.from("broadcasts").select("*").order("created_at", { ascending: false });
+  if (error) { console.error("fetchAllBroadcasts failed", error); return []; }
+  return data || [];
+}
+async function fetchBroadcastInbox(broadcastId) {
+  const { data, error } = await supabase.from("inbox").select("id, read_at, recipient_member_id, recipient_account_id").eq("broadcast_id", broadcastId);
+  if (error) { console.error("fetchBroadcastInbox failed", error); return []; }
+  return data || [];
+}
+async function createBroadcast(title, body, audienceLabel, memberIds) {
+  const { data, error } = await supabase.rpc("send_broadcast", { p_title: title, p_body: body, p_audience_label: audienceLabel, p_member_ids: memberIds });
+  if (error) throw new Error(error.message || "تعذّر الإرسال.");
+  const row = Array.isArray(data) ? data[0] : data;
+  const bid = row?.broadcast_id;
+  if (bid) supabase.functions.invoke("send-family-email", { body: { type: "broadcast", broadcast_id: bid } }).catch((e) => console.error("broadcast email failed", e));
+  return { id: bid, recipients: row?.recipients || 0 };
+}
+async function softDeleteBroadcast(id) {
+  const { error } = await supabase.from("broadcasts").update({ deleted: true }).eq("id", id);
+  return !error;
+}
+// معرّفات فرع العائلة (الجذر وكل ذريته أبويًا)
+function branchMemberIds(rootId, members) {
+  const kidsBy = {};
+  members.forEach((m) => { if (m.fatherId) (kidsBy[m.fatherId] = kidsBy[m.fatherId] || []).push(m.id); });
+  const out = []; const stack = [rootId]; const seen = {};
+  while (stack.length) { const id = stack.pop(); if (seen[id]) continue; seen[id] = 1; out.push(id); (kidsBy[id] || []).forEach((c) => stack.push(c)); }
+  return out;
+}
+function fmtInboxDate(d) {
+  try { return new Date(d).toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "long", day: "numeric" }); } catch (e) { return d; }
 }
 
 async function insertMember(form) {
@@ -754,47 +814,18 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [reading, setReading] = useState(null);
-  const [size, setSize] = useState("normal");
-  const [pinned, setPinned] = useState(false);
-  const [order, setOrder] = useState("");
   const [issueCount, setIssueCount] = useState(null);
-  const [latestIssue, setLatestIssue] = useState(null);
-  const [reactions, setReactions] = useState({});
 
   useEffect(() => {
     let cancelled = false;
     supabase.from("magazine_issues").select("id", { count: "exact", head: true }).then(({ count }) => { if (!cancelled) setIssueCount(count ?? null); });
-    supabase.from("magazine_issues").select("issue_number,title,published_date").order("issue_number", { ascending: false }).limit(1).then(({ data }) => { if (!cancelled && data && data[0]) setLatestIssue(data[0]); });
-    supabase.rpc("news_reaction_summary").then(({ data }) => {
-      if (cancelled || !data) return;
-      const m = {}; data.forEach((r) => { m[r.news_id] = { cnt: Number(r.cnt) || 0, mine: !!r.mine }; });
-      setReactions(m);
-    });
     return () => { cancelled = true; };
   }, []);
 
-  const toggleReaction = async (id) => {
-    const cur = reactions[id] || { cnt: 0, mine: false };
-    const next = cur.mine ? { cnt: Math.max(0, cur.cnt - 1), mine: false } : { cnt: cur.cnt + 1, mine: true };
-    setReactions((p) => ({ ...p, [id]: next }));
-    try {
-      if (cur.mine) await supabase.from("news_reactions").delete().eq("news_id", id);
-      else { const { error } = await supabase.from("news_reactions").insert({ news_id: id }); if (error) throw error; }
-    } catch (e) { setReactions((p) => ({ ...p, [id]: cur })); }
-  };
-
-  const shareNews = async (n) => {
-    const url = (typeof window !== "undefined" ? window.location.origin : "https://www.alturki.family") + "/#news";
-    const txt = `${newsTitle(n)} — أخبار عائلة آل تركي`;
-    try { if (navigator.share) { await navigator.share({ title: newsTitle(n), text: txt, url }); return; } } catch (e) { return; }
-    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(txt + " " + url)}`, "_blank");
-  };
-
   const todayStr = new Date().toISOString().slice(0, 10);
   const nextEvent = (events || []).filter((e) => e.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date))[0];
-  const daysTo = (d) => { try { const n = Math.ceil((new Date(d + "T00:00:00") - new Date(todayStr + "T00:00:00")) / 86400000); return n; } catch (e) { return null; } };
 
-  const resetForm = () => { setEditingId(null); setType("عام"); setTitle(""); setText(""); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); setSize("normal"); setPinned(false); setOrder(""); };
+  const resetForm = () => { setEditingId(null); setType("عام"); setTitle(""); setText(""); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); };
   const openComposer = () => { resetForm(); setOpen(true); };
 
   const submit = async () => {
@@ -806,7 +837,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
       const uploaded = await uploadNewsImage(compressed);
       if (uploaded) imageUrl = uploaded;
     }
-    const payload = { type, title: title.trim() || null, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null, size, pinned, display_order: order === "" ? null : (parseInt(order, 10) || null) };
+    const payload = { type, title: title.trim() || null, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null };
     if (editingId) {
       const updated = await updateNews(editingId, payload);
       if (updated) setNews(news.map((n) => (n.id === editingId ? updated : n)));
@@ -828,9 +859,6 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
     setExistingImageUrl(n.image_url || "");
     setImageFile(null);
     setLocationUrl(n.location_url || "");
-    setSize(n.size || "normal");
-    setPinned(!!n.pinned);
-    setOrder(n.display_order != null ? String(n.display_order) : "");
     setOpen(true);
   };
 
@@ -843,11 +871,8 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
     setReading(null);
   };
 
-  // القالب الذكي: ترتيبٌ يدويّ (إن وُجد) ثم التثبيت ثم التاريخ، والرئيسي من مقاس «رئيسي» أو الأحدث
-  const ord = (n) => (n.display_order != null ? n.display_order : 1e9);
-  const sortedNews = [...news].sort((a, b) => ord(a) - ord(b) || (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || String(b.date || "").localeCompare(String(a.date || "")));
-  const hero = sortedNews.find((n) => n.size === "hero") || sortedNews[0];
-  const rest = sortedNews.filter((n) => hero && n.id !== hero.id);
+  const hero = news[0];
+  const rest = news.slice(1);
   const fmtDate = (d) => { try { return new Date(d).toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "long", day: "numeric" }); } catch (e) { return d; } };
 
   return (
@@ -882,27 +907,30 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
         </div>
       </button>
 
-      {/* بطاقتان حيّتان تعرضان المحتوى الفعلي */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-        <button onClick={() => onNavigate?.("magazine")} style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "12px 12px", cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", minHeight: 96 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ width: 30, height: 30, borderRadius: 8, background: NEWS_TYPES["زواج"].soft, display: "flex", alignItems: "center", justifyContent: "center" }}><BookOpen size={15} color={T.gold} /></div>
-            {issueCount != null && <span style={{ fontSize: 9.5, fontWeight: 600, color: T.gold, background: T.sandDark, borderRadius: 999, padding: "2px 8px" }}>{issueCount} عددًا</span>}
+        <button
+          onClick={() => onNavigate?.("magazine")}
+          style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 12px", cursor: "pointer", fontFamily: "inherit" }}
+        >
+          <div style={{ width: 34, height: 34, borderRadius: "50%", background: T.sandDark, border: `1.5px solid ${T.gold}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <BookOpen size={16} color={T.gold} />
           </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, marginTop: 8 }}>مجلة الصلة</div>
-          <div style={{ fontSize: 10.5, color: T.muted, marginTop: "auto", paddingTop: 4, lineHeight: 1.5 }}>
-            {latestIssue ? `أحدث عدد: ${latestIssue.title || "الصلة"} (${latestIssue.issue_number})` : "تصفّح الأعداد"}
-          </div>
+          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>مجلة الصلة</div>
+          <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: T.gold, background: T.sandDark, border: `1px solid ${T.gold}`, borderRadius: 999, padding: "2px 9px", marginTop: 6 }}>
+            {issueCount != null ? `${issueCount} عددًا` : "تصفّح الأعداد"}
+          </span>
         </button>
-        <button onClick={() => onNavigate?.("events")} style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "12px 12px", cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", minHeight: 96 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ width: 30, height: 30, borderRadius: 8, background: NEWS_TYPES["مولود"].soft, display: "flex", alignItems: "center", justifyContent: "center" }}><CalendarDays size={15} color="#1b7a3d" /></div>
-            {nextEvent && daysTo(nextEvent.date) != null && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: "#1b7a3d", borderRadius: 999, padding: "2px 8px" }}>{daysTo(nextEvent.date) <= 0 ? "اليوم" : `بعد ${daysTo(nextEvent.date)} يوم`}</span>}
+        <button
+          onClick={() => onNavigate?.("events")}
+          style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 12px", cursor: "pointer", fontFamily: "inherit" }}
+        >
+          <div style={{ width: 34, height: 34, borderRadius: "50%", background: T.sandDark, border: `1.5px solid ${T.gold}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <CalendarDays size={16} color={T.gold} />
           </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, marginTop: 8 }}>المناسبات</div>
-          <div style={{ fontSize: 10.5, color: T.muted, marginTop: "auto", paddingTop: 4, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-            {nextEvent ? (nextEvent.title || "مناسبة قادمة") : "لا مناسبات قريبة"}
-          </div>
+          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>المناسبات</div>
+          <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: nextEvent ? T.gold : T.muted, background: T.sandDark, border: `1px solid ${nextEvent ? T.gold : T.line}`, borderRadius: 999, padding: "2px 9px", marginTop: 6 }}>
+            {nextEvent ? nextEvent.date : "لا شي قريب"}
+          </span>
         </button>
       </div>
 
@@ -943,52 +971,33 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
               {!hero.image_url && <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: meta.color, fontSize: 11, fontWeight: 600, marginBottom: 6 }}><HIcon size={13} /> {hero.type}</span>}
               <div style={{ fontSize: 18, fontWeight: 700, color: T.ink, lineHeight: 1.55 }}>{newsTitle(hero)}</div>
               <div style={{ fontSize: 13, color: T.textMuted || T.text, lineHeight: 1.7, marginTop: 7, fontWeight: 400, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsExcerpt(hero.text, 140)}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: T.muted, marginTop: 9 }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Clock size={12} /> {fmtDate(hero.date)}</span>
-                {reactions[hero.id]?.cnt > 0 && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Heart size={12} color="#c0392b" fill="#c0392b" /> {reactions[hero.id].cnt}</span>}
-              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.muted, marginTop: 9 }}><Clock size={12} /> {fmtDate(hero.date)}</div>
             </div>
           </button>
         );
       })()}
 
-      {/* بقية الأخبار — قالب ذكي: الحجم يحدّد عرض البطاقة (كبير/عادي مصغّر) */}
+      {/* بقية الأخبار — شبكة بطاقتين، صورة ١٦:٩ فوق */}
       {rest.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {rest.map((n) => {
             const meta = NEWS_TYPES[n.type] || NEWS_TYPES["عام"];
             const Icon = meta.icon;
-            const span = { gridColumn: n.size === "normal" ? "auto" : "1 / -1" };
-            const badge = (small) => (
-              <span style={{ position: "absolute", top: small ? 8 : 12, insetInlineStart: small ? 8 : 12, display: "inline-flex", alignItems: "center", gap: 4, background: meta.color, color: "#fff", borderRadius: small ? 7 : 8, padding: small ? "3px 8px" : "4px 11px", fontSize: small ? 9.5 : 11, fontWeight: 600 }}><Icon size={small ? 10 : 12} /> {n.type}</span>
-            );
-            if (n.size === "compact") {
-              return (
-                <button key={n.id} onClick={() => setReading(n)} style={{ ...span, display: "flex", gap: 10, alignItems: "center", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderInlineStart: `4px solid ${meta.color}`, borderRadius: 12, padding: "10px 12px", cursor: "pointer", fontFamily: "inherit" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: meta.color, fontSize: 10, fontWeight: 600 }}><Icon size={11} /> {n.type}</span>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: T.ink, lineHeight: 1.5, marginTop: 2, display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsTitle(n)}</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: T.muted, marginTop: 3 }}><span>{fmtDate(n.date)}</span>{reactions[n.id]?.cnt > 0 && <span style={{ display: "flex", alignItems: "center", gap: 3 }}><Heart size={11} color="#c0392b" fill="#c0392b" /> {reactions[n.id].cnt}</span>}</div>
-                  </div>
-                  {n.image_url && <img src={n.image_url} alt="" style={{ width: 54, height: 54, objectFit: "cover", borderRadius: 10, flexShrink: 0 }} />}
-                </button>
-              );
-            }
-            const big = n.size === "large" || n.size === "hero";
             return (
-              <button key={n.id} onClick={() => setReading(n)} style={{ ...span, display: "flex", flexDirection: "column", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 16, overflow: "hidden", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
+              <button key={n.id} onClick={() => setReading(n)} style={{ display: "flex", flexDirection: "column", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 16, overflow: "hidden", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
                 {n.image_url ? (
-                  <NewsImage src={n.image_url} overlay={badge(!big)} />
+                  <NewsImage src={n.image_url} overlay={
+                    <span style={{ position: "absolute", top: 8, insetInlineStart: 8, display: "inline-flex", alignItems: "center", gap: 3, background: meta.color, color: "#fff", borderRadius: 7, padding: "3px 8px", fontSize: 9.5, fontWeight: 600 }}><Icon size={10} /> {n.type}</span>
+                  } />
                 ) : (
                   <div style={{ width: "100%", aspectRatio: "16 / 9", background: meta.soft, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-                    <Icon size={big ? 38 : 30} color={meta.color} style={{ opacity: 0.55 }} />
+                    <Icon size={30} color={meta.color} style={{ opacity: 0.55 }} />
                     <span style={{ position: "absolute", top: 8, insetInlineStart: 8, color: meta.color, fontSize: 9.5, fontWeight: 700 }}>{n.type}</span>
                   </div>
                 )}
-                <div style={{ padding: big ? "12px 15px 14px" : "9px 11px 11px", flex: 1, display: "flex", flexDirection: "column" }}>
-                  <div style={{ fontSize: big ? 16.5 : 13, fontWeight: big ? 700 : 600, color: T.ink, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsTitle(n)}</div>
-                  {big && <div style={{ fontSize: 12.5, color: T.text, lineHeight: 1.65, marginTop: 6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsExcerpt(n.text, 130)}</div>}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: T.muted, marginTop: "auto", paddingTop: 8 }}><span>{fmtDate(n.date)}</span>{reactions[n.id]?.cnt > 0 && <span style={{ display: "flex", alignItems: "center", gap: 3 }}><Heart size={11} color="#c0392b" fill="#c0392b" /> {reactions[n.id].cnt}</span>}</div>
+                <div style={{ padding: "9px 11px 11px", flex: 1, display: "flex", flexDirection: "column" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, lineHeight: 1.55, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsTitle(n)}</div>
+                  <div style={{ fontSize: 10, color: T.muted, marginTop: "auto", paddingTop: 8 }}>{fmtDate(n.date)}</div>
                 </div>
               </button>
             );
@@ -1022,22 +1031,6 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
                     <MapPin size={14} color={T.gold} /> عرض الموقع على الخريطة
                   </a>
                 )}
-                {/* التفاعل: إعجاب/دعاء + مشاركة */}
-                {(() => {
-                  const isDeath = reading.type === "وفاة";
-                  const r = reactions[reading.id] || { cnt: 0, mine: false };
-                  return (
-                    <div style={{ display: "flex", gap: 10, marginTop: 18, paddingTop: 14, borderTop: `1px solid ${T.line}` }}>
-                      <button onClick={() => toggleReaction(reading.id)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: r.mine ? (isDeath ? "#eef2f0" : "#fdeaea") : T.card, border: `1px solid ${r.mine ? (isDeath ? "#8aa39b" : "#e3a3a3") : T.line}`, borderRadius: 12, padding: "10px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", color: r.mine ? (isDeath ? "#4a6b62" : "#c0392b") : T.ink }}>
-                        <Heart size={16} color={r.mine ? (isDeath ? "#4a6b62" : "#c0392b") : T.muted} fill={r.mine ? (isDeath ? "#4a6b62" : "#c0392b") : "none"} />
-                        {isDeath ? "دعاءٌ له" : "إعجاب"}{r.cnt > 0 ? ` · ${r.cnt}` : ""}
-                      </button>
-                      <button onClick={() => shareNews(reading)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "10px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", color: T.ink }}>
-                        <Share2 size={16} color={TT.teal800} /> مشاركة
-                      </button>
-                    </div>
-                  );
-                })()}
                 {canManageNews && (
                   <div style={{ display: "flex", gap: 8, marginTop: 18, paddingTop: 14, borderTop: `1px solid ${T.line}` }}>
                     <button onClick={() => startEdit(reading)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: T.card, color: T.gold, borderRadius: 8, padding: "7px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", fontWeight: 700 }}>
@@ -1089,27 +1082,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
                 )}
               </div>
               <input type="url" placeholder="رابط الموقع من خرائط جوجل (اختياري)" value={locationUrl} onChange={(e) => setLocationUrl(e.target.value)} style={{ ...inputStyle, marginTop: 10 }} />
-
-              {/* حجم الخبر في الصفحة + تثبيت (تحكّم الإشراف بالإخراج) */}
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: T.ink, margin: "14px 0 6px" }}>حجم الخبر في الصفحة</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {[["hero", "رئيسي (بارز أعلى الصفحة)"], ["large", "كبير (عرض كامل)"], ["normal", "عادي"], ["compact", "مصغّر (سطر)"]].map(([k, lbl]) => {
-                  const on = size === k;
-                  return (
-                    <button key={k} onClick={() => setSize(k)} style={{ border: `1.5px solid ${on ? TT.teal800 : T.line}`, background: on ? "#e6efec" : "transparent", color: on ? TT.teal800 : T.text, borderRadius: 10, padding: "7px 12px", fontSize: 11.5, fontWeight: on ? 800 : 600, fontFamily: "inherit", cursor: "pointer" }}>{lbl}</button>
-                  );
-                })}
-              </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12.5, color: T.ink, cursor: "pointer", fontWeight: 700 }}>
-                <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} /> تثبيت الخبر في المقدّمة
-              </label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
-                <span style={{ fontSize: 12.5, color: T.ink, fontWeight: 700 }}>ترتيب الظهور (اختياري):</span>
-                <input type="number" min="1" value={order} onChange={(e) => setOrder(e.target.value)} placeholder="تلقائي" style={{ ...inputStyle, width: 90, textAlign: "center", padding: "7px 8px" }} />
-              </div>
-              <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>الأصغر يظهر أولاً. اتركه فارغاً ليتبع الترتيب التلقائي (الأحدث).</div>
-
-              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
                 <button onClick={submit} disabled={uploadingImg} style={{ ...primaryBtnStyle, marginTop: 0, flex: 1 }}>
                   {uploadingImg ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : editingId ? "حفظ التعديل" : "نشر الخبر"}
                 </button>
@@ -3775,6 +3748,7 @@ function MembersTab({ members, setMembers, profilesMap, canManageTree }) {
 
 const ADMIN_PERMISSIONS = [
   { key: "manage_registrations", label: "إدارة تسجيل الأعضاء ومشكلاته" },
+  { key: "manage_messages", label: "إرسال الرسائل الجماعية وإدارة صندوق الوارد" },
   { key: "manage_news", label: "إضافة/تعديل الأخبار وإرسالها كإشعار" },
   { key: "manage_events", label: "إدارة الفعاليات والمناسبات" },
   { key: "manage_documents", label: "رفع وإدارة الوثائق" },
@@ -3782,7 +3756,252 @@ const ADMIN_PERMISSIONS = [
   { key: "manage_admins", label: "إضافة/حذف مشرفين آخرين" },
 ];
 
-function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageAdmins, canManageRegistrations }) {
+/* ============ صندوق وارد العضو (شاشة كاملة) ============ */
+function InboxThread({ item, isAdmin, onBack, onChanged }) {
+  const [replies, setReplies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const bc = item.broadcasts || {};
+  const load = async () => { setLoading(true); setReplies(await fetchReplies(item.id)); setLoading(false); };
+  useEffect(() => { load(); }, [item.id]);
+  const submit = async () => {
+    if (!text.trim()) return;
+    setBusy(true);
+    const okr = await sendReply(item.id, text.trim(), isAdmin);
+    if (okr) { setText(""); await load(); onChanged && onChanged(); }
+    setBusy(false);
+  };
+  return (
+    <div>
+      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: T.gold, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: 10 }}><ChevronRight size={16} /> رجوع</button>
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 16, marginBottom: 12 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: T.ink, marginBottom: 4 }}>{bc.title}</div>
+        <div style={{ fontSize: 10.5, color: T.muted, marginBottom: 10 }}>{fmtInboxDate(bc.created_at)}</div>
+        <div style={{ fontSize: 13, color: T.text, lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{bc.body}</div>
+      </div>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: T.gold, margin: "0 2px 8px" }}>المحادثة</div>
+      {loading ? <Loader2 size={16} style={{ animation: "rosette-spin 1s linear infinite" }} /> : (
+        replies.length === 0 ? <div style={{ fontSize: 12, color: T.muted, textAlign: "center", padding: "6px 0 12px" }}>لا ردود بعد. تقدر ترد أدناه.</div> : (
+          <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+            {replies.map((r) => (
+              <div key={r.id} style={{ alignSelf: r.from_admin ? "flex-start" : "flex-end", maxWidth: "85%", background: r.from_admin ? T.sandDark : T.ink, color: r.from_admin ? T.ink : T.sand, borderRadius: 12, padding: "8px 12px" }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, opacity: 0.8, marginBottom: 2 }}>{r.from_admin ? "الإشراف" : "أنت"}</div>
+                <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{r.body}</div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+      <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="اكتب ردك..." rows={2} style={{ ...inputStyle, resize: "none", flex: 1 }} />
+        <button onClick={submit} disabled={busy || !text.trim()} style={{ ...primaryBtnStyle, padding: "10px 14px", display: "flex", alignItems: "center", gap: 4 }}>{busy ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : <Send size={15} />}</button>
+      </div>
+    </div>
+  );
+}
+
+function InboxOverlay({ uid, items, onClose, reload }) {
+  const [openItem, setOpenItem] = useState(null);
+  const openThread = async (it) => {
+    setOpenItem(it);
+    if (!it.read_at) { await markInboxRead(it.id); reload && reload(); }
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: T.sand, zIndex: 95, display: "flex", flexDirection: "column", maxWidth: 430, margin: "0 auto" }}>
+      <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 2 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: TT.gold500, fontWeight: 800, fontSize: 15 }}><Inbox size={18} /> صندوق الوارد</div>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer" }}><X size={22} /></button>
+      </div>
+      <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
+        {openItem ? (
+          <InboxThread item={openItem} isAdmin={false} onBack={() => setOpenItem(null)} onChanged={reload} />
+        ) : items.length === 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: "60px 0", color: T.muted }}>
+            <Inbox size={30} /> <span style={{ fontSize: 13 }}>لا رسائل في صندوقك بعد.</span>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {items.map((it) => {
+              const bc = it.broadcasts || {};
+              const unread = !it.read_at;
+              return (
+                <div key={it.id} onClick={() => openThread(it)} style={{ background: T.card, border: `1.5px solid ${unread ? T.gold : T.line}`, borderRadius: 14, padding: 14, cursor: "pointer", position: "relative" }}>
+                  {unread && <span style={{ position: "absolute", top: 14, insetInlineStart: 14, width: 9, height: 9, borderRadius: 999, background: T.gold }} />}
+                  <div style={{ fontSize: 13.5, fontWeight: 800, color: T.ink, marginBottom: 3, paddingInlineStart: unread ? 16 : 0 }}>{bc.title}</div>
+                  <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.7, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{bc.body}</div>
+                  <div style={{ fontSize: 10, color: T.muted, marginTop: 6 }}>{fmtInboxDate(bc.created_at)}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============ إدارة الرسائل الجماعية (إشراف) ============ */
+const AUDIENCE_OPTS = [
+  { key: "all", label: "كل الأعضاء" },
+  { key: "male", label: "الذكور" },
+  { key: "female", label: "الإناث" },
+  { key: "branch", label: "فرع من العائلة" },
+];
+function BroadcastManager({ members }) {
+  const normA = (s) => normalizeArabicLetters(s).split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [aud, setAud] = useState("all");
+  const [branchRoot, setBranchRoot] = useState(null);
+  const [branchQuery, setBranchQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [list, setList] = useState([]);
+  const [loadingList, setLoadingList] = useState(true);
+  const [openThread, setOpenThread] = useState(null); // broadcast being inspected
+  const [confirmDel, setConfirmDel] = useState(null);
+
+  const withAccount = members.filter((m) => m.userAccountId);
+  const targetMembers = () => {
+    if (aud === "male") return withAccount.filter((m) => m.gender !== "female");
+    if (aud === "female") return withAccount.filter((m) => m.gender === "female");
+    if (aud === "branch") { if (!branchRoot) return []; const ids = new Set(branchMemberIds(branchRoot.id, members)); return withAccount.filter((m) => ids.has(m.id)); }
+    return withAccount;
+  };
+  const audienceLabel = () => {
+    if (aud === "male") return "الذكور";
+    if (aud === "female") return "الإناث";
+    if (aud === "branch") return `فرع: ${branchRoot ? (branchRoot.name || "") : ""}`;
+    return "كل الأعضاء";
+  };
+  const count = targetMembers().length;
+
+  const loadList = async () => { setLoadingList(true); setList((await fetchAllBroadcasts()).filter((b) => !b.deleted)); setLoadingList(false); };
+  useEffect(() => { loadList(); }, []);
+
+  const submit = async () => {
+    setErr(""); setMsg("");
+    if (!title.trim() || !body.trim()) return setErr("العنوان والنص مطلوبان.");
+    const ids = targetMembers().map((m) => m.id);
+    if (ids.length === 0) return setErr("لا مستقبِلين مطابقين (لا حسابات مفعّلة في هذه الفئة).");
+    setBusy(true);
+    try {
+      const res = await createBroadcast(title.trim(), body.trim(), audienceLabel(), ids);
+      setMsg(`أُرسلت الرسالة إلى ${res.recipients} عضوًا. تصلهم داخل التطبيق وعلى بريدهم.`);
+      setTitle(""); setBody(""); setAud("all"); setBranchRoot(null); setBranchQuery("");
+      loadList();
+    } catch (e) { setErr(e.message || "تعذّر الإرسال."); }
+    setBusy(false);
+  };
+
+  if (openThread) return <AdminBroadcastThread broadcast={openThread} members={members} onBack={() => { setOpenThread(null); loadList(); }} />;
+
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <SectionTitle>الرسائل الجماعية</SectionTitle>
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}><Megaphone size={15} color={T.gold} /> رسالة جديدة</div>
+        <input placeholder="عنوان الرسالة" value={title} onChange={(e) => setTitle(e.target.value)} style={{ ...inputStyle, marginBottom: 8 }} />
+        <textarea placeholder="نص الرسالة..." value={body} onChange={(e) => setBody(e.target.value)} rows={4} style={{ ...inputStyle, resize: "vertical", marginBottom: 10 }} />
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: T.muted, marginBottom: 6 }}>الفئة المستهدفة</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+          {AUDIENCE_OPTS.map((o) => (
+            <button key={o.key} onClick={() => setAud(o.key)} style={{ border: `1.5px solid ${aud === o.key ? T.gold : T.line}`, background: aud === o.key ? T.sandDark : "transparent", color: T.ink, borderRadius: 999, padding: "6px 13px", fontSize: 12, fontWeight: aud === o.key ? 800 : 600, fontFamily: "inherit", cursor: "pointer" }}>{o.label}</button>
+          ))}
+        </div>
+        {aud === "branch" && (
+          <div style={{ marginBottom: 8 }}>
+            {branchRoot ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: T.sandDark, borderRadius: 10, padding: "8px 12px" }}>
+                <span style={{ fontSize: 12.5, color: T.ink, fontWeight: 700 }}>{branchRoot.nasab || branchRoot.name}</span>
+                <button onClick={() => { setBranchRoot(null); setBranchQuery(""); }} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }}><X size={16} /></button>
+              </div>
+            ) : (
+              <div>
+                <input placeholder="اختر جذر الفرع بالاسم..." value={branchQuery} onChange={(e) => setBranchQuery(e.target.value)} style={inputStyle} />
+                {branchQuery.trim().length >= 2 && (
+                  <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, marginTop: 6, maxHeight: 200, overflow: "auto", background: T.card }}>
+                    {members.filter((m) => normA(m.nasab || m.name).includes(normA(branchQuery))).slice(0, 8).map((m) => (
+                      <div key={m.id} onClick={() => setBranchRoot(m)} style={{ padding: "8px 12px", borderBottom: `1px solid ${T.line}`, cursor: "pointer", fontSize: 12.5, color: T.text }}>{m.nasab || m.name}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: T.muted, marginBottom: 10 }}>سيصل إلى <b style={{ color: T.gold }}>{count}</b> عضوًا لديهم حساب مفعّل.</div>
+        {err && <div style={{ color: T.clay, fontSize: 12, marginBottom: 8 }}>{err}</div>}
+        {msg && <div style={{ color: "#3A7D5C", fontSize: 12, marginBottom: 8 }}>{msg}</div>}
+        <button onClick={submit} disabled={busy} style={{ ...primaryBtnStyle, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>{busy ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : <Send size={15} />} إرسال</button>
+      </div>
+
+      <div style={{ fontSize: 12, fontWeight: 700, color: T.muted, margin: "0 2px 8px" }}>الرسائل المُرسَلة</div>
+      {loadingList ? <Loader2 size={16} style={{ animation: "rosette-spin 1s linear infinite" }} /> : list.length === 0 ? <EmptyState text="لا رسائل مُرسَلة بعد." /> : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {list.map((b) => (
+            <div key={b.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setOpenThread(b)}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: T.ink }}>{b.title}</div>
+                  <div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>{fmtInboxDate(b.created_at)}{b.audience_label ? ` · ${b.audience_label}` : ""}</div>
+                </div>
+                <button onClick={() => setConfirmDel(b)} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف"><Trash2 size={15} /></button>
+              </div>
+              <button onClick={() => setOpenThread(b)} style={{ marginTop: 8, border: `1px solid ${T.line}`, background: "transparent", color: T.ink, borderRadius: 8, padding: "5px 12px", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}><MessageCircle size={13} /> الردود والمستقبِلون</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {confirmDel && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 20 }} onClick={() => setConfirmDel(null)}>
+          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 13, color: T.text, marginBottom: 16, textAlign: "center", lineHeight: 1.7 }}>حذف الرسالة «{confirmDel.title}» من صناديق الجميع؟</div>
+            <button onClick={async () => { await softDeleteBroadcast(confirmDel.id); setConfirmDel(null); loadList(); }} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>حذف</button>
+            <button onClick={() => setConfirmDel(null)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>تراجع</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminBroadcastThread({ broadcast, members, onBack }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [active, setActive] = useState(null); // inbox row being replied to
+  const nameOf = (mid) => { const m = members.find((x) => x.id === mid); return m ? (m.nasab || m.name) : "عضو"; };
+  const load = async () => { setLoading(true); setRows(await fetchBroadcastInbox(broadcast.id)); setLoading(false); };
+  useEffect(() => { load(); }, [broadcast.id]);
+  if (active) {
+    const item = { id: active.id, broadcasts: broadcast };
+    return <InboxThread item={item} isAdmin={true} onBack={() => setActive(null)} onChanged={load} />;
+  }
+  return (
+    <div>
+      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: T.gold, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: 10 }}><ChevronRight size={16} /> رجوع للقائمة</button>
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: T.ink, marginBottom: 4 }}>{broadcast.title}</div>
+        <div style={{ fontSize: 12.5, color: T.text, lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{broadcast.body}</div>
+      </div>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: T.gold, margin: "0 2px 8px" }}>المستقبِلون ({rows.length}) — اضغط للرد على أحدهم</div>
+      {loading ? <Loader2 size={16} style={{ animation: "rosette-spin 1s linear infinite" }} /> : (
+        <div style={{ display: "grid", gap: 6 }}>
+          {rows.map((r) => (
+            <div key={r.id} onClick={() => setActive(r)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: T.card, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 12px", cursor: "pointer" }}>
+              <span style={{ fontSize: 12.5, color: T.text, fontWeight: 700 }}>{nameOf(r.recipient_member_id)}</span>
+              <span style={{ fontSize: 10, color: r.read_at ? "#3A7D5C" : T.muted, fontWeight: 700 }}>{r.read_at ? "قرأها" : "لم تُقرأ"}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageAdmins, canManageRegistrations, canManageMessages }) {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [phone, setPhone] = useState("");
@@ -3970,6 +4189,8 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
           </div>
         </div>
       </div>
+
+      {canManageMessages && <BroadcastManager members={members} />}
 
       {canManageRegistrations && (
         <>
@@ -4279,193 +4500,6 @@ function ContactUsView({ onBack, meId }) {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-// إدارة أسرة البنت: زوجها وأولادها (الأولاد يُنسبون لأبيهم الزوج، ويظهرون في ملفها فقط)
-function DaughterFamilyManager({ daughter, members, setMembers, profilesMap }) {
-  const husbands = members.filter((m) => m.spouseOf === daughter.id && m.gender !== "female").sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
-  const [showAddH, setShowAddH] = useState(false);
-  const [hName, setHName] = useState("");
-  const [hPhone, setHPhone] = useState("");
-  const [childFor, setChildFor] = useState(null); // husband id
-  const [cName, setCName] = useState("");
-  const [cGender, setCGender] = useState("male");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const [confirmDel, setConfirmDel] = useState(null);
-
-  const addHusband = async () => {
-    if (!hName.trim()) { setErr("اكتب اسم الزوج."); return; }
-    setBusy(true); setErr("");
-    try {
-      const created = await insertMember({ name: hName.trim(), spouseOf: daughter.id, gender: "male", phone: hPhone.trim() || null });
-      setMembers(enrichMembers([...members, created], profilesMap));
-      setHName(""); setHPhone(""); setShowAddH(false);
-    } catch (e) { setErr(e.message || "تعذّرت الإضافة."); }
-    setBusy(false);
-  };
-  const addChild = async (husbandId) => {
-    if (!cName.trim()) { setErr("اكتب اسم الابن/الابنة."); return; }
-    setBusy(true); setErr("");
-    try {
-      const created = await insertMember({ name: cName.trim(), fatherId: husbandId, gender: cGender });
-      setMembers(enrichMembers([...members, created], profilesMap));
-      setCName(""); setCGender("male"); setChildFor(null);
-    } catch (e) { setErr(e.message || "تعذّرت الإضافة."); }
-    setBusy(false);
-  };
-  const del = async () => {
-    if (!confirmDel) return;
-    setBusy(true);
-    try { await deleteMember(confirmDel.id); setMembers(members.filter((m) => m.id !== confirmDel.id)); } catch (e) {}
-    setConfirmDel(null); setBusy(false);
-  };
-
-  return (
-    <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
-      {err && <div style={{ color: T.clay, fontSize: 12, marginBottom: 8 }}>{err}</div>}
-
-      {/* الزوج */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <span style={{ fontSize: 12.5, fontWeight: 800, color: T.ink }}>الزوج</span>
-        <button onClick={() => { setShowAddH((v) => !v); setErr(""); }} style={{ display: "flex", alignItems: "center", gap: 4, border: `1px solid ${T.gold}`, background: showAddH ? T.sandDark : "transparent", color: T.gold, borderRadius: 999, padding: "4px 11px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", fontWeight: 700 }}><Plus size={12} /> إضافة زوج</button>
-      </div>
-      {husbands.length === 0 && !showAddH && <div style={{ fontSize: 11.5, color: T.muted, textAlign: "center", padding: "6px 0 10px" }}>لم يُضَف الزوج بعد. أضيفيه ثم أضيفي الأولاد تحته.</div>}
-      {showAddH && (
-        <div style={{ display: "grid", gap: 6, marginBottom: 10, paddingBottom: 10, borderBottom: `1px dashed ${T.line}` }}>
-          <input placeholder="اسم الزوج (كاملاً)" value={hName} onChange={(e) => setHName(e.target.value)} style={inputStyle} />
-          <input placeholder="جواله (اختياري)" value={hPhone} onChange={(e) => setHPhone(e.target.value)} style={inputStyle} />
-          <button onClick={addHusband} disabled={busy} style={primaryBtnStyle}>{busy ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "حفظ الزوج"}</button>
-        </div>
-      )}
-
-      {husbands.map((h) => {
-        const kids = members.filter((m) => m.fatherId === h.id).sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
-        return (
-          <div key={h.id} style={{ border: `1px solid ${T.line}`, borderRadius: 12, padding: 12, marginBottom: 10, background: T.sand }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: T.ink }}>{h.name}{h.phone ? <span style={{ fontSize: 11, color: T.muted, fontWeight: 500, direction: "ltr" }}>  ·  {h.phone}</span> : null}</div>
-              <button onClick={() => setConfirmDel({ id: h.id, name: h.name, kind: "husband" })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف الزوج"><Trash2 size={15} /></button>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: T.gold }}>الأبناء والبنات</span>
-              <button onClick={() => { setChildFor(childFor === h.id ? null : h.id); setErr(""); }} style={{ display: "flex", alignItems: "center", gap: 4, border: `1px solid ${T.line}`, background: childFor === h.id ? T.sandDark : "transparent", color: T.ink, borderRadius: 999, padding: "4px 10px", fontSize: 10.5, fontFamily: "inherit", cursor: "pointer", fontWeight: 700 }}><Plus size={11} /> إضافة</button>
-            </div>
-            {kids.length === 0 && childFor !== h.id && <div style={{ fontSize: 11, color: T.muted, textAlign: "center", padding: "6px 0" }}>لا أولاد مضافون بعد.</div>}
-            {kids.map((k) => (
-              <div key={k.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px dashed ${T.line}` }}>
-                <span style={{ fontSize: 12.5, color: T.text }}>{k.name} <span style={{ fontSize: 10, color: T.muted }}>· {k.gender === "female" ? "ابنة" : "ابن"}</span></span>
-                <button onClick={() => setConfirmDel({ id: k.id, name: k.name, kind: "child" })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف"><Trash2 size={14} /></button>
-              </div>
-            ))}
-            {childFor === h.id && (
-              <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-                <input placeholder="اسم الابن/الابنة" value={cName} onChange={(e) => setCName(e.target.value)} style={inputStyle} />
-                <div style={{ display: "flex", gap: 6 }}>
-                  {[["male", "ابن"], ["female", "ابنة"]].map(([g, lbl]) => (
-                    <button key={g} onClick={() => setCGender(g)} style={{ flex: 1, border: `1.5px solid ${cGender === g ? T.gold : T.line}`, background: cGender === g ? T.sandDark : "transparent", color: T.ink, borderRadius: 10, padding: "8px", fontSize: 12.5, fontWeight: cGender === g ? 800 : 600, fontFamily: "inherit", cursor: "pointer" }}>{lbl}</button>
-                  ))}
-                </div>
-                <button onClick={() => addChild(h.id)} disabled={busy} style={primaryBtnStyle}>{busy ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "حفظ"}</button>
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4, lineHeight: 1.6 }}>يُنسب الأولاد لأبيهم (الزوج) وأسرته، ويظهرون في ملفكِ فقط — لا على لوحة الشجرة.</div>
-
-      {confirmDel && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 20 }} onClick={() => setConfirmDel(null)}>
-          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontSize: 13, color: T.text, marginBottom: 16, textAlign: "center", lineHeight: 1.7 }}>تأكيد حذف «{confirmDel.name}»{confirmDel.kind === "husband" ? " وكل أولاده المسجّلين تحته؟" : "؟"}</div>
-            <button onClick={del} disabled={busy} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>حذف</button>
-            <button onClick={() => setConfirmDel(null)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>تراجع</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// تفعيل الأخت التي والدها متوفى: الأخ الذكر (من نفس الأب) يضيفها ببريدها فتفعّل حسابها بنفسها.
-function SisterActivationManager({ me, members, setMembers, profilesMap }) {
-  const father = me?.fatherId ? members.find((m) => m.id === me.fatherId) : null;
-  const fatherDeceased = father && (father.isAlive === false || father.deathDate);
-  const sisters = members
-    .filter((m) => m.gender === "female" && m.fatherId === me?.fatherId && m.id !== me?.id)
-    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
-  const [showAdd, setShowAdd] = useState(false);
-  const [sName, setSName] = useState("");
-  const [sEmail, setSEmail] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const [ok, setOk] = useState("");
-  const [confirmDel, setConfirmDel] = useState(null);
-
-  if (me?.gender === "female" || !fatherDeceased) return null;
-
-  const addSister = async () => {
-    if (!sName.trim()) return setErr("اكتب اسم الأخت رباعيًا.");
-    if (!isValidEmail(sEmail)) return setErr("صيغة البريد الإلكتروني غير صحيحة.");
-    setBusy(true); setErr(""); setOk("");
-    try {
-      const created = await insertMember({ name: sName.trim(), fatherId: me.fatherId, gender: "female", prefilledEmail: sEmail.trim() });
-      setMembers(enrichMembers([...members, created], profilesMap));
-      sendFamilyEmail({ type: "welcome", email: sEmail.trim(), name: sName.trim() });
-      setOk(`تمت إضافة ${created.name}. ستصلها دعوة على بريدها لتفعّل حسابها بنفسها.`);
-      setSName(""); setSEmail(""); setShowAdd(false);
-    } catch (e) { setErr(e.message || "تعذّرت الإضافة."); }
-    setBusy(false);
-  };
-  const del = async () => {
-    if (!confirmDel) return;
-    setBusy(true);
-    try { await deleteMember(confirmDel.id); setMembers(members.filter((m) => m.id !== confirmDel.id)); } catch (e) { setErr(e.message || "تعذّر الحذف."); }
-    setConfirmDel(null); setBusy(false);
-  };
-
-  return (
-    <div style={{ marginTop: 14, marginBottom: 14 }}>
-      <SectionTitle action={<IconButton onClick={() => { setShowAdd((v) => !v); setErr(""); setOk(""); }} active={showAdd}><Plus size={13} /> إضافة</IconButton>}>أخواتي (تفعيل حساباتهن)</SectionTitle>
-      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
-        <div style={{ fontSize: 10.5, color: T.muted, lineHeight: 1.7, marginBottom: 10 }}>لأن والدكم — رحمه الله — لم يعد يستطيع الإضافة، تقدر تضيف أخواتك ببريد كل واحدة فتصلها دعوة تفعّل حسابها بنفسها.</div>
-        {err && <div style={{ color: T.clay, fontSize: 12, marginBottom: 8 }}>{err}</div>}
-        {ok && <div style={{ color: "#2F7D4F", fontSize: 12, marginBottom: 8 }}>{ok}</div>}
-        {sisters.length === 0 && !showAdd && <div style={{ fontSize: 12, color: T.muted, textAlign: "center", padding: "8px 0" }}>لا أخوات مضافات بعد.</div>}
-        {sisters.map((s) => (
-          <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
-            <div>
-              <div style={{ fontSize: 12.5, color: T.text, fontWeight: 700 }}>{s.name}</div>
-              <div style={{ fontSize: 10.5, color: T.muted }}>{s.prefilledEmail}</div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: s.userAccountId ? "#2F7D4F" : T.muted, marginTop: 2 }}>الحساب: {s.userAccountId ? "مفعّل" : "غير مفعّل"}</div>
-            </div>
-            {!s.userAccountId && (
-              <button onClick={() => setConfirmDel({ id: s.id, name: s.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف"><Trash2 size={15} /></button>
-            )}
-          </div>
-        ))}
-        {showAdd && (
-          <div style={{ display: "grid", gap: 6, marginTop: 10, paddingTop: 10, borderTop: sisters.length ? `1px dashed ${T.line}` : "none" }}>
-            <input placeholder="اسم الأخت رباعيًا" value={sName} onChange={(e) => setSName(e.target.value)} style={inputStyle} />
-            <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={sEmail} onChange={(e) => setSEmail(e.target.value)} style={inputStyle} />
-            <button onClick={addSister} disabled={busy} style={primaryBtnStyle}>{busy ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}</button>
-            <div style={{ fontSize: 10.5, color: T.muted }}>تُنسب لأبيكم مباشرةً، وتظهر أسرتها (زوجها وأولادها) في ملفها هي بعد التفعيل.</div>
-          </div>
-        )}
-      </div>
-      {confirmDel && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 20 }} onClick={() => setConfirmDel(null)}>
-          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontSize: 13, color: T.text, marginBottom: 16, textAlign: "center", lineHeight: 1.7 }}>حذف «{confirmDel.name}»؟ (متاح ما دام حسابها غير مفعّل)</div>
-            <button onClick={del} disabled={busy} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>حذف</button>
-            <button onClick={() => setConfirmDel(null)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>تراجع</button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -5266,15 +5300,6 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
         </div>
       )}
 
-      {form.gender !== "female" && <SisterActivationManager me={me} members={members} setMembers={setMembers} profilesMap={profilesMap} />}
-
-      {form.gender === "female" && (
-        <div style={{ marginTop: 14, marginBottom: 14 }}>
-          <SectionTitle>أسرتي (الزوج والأولاد)</SectionTitle>
-          <DaughterFamilyManager daughter={me} members={members} setMembers={setMembers} profilesMap={profilesMap} />
-        </div>
-      )}
-
       {confirmRemove && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={() => setConfirmRemove(null)}>
           <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()} dir="rtl">
@@ -5378,17 +5403,34 @@ function FamilyAppInner({ meId }) {
   const [canManageEvents, setCanManageEvents] = useState(false);
   const [canManageDocuments, setCanManageDocuments] = useState(false);
   const [canManageRegistrations, setCanManageRegistrations] = useState(false);
+  const [canManageMessages, setCanManageMessages] = useState(false);
   const [magazineUploading, setMagazineUploading] = useState(false);
   const [magazineUploadMsg, setMagazineUploadMsg] = useState("");
+  const [authUid, setAuthUid] = useState(null);
+  const [inboxItems, setInboxItems] = useState([]);
+  const [inboxOpen, setInboxOpen] = useState(() => { try { return window.location.hash.replace("#", "") === "inbox"; } catch (e) { return false; } });
+
+  const reloadInbox = async (uid) => {
+    const id = uid || authUid;
+    if (!id) return;
+    setInboxItems(await fetchInbox(id));
+  };
 
   useEffect(() => {
     (async () => {
-      const [rawMembers, profiles, contacts, n, e, treePerm, adminsPerm, newsPerm, eventsPerm, docsPerm, regPerm] = await Promise.all([
+      const [rawMembers, profiles, contacts, n, e, treePerm, adminsPerm, newsPerm, eventsPerm, docsPerm, regPerm, msgPerm] = await Promise.all([
         fetchMembers(), fetchMemberProfiles(), fetchMemberContacts(), fetchNews(), fetchEvents(),
         checkPermission("manage_tree_profiles"), checkPermission("manage_admins"),
         checkPermission("manage_news"), checkPermission("manage_events"),
         checkPermission("manage_documents"), checkPermission("manage_registrations"),
+        checkPermission("manage_messages"),
       ]);
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        const uid = authData?.user?.id || null;
+        setAuthUid(uid);
+        if (uid) setInboxItems(await fetchInbox(uid));
+      } catch (err) { console.error("auth/inbox load failed", err); }
       // دمج الجوال/البريد المسموح بهما (من RPC الآمنة) مع بيانات الأعضاء قبل الإثراء
       const mergedMembers = rawMembers.map((m) => {
         const c = contacts[m.id];
@@ -5404,12 +5446,14 @@ function FamilyAppInner({ meId }) {
       setCanManageEvents(eventsPerm);
       setCanManageDocuments(docsPerm);
       setCanManageRegistrations(regPerm);
+      setCanManageMessages(msgPerm);
       setLoading(false);
     })();
   }, []);
 
   const me = members.find((m) => m.id === meId);
-  const TABS = (canManageAdmins || canManageTree || canManageRegistrations) ? [...BASE_TABS, ADMINS_TAB] : BASE_TABS;
+  const unreadInbox = inboxItems.filter((i) => !i.read_at).length;
+  const TABS = (canManageAdmins || canManageTree || canManageRegistrations || canManageMessages) ? [...BASE_TABS, ADMINS_TAB] : BASE_TABS;
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Readex Pro', sans-serif", background: T.sand, minHeight: "100vh" }}>
@@ -5441,7 +5485,21 @@ function FamilyAppInner({ meId }) {
             boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
           }}
           title="الرجوع للرئيسية"
-        />
+        >
+          <button
+            onClick={(ev) => { ev.stopPropagation(); setInboxOpen(true); }}
+            title="صندوق الوارد"
+            style={{ position: "absolute", top: 12, insetInlineStart: 12, width: 40, height: 40, borderRadius: 999, background: "rgba(23,54,52,0.92)", border: `1.5px solid ${TT.gold500}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.2)" }}
+          >
+            <Bell size={18} color={TT.gold500} />
+            {unreadInbox > 0 && (
+              <span style={{ position: "absolute", top: -4, insetInlineEnd: -4, minWidth: 18, height: 18, padding: "0 4px", borderRadius: 999, background: T.clay, color: "#fff", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", border: "2px solid #fafafa" }}>{unreadInbox > 99 ? "99+" : unreadInbox}</span>
+            )}
+          </button>
+        </div>
+        {inboxOpen && (
+          <InboxOverlay uid={authUid} items={inboxItems} onClose={() => setInboxOpen(false)} reload={() => reloadInbox()} />
+        )}
         {(magazineUploading || magazineUploadMsg) && (
           <div style={{ position: "fixed", top: 96, left: "50%", transform: "translateX(-50%)", zIndex: 55, width: "calc(100% - 32px)", maxWidth: 400 }}>
             <div
@@ -5487,7 +5545,7 @@ function FamilyAppInner({ meId }) {
               {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} onUploadingChange={setMagazineUploading} onUploadResult={setMagazineUploadMsg} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
               {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} />}
-              {tab === "admins" && (canManageAdmins || canManageTree || canManageRegistrations) && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} canManageAdmins={canManageAdmins} canManageRegistrations={canManageRegistrations} />}
+              {tab === "admins" && (canManageAdmins || canManageTree || canManageRegistrations || canManageMessages) && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} canManageAdmins={canManageAdmins} canManageRegistrations={canManageRegistrations} canManageMessages={canManageMessages} />}
             </>
           )}
         </div>
