@@ -4306,14 +4306,16 @@ function FamilyAppInner({ meId }) {
             return (
               <button key={t.key} onClick={() => setTab(t.key)} style={{
                 position: "relative", flex: 1, cursor: "pointer", fontFamily: "inherit",
-                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end",
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start",
                 background: active ? T.sand : "transparent",
                 border: "none",
-                borderTopLeftRadius: active ? 14 : 0,
-                borderTopRightRadius: active ? 14 : 0,
-                marginTop: active ? -14 : 0,
-                paddingTop: active ? 22 : 8,
-                paddingBottom: 4,
+                borderTopLeftRadius: 0,
+                borderTopRightRadius: 0,
+                borderBottomLeftRadius: active ? 16 : 0,
+                borderBottomRightRadius: active ? 16 : 0,
+                marginTop: active ? -2 : 0,
+                paddingTop: active ? 10 : 8,
+                paddingBottom: active ? 8 : 4,
               }}>
                 <Icon size={19} color={active ? T.ink : T.goldLight} strokeWidth={active ? 2.4 : 2} />
                 <span style={{ fontSize: 9.5, fontWeight: active ? 800 : 600, color: active ? T.ink : "#e7dfc9", marginTop: 3 }}>{t.label}</span>
