@@ -9,7 +9,7 @@ import {
   Settings, Fingerprint, Lock, HelpCircle, MessageCircle, ChevronsRight, Video,
   Camera, ImagePlus, QrCode,
   Trophy, Sparkles, RotateCcw, Gamepad2,
-  Download, Sun, ScrollText, ListTree, Eye, Clock
+  Download, Sun, ScrollText, ListTree, Eye, Clock, Heart, Share2
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -756,21 +756,45 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
   const [reading, setReading] = useState(null);
   const [size, setSize] = useState("normal");
   const [pinned, setPinned] = useState(false);
+  const [order, setOrder] = useState("");
   const [issueCount, setIssueCount] = useState(null);
   const [latestIssue, setLatestIssue] = useState(null);
+  const [reactions, setReactions] = useState({});
 
   useEffect(() => {
     let cancelled = false;
     supabase.from("magazine_issues").select("id", { count: "exact", head: true }).then(({ count }) => { if (!cancelled) setIssueCount(count ?? null); });
     supabase.from("magazine_issues").select("issue_number,title,published_date").order("issue_number", { ascending: false }).limit(1).then(({ data }) => { if (!cancelled && data && data[0]) setLatestIssue(data[0]); });
+    supabase.rpc("news_reaction_summary").then(({ data }) => {
+      if (cancelled || !data) return;
+      const m = {}; data.forEach((r) => { m[r.news_id] = { cnt: Number(r.cnt) || 0, mine: !!r.mine }; });
+      setReactions(m);
+    });
     return () => { cancelled = true; };
   }, []);
+
+  const toggleReaction = async (id) => {
+    const cur = reactions[id] || { cnt: 0, mine: false };
+    const next = cur.mine ? { cnt: Math.max(0, cur.cnt - 1), mine: false } : { cnt: cur.cnt + 1, mine: true };
+    setReactions((p) => ({ ...p, [id]: next }));
+    try {
+      if (cur.mine) await supabase.from("news_reactions").delete().eq("news_id", id);
+      else { const { error } = await supabase.from("news_reactions").insert({ news_id: id }); if (error) throw error; }
+    } catch (e) { setReactions((p) => ({ ...p, [id]: cur })); }
+  };
+
+  const shareNews = async (n) => {
+    const url = (typeof window !== "undefined" ? window.location.origin : "https://www.alturki.family") + "/#news";
+    const txt = `${newsTitle(n)} — أخبار عائلة آل تركي`;
+    try { if (navigator.share) { await navigator.share({ title: newsTitle(n), text: txt, url }); return; } } catch (e) { return; }
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(txt + " " + url)}`, "_blank");
+  };
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const nextEvent = (events || []).filter((e) => e.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date))[0];
   const daysTo = (d) => { try { const n = Math.ceil((new Date(d + "T00:00:00") - new Date(todayStr + "T00:00:00")) / 86400000); return n; } catch (e) { return null; } };
 
-  const resetForm = () => { setEditingId(null); setType("عام"); setTitle(""); setText(""); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); setSize("normal"); setPinned(false); };
+  const resetForm = () => { setEditingId(null); setType("عام"); setTitle(""); setText(""); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); setSize("normal"); setPinned(false); setOrder(""); };
   const openComposer = () => { resetForm(); setOpen(true); };
 
   const submit = async () => {
@@ -782,7 +806,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
       const uploaded = await uploadNewsImage(compressed);
       if (uploaded) imageUrl = uploaded;
     }
-    const payload = { type, title: title.trim() || null, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null, size, pinned };
+    const payload = { type, title: title.trim() || null, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null, size, pinned, display_order: order === "" ? null : (parseInt(order, 10) || null) };
     if (editingId) {
       const updated = await updateNews(editingId, payload);
       if (updated) setNews(news.map((n) => (n.id === editingId ? updated : n)));
@@ -806,6 +830,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
     setLocationUrl(n.location_url || "");
     setSize(n.size || "normal");
     setPinned(!!n.pinned);
+    setOrder(n.display_order != null ? String(n.display_order) : "");
     setOpen(true);
   };
 
@@ -818,8 +843,9 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
     setReading(null);
   };
 
-  // القالب الذكي: ترتيب حسب التثبيت ثم التاريخ، والخبر الرئيسي من مقاس «رئيسي» أو أحدث خبر
-  const sortedNews = [...news].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || String(b.date || "").localeCompare(String(a.date || "")));
+  // القالب الذكي: ترتيبٌ يدويّ (إن وُجد) ثم التثبيت ثم التاريخ، والرئيسي من مقاس «رئيسي» أو الأحدث
+  const ord = (n) => (n.display_order != null ? n.display_order : 1e9);
+  const sortedNews = [...news].sort((a, b) => ord(a) - ord(b) || (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || String(b.date || "").localeCompare(String(a.date || "")));
   const hero = sortedNews.find((n) => n.size === "hero") || sortedNews[0];
   const rest = sortedNews.filter((n) => hero && n.id !== hero.id);
   const fmtDate = (d) => { try { return new Date(d).toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "long", day: "numeric" }); } catch (e) { return d; } };
@@ -917,7 +943,10 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
               {!hero.image_url && <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: meta.color, fontSize: 11, fontWeight: 600, marginBottom: 6 }}><HIcon size={13} /> {hero.type}</span>}
               <div style={{ fontSize: 18, fontWeight: 700, color: T.ink, lineHeight: 1.55 }}>{newsTitle(hero)}</div>
               <div style={{ fontSize: 13, color: T.textMuted || T.text, lineHeight: 1.7, marginTop: 7, fontWeight: 400, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsExcerpt(hero.text, 140)}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.muted, marginTop: 9 }}><Clock size={12} /> {fmtDate(hero.date)}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: T.muted, marginTop: 9 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Clock size={12} /> {fmtDate(hero.date)}</span>
+                {reactions[hero.id]?.cnt > 0 && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Heart size={12} color="#c0392b" fill="#c0392b" /> {reactions[hero.id].cnt}</span>}
+              </div>
             </div>
           </button>
         );
@@ -939,7 +968,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: meta.color, fontSize: 10, fontWeight: 600 }}><Icon size={11} /> {n.type}</span>
                     <div style={{ fontSize: 13.5, fontWeight: 600, color: T.ink, lineHeight: 1.5, marginTop: 2, display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsTitle(n)}</div>
-                    <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>{fmtDate(n.date)}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: T.muted, marginTop: 3 }}><span>{fmtDate(n.date)}</span>{reactions[n.id]?.cnt > 0 && <span style={{ display: "flex", alignItems: "center", gap: 3 }}><Heart size={11} color="#c0392b" fill="#c0392b" /> {reactions[n.id].cnt}</span>}</div>
                   </div>
                   {n.image_url && <img src={n.image_url} alt="" style={{ width: 54, height: 54, objectFit: "cover", borderRadius: 10, flexShrink: 0 }} />}
                 </button>
@@ -959,7 +988,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
                 <div style={{ padding: big ? "12px 15px 14px" : "9px 11px 11px", flex: 1, display: "flex", flexDirection: "column" }}>
                   <div style={{ fontSize: big ? 16.5 : 13, fontWeight: big ? 700 : 600, color: T.ink, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsTitle(n)}</div>
                   {big && <div style={{ fontSize: 12.5, color: T.text, lineHeight: 1.65, marginTop: 6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsExcerpt(n.text, 130)}</div>}
-                  <div style={{ fontSize: 10, color: T.muted, marginTop: "auto", paddingTop: 8 }}>{fmtDate(n.date)}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: T.muted, marginTop: "auto", paddingTop: 8 }}><span>{fmtDate(n.date)}</span>{reactions[n.id]?.cnt > 0 && <span style={{ display: "flex", alignItems: "center", gap: 3 }}><Heart size={11} color="#c0392b" fill="#c0392b" /> {reactions[n.id].cnt}</span>}</div>
                 </div>
               </button>
             );
@@ -993,6 +1022,22 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
                     <MapPin size={14} color={T.gold} /> عرض الموقع على الخريطة
                   </a>
                 )}
+                {/* التفاعل: إعجاب/دعاء + مشاركة */}
+                {(() => {
+                  const isDeath = reading.type === "وفاة";
+                  const r = reactions[reading.id] || { cnt: 0, mine: false };
+                  return (
+                    <div style={{ display: "flex", gap: 10, marginTop: 18, paddingTop: 14, borderTop: `1px solid ${T.line}` }}>
+                      <button onClick={() => toggleReaction(reading.id)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: r.mine ? (isDeath ? "#eef2f0" : "#fdeaea") : T.card, border: `1px solid ${r.mine ? (isDeath ? "#8aa39b" : "#e3a3a3") : T.line}`, borderRadius: 12, padding: "10px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", color: r.mine ? (isDeath ? "#4a6b62" : "#c0392b") : T.ink }}>
+                        <Heart size={16} color={r.mine ? (isDeath ? "#4a6b62" : "#c0392b") : T.muted} fill={r.mine ? (isDeath ? "#4a6b62" : "#c0392b") : "none"} />
+                        {isDeath ? "دعاءٌ له" : "إعجاب"}{r.cnt > 0 ? ` · ${r.cnt}` : ""}
+                      </button>
+                      <button onClick={() => shareNews(reading)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "10px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", color: T.ink }}>
+                        <Share2 size={16} color={TT.teal800} /> مشاركة
+                      </button>
+                    </div>
+                  );
+                })()}
                 {canManageNews && (
                   <div style={{ display: "flex", gap: 8, marginTop: 18, paddingTop: 14, borderTop: `1px solid ${T.line}` }}>
                     <button onClick={() => startEdit(reading)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: T.card, color: T.gold, borderRadius: 8, padding: "7px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", fontWeight: 700 }}>
@@ -1058,6 +1103,11 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
               <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12.5, color: T.ink, cursor: "pointer", fontWeight: 700 }}>
                 <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} /> تثبيت الخبر في المقدّمة
               </label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+                <span style={{ fontSize: 12.5, color: T.ink, fontWeight: 700 }}>ترتيب الظهور (اختياري):</span>
+                <input type="number" min="1" value={order} onChange={(e) => setOrder(e.target.value)} placeholder="تلقائي" style={{ ...inputStyle, width: 90, textAlign: "center", padding: "7px 8px" }} />
+              </div>
+              <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4 }}>الأصغر يظهر أولاً. اتركه فارغاً ليتبع الترتيب التلقائي (الأحدث).</div>
 
               <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
                 <button onClick={submit} disabled={uploadingImg} style={{ ...primaryBtnStyle, marginTop: 0, flex: 1 }}>
