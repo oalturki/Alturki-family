@@ -952,7 +952,8 @@ const TT = {
 };
 
 // بطاقة سريعة تظهر عند لمس أي فرد بالشجرة: صورة + اسم أول + مدينة + جوال (إن أتيح) + أزرار
-function TreeMemberPopup({ member, onClose, onOpenProfile, onLocate }) {
+function TreeMemberPopup({ member, members, onClose, onOpenProfile }) {
+  const [showLineage, setShowLineage] = useState(false);
   const phone = (member.isAlive && member.phone && member.phoneVisible) ? member.phone : "";
   const waDigits = phone ? phone.replace(/[^0-9]/g, "") : "";
   const btn = (bg, color, border) => ({
@@ -984,8 +985,9 @@ function TreeMemberPopup({ member, onClose, onOpenProfile, onLocate }) {
           )}
           <div style={{ display: "flex", gap: 9, marginTop: 14, flexWrap: "wrap" }}>
             <button onClick={onOpenProfile} style={btn(TT.teal800, "#fff")}><FileText size={15} /> الملف الشخصي</button>
-            <button onClick={onLocate} style={btn(T.sandDark, T.ink, T.line)}><MapPin size={15} /> موقعه بالشجرة</button>
+            <button onClick={() => setShowLineage(true)} style={btn(T.sandDark, T.ink, T.line)}><ScrollText size={15} /> سلسلة النسب</button>
           </div>
+          {showLineage && <LineageModal member={member} members={members} onClose={() => setShowLineage(false)} />}
           {phone && (
             <div style={{ display: "flex", gap: 9, marginTop: 9 }}>
               <a href={`tel:${phone}`} style={{ ...btn(T.gold, "#fff"), textDecoration: "none" }}><Phone size={15} /> اتصال</a>
@@ -2301,7 +2303,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       )}
 
       {detailId && byId[detailId] && (
-        <TreeMemberPopup member={byId[detailId]} onClose={() => setDetailId(null)} onOpenProfile={() => { const mm = byId[detailId]; setDetailId(null); setProfileMember(mm); }} onLocate={() => { const id = detailId; setDetailId(null); goToMember(id); }} />
+        <TreeMemberPopup member={byId[detailId]} members={members} onClose={() => setDetailId(null)} onOpenProfile={() => { const mm = byId[detailId]; setDetailId(null); setProfileMember(mm); }} />
       )}
       {profileMember && (
         <MemberDetailModal member={profileMember} members={members} canManageTree={canManageTree} onClose={() => setProfileMember(null)} onSaved={(updated) => { setMembers((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x))); setProfileMember(null); }} />
