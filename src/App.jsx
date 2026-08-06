@@ -1432,6 +1432,32 @@ function mixToWhite(hex, t) {
   return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
 }
 const FAN_PALETTE = ["#1a4d4d", "#B4894A", "#A24936", "#1b7a3d", "#6b5b95", "#2e7d8c", "#c9a227", "#8a5a44", "#4a7c59", "#9c6b3f", "#556b2f", "#7a4d6b"];
+const GEN_ACCENT = ["#1a4d4d", "#B4894A", "#A24936", "#1b7a3d", "#6b5b95", "#2e7d8c", "#8a5a44", "#4a7c59"];
+
+// بطاقة مصغّرة تظهر عند لمس أي فرد داخل قوائم الذرّية: صورة + نسب + مدينة + رابط لملفه، قابلة للإغلاق
+function MiniMemberCard({ member, members, onClose }) {
+  const [showProfile, setShowProfile] = useState(false);
+  const phone = (member.isAlive && member.phone && member.phoneVisible) ? member.phone : "";
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 92, padding: 18 }} onClick={onClose}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.card, borderRadius: 18, width: "100%", maxWidth: 320, overflow: "hidden", fontFamily: "'Tajawal', sans-serif", boxShadow: "0 12px 40px rgba(0,0,0,0.3)" }}>
+        <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "18px 16px 14px", textAlign: "center", position: "relative" }}>
+          <button onClick={onClose} style={{ position: "absolute", left: 10, top: 10, background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={18} /></button>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}><Avatar name={member.name} photoUrl={member.photoUrl} gender={member.gender} size={78} /></div>
+          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 18, fontWeight: 700, color: "#fff" }}>{member.name}</div>
+          {member.nasab && member.nasab !== member.name && <div style={{ fontSize: 11, color: "#CFE0DC", marginTop: 3 }}>{member.nasab}</div>}
+          {member.isAlive === false && <div style={{ fontSize: 11, color: TT.gold400, fontWeight: 700, marginTop: 5 }}>متوفّى رحمه الله</div>}
+        </div>
+        <div style={{ padding: 14 }}>
+          {member.region && <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: T.text, marginBottom: 8 }}><MapPin size={14} color={T.gold} /> {member.region}</div>}
+          {phone && <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: T.text, marginBottom: 8 }}><Phone size={14} color={T.gold} /> <span style={{ direction: "ltr" }}>{phone}</span></div>}
+          <button onClick={() => setShowProfile(true)} style={{ width: "100%", marginTop: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: TT.teal800, color: "#fff", border: "none", borderRadius: 10, padding: "11px", fontSize: 13, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}><FileText size={15} /> الملف الشخصي</button>
+        </div>
+      </div>
+      {showProfile && <MemberDetailModal member={member} members={members} canManageTree={false} onClose={() => setShowProfile(false)} onSaved={() => setShowProfile(false)} />}
+    </div>
+  );
+}
 
 function modalShell(title, icon, onClose, inner, extra) {
   return (
@@ -1454,6 +1480,7 @@ function modalShell(title, icon, onClose, inner, extra) {
 function LineageModal({ member, members, onClose }) {
   const { byId, childrenMap } = useMemo(() => treeMaps(members), [members]);
   const [view, setView] = useState("up");
+  const [picked, setPicked] = useState(null);
   const chain = useMemo(() => ancestorsToRoot(member, byId), [member, byId]);
   const rows = useMemo(() => descendantRows(member.id, childrenMap, byId), [member.id, childrenMap, byId]);
   const upList = [...chain].reverse(); // تركي ... العضو
@@ -1493,28 +1520,43 @@ function LineageModal({ member, members, onClose }) {
       {rows.length === 0 ? (
         <div style={{ textAlign: "center", color: T.muted, fontSize: 13, padding: "20px 0" }}>لا ذرّية مسجّلة لهذا الفرد بعد.</div>
       ) : (
-        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "8px 6px" }}>
-          {rows.map((r) => (
-            <div key={r.member.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 4px", paddingInlineStart: (r.depth - 1) * 16 + 4, borderBottom: `1px dashed ${T.line}` }}>
-              <span style={{ width: 5, height: 5, borderRadius: "50%", background: r.member.isAlive === false ? T.clay : TT.teal800, flexShrink: 0 }} />
-              <span style={{ fontSize: 13, fontWeight: r.depth === 1 ? 800 : 600, color: r.member.isAlive === false ? T.muted : T.ink }}>{r.member.name}</span>
-              {r.member.region && <span style={{ fontSize: 10, color: T.muted }}>· {r.member.region}</span>}
-            </div>
-          ))}
-        </div>
+        <>
+          <div style={{ fontSize: 10.5, color: T.muted, textAlign: "center", marginBottom: 8 }}>المس أي اسم لعرض بطاقته ورابط ملفه · كل جيلٍ بلونٍ ومسافةٍ مختلفة</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {rows.map((r) => (<DescRow key={r.member.id} r={r} onPick={() => setPicked(r.member)} />))}
+          </div>
+        </>
       )}
     </div>
   );
 
   return modalShell("سلسلة النسب والذرّية", <ScrollText size={17} color={TT.gold400} />, onClose, (
-    <div>{seg}{view === "up" ? upView : downView}</div>
+    <div>{seg}{view === "up" ? upView : downView}
+      {picked && <MiniMemberCard member={picked} members={members} onClose={() => setPicked(null)} />}
+    </div>
   ));
+}
+
+// صفّ فرد داخل قائمة الذرّية: تمييز الجيل بلون خلفية + شريط جانبي + مسافة بادئة متدرّجة، قابل للّمس
+function DescRow({ r, onPick }) {
+  const acc = GEN_ACCENT[(r.depth - 1) % GEN_ACCENT.length];
+  const dead = r.member.isAlive === false;
+  return (
+    <button onClick={onPick} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", textAlign: "right", cursor: "pointer", fontFamily: "inherit", padding: "9px 8px", paddingInlineStart: (r.depth - 1) * 22 + 8, background: mixToWhite(acc, 0.88), borderInlineStart: `3px solid ${acc}`, border: "none", borderRadius: "0 8px 8px 0" }}>
+      <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: acc, borderRadius: 6, padding: "1px 6px", flexShrink: 0 }}>ج{r.depth}</span>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: dead ? T.clay : acc, flexShrink: 0 }} />
+      <span style={{ fontSize: 13.5, fontWeight: r.depth === 1 ? 800 : 600, color: dead ? T.muted : T.ink }}>{r.member.name}</span>
+      {r.member.region && <span style={{ fontSize: 10, color: T.muted }}>· {r.member.region}</span>}
+      <ChevronLeft size={14} color={T.muted} style={{ marginInlineStart: "auto", flexShrink: 0 }} />
+    </button>
+  );
 }
 
 // ===== كشف ذرية فرع =====
 function DescendantsReportModal({ member, members, onClose }) {
   const { byId, childrenMap } = useMemo(() => treeMaps(members), [members]);
   const rows = useMemo(() => descendantRows(member.id, childrenMap, byId), [member.id, childrenMap, byId]);
+  const [picked, setPicked] = useState(null);
   const sons = rows.filter((r) => r.depth === 1).length;
   const gens = rows.reduce((mx, r) => Math.max(mx, r.depth), 0);
   const alive = rows.filter((r) => r.member.isAlive !== false).length;
@@ -1538,17 +1580,11 @@ function DescendantsReportModal({ member, members, onClose }) {
     ) : (
       <div>
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>{sc(rows.length, "إجمالي الذرّية")}{sc(sons, "الأبناء المباشرون")}{sc(gens, "عدد الأجيال")}{sc(alive, "الأحياء")}</div>
-        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "8px 6px" }}>
-          {rows.map((r) => (
-            <div key={r.member.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 4px", paddingInlineStart: (r.depth - 1) * 16 + 4, borderBottom: `1px dashed ${T.line}` }}>
-              <span style={{ fontSize: 9.5, color: T.gold, fontWeight: 700, flexShrink: 0 }}>ج{r.depth}</span>
-              <span style={{ width: 5, height: 5, borderRadius: "50%", background: r.member.isAlive === false ? T.clay : TT.teal800, flexShrink: 0 }} />
-              <span style={{ fontSize: 13, fontWeight: r.depth === 1 ? 800 : 600, color: r.member.isAlive === false ? T.muted : T.ink }}>{r.member.name}</span>
-              {r.member.memberNumber && <span style={{ fontSize: 10, color: T.muted }}>· {r.member.memberNumber}</span>}
-              {r.member.region && <span style={{ fontSize: 10, color: T.muted }}>· {r.member.region}</span>}
-            </div>
-          ))}
+        <div style={{ fontSize: 10.5, color: T.muted, textAlign: "center", marginBottom: 8 }}>المس أي اسم لعرض بطاقته ورابط ملفه · كل جيلٍ بلونٍ ومسافةٍ مختلفة</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          {rows.map((r) => (<DescRow key={r.member.id} r={r} onPick={() => setPicked(r.member)} />))}
         </div>
+        {picked && <MiniMemberCard member={picked} members={members} onClose={() => setPicked(null)} />}
       </div>
     )
   ), extra);
@@ -3029,7 +3065,7 @@ function MemberDetailModal({ member, members, canManageTree, onClose, onSaved })
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 50 }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 96 }} onClick={onClose}>
       <div style={{ background: T.card, borderRadius: "18px 18px 0 0", padding: 22, width: "100%", maxWidth: 430, maxHeight: "88vh", overflowY: "auto", fontFamily: "'Tajawal', sans-serif" }} onClick={(e) => e.stopPropagation()} dir="rtl">
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer" }}><X size={20} /></button>
