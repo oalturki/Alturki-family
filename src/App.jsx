@@ -1214,14 +1214,16 @@ async function directoryToPdf(list) {
   const j = await ensureJsPdf();
   const PW = 595, PH = 842, M = 30, cardH = 46, gap = 8, rowH = cardH + gap;
   const pdf = new j.jsPDF({ unit: "pt", format: "a4" });
+  // كانفاس واحد يُعاد استخدامه + صور JPEG بدقّة معتدلة — لتفادي نفاد الذاكرة وانهيار الصفحة على آيفون
+  const scale = 1.35;
+  const cv = document.createElement("canvas"); cv.width = Math.round(PW * scale); cv.height = Math.round(PH * scale);
+  const cx = cv.getContext("2d");
   const rasterize = (svg) => new Promise((resolve, reject) => {
     const url = "data:image/svg+xml;charset=utf-8;base64," + btoa(unescape(encodeURIComponent(svg)));
     const img = new Image();
     img.onload = () => {
-      const scale = 2;
-      const c = document.createElement("canvas"); c.width = PW * scale; c.height = PH * scale;
-      const ctx = c.getContext("2d"); ctx.fillStyle = "#F4EFE3"; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
-      resolve(c.toDataURL("image/png"));
+      cx.fillStyle = "#F4EFE3"; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(img, 0, 0, cv.width, cv.height);
+      resolve(cv.toDataURL("image/jpeg", 0.9));
     };
     img.onerror = reject; img.src = url;
   });
@@ -1249,14 +1251,15 @@ async function directoryToPdf(list) {
     });
     body += `<text x="${PW / 2}" y="${PH - 14}" text-anchor="middle" font-size="10" fill="#6B7370">صفحة ${p + 1} من ${totalPages} · عائلة آل تركي</text>`;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PW}" height="${PH}" viewBox="0 0 ${PW} ${PH}" font-family="sans-serif">${body}</svg>`;
-    const png = await rasterize(svg);
+    const jpeg = await rasterize(svg);
     if (p > 0) pdf.addPage();
-    pdf.addImage(png, "PNG", 0, 0, PW, PH);
+    pdf.addImage(jpeg, "JPEG", 0, 0, PW, PH, undefined, "FAST");
     chunk.forEach((x, i) => {
       const ry = top + i * rowH;
       const digits = (x.phone || "").replace(/[^0-9+]/g, "");
       if (digits) pdf.link(M, ry, (PW - 2 * M), cardH, { url: "tel:" + digits });
     });
+    await new Promise((r) => setTimeout(r, 0)); // إفساح المجال للمتصفح بين الصفحات
   }
   pdf.save("دليل_الهاتف_عائلة_آل_تركي.pdf");
 }
