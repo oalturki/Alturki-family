@@ -2160,6 +2160,11 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         />
       </div>
 
+      {/* عبارة الإعداد والتصحيح تحت الرأسية */}
+      <div style={{ maxWidth: 470, margin: "0 auto 12px", padding: "0 8px", textAlign: "center", fontSize: 10.5, color: T.muted, lineHeight: 1.75 }}>
+        أعدّ الشجرة في طبعتها الأولى عام ١٣٩٨هـ العمّ <span style={{ color: T.ink, fontWeight: 700 }}>حمد بن عبدالله بن حمد التركي</span> رحمه الله، وأتمّها وصحّحها في طبعاتها اللاحقة <span style={{ color: T.ink, fontWeight: 700 }}>أ.د. محمد بن تركي بن سليمان التركي</span>.
+      </div>
+
       {/* مستطيل البحث */}
       <div style={{ position: "relative", marginBottom: 10 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
