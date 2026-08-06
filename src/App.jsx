@@ -4504,7 +4504,7 @@ function ContactUsView({ onBack, meId }) {
   );
 }
 
-function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) {
+function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, onOpenInbox, unreadInbox = 0 }) {
   const me = members.find((m) => m.id === meId);
   const [profileView, setProfileView] = useState("menu"); // menu | info | settings
   const [mode, setMode] = useState("view");
@@ -4835,6 +4835,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
 
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "2px 14px", marginBottom: 14 }}>
           <MenuRow icon={UserCircle2} label="ملفي" sublabel="المعلومات الشخصية، السيرة، الأبناء والبنات" onClick={() => setProfileView("info")} />
+          <MenuRow icon={Inbox} label="رسائلي" sublabel={unreadInbox > 0 ? `${unreadInbox} رسالة غير مقروءة` : "رسائل العائلة والردود عليها"} onClick={onOpenInbox} />
           <MenuRow icon={Settings} label="الإعدادات" sublabel="الخصوصية، الإشعارات، وأكثر" onClick={() => setProfileView("settings")} />
           <MenuRow icon={Fingerprint} label="بصمة الوجه / الإصبع" sublabel={faceIdMsg || "دخول سريع بدون كلمة مرور"} onClick={handleEnableFaceId} />
           <MenuRow icon={KeyRound} label="رمز المرور السريع" disabled />
@@ -5390,6 +5391,7 @@ function FamilyAppInner({ meId }) {
   });
 
   useEffect(() => {
+    if (window.location.hash.replace("#", "") === "inbox") return; // لا نطمس هاش الوارد قبل التقاطه
     window.location.hash = tab;
   }, [tab]);
   const [loading, setLoading] = useState(true);
@@ -5415,6 +5417,19 @@ function FamilyAppInner({ meId }) {
     if (!id) return;
     setInboxItems(await fetchInbox(id));
   };
+
+  // فتح صندوق الوارد عند القدوم من رابط البريد (alturki.family/#inbox)، حتى لو كان الموقع مفتوحًا
+  useEffect(() => {
+    const openFromHash = () => {
+      if (window.location.hash.replace("#", "") !== "inbox") return;
+      setInboxOpen(true);
+      reloadInbox();
+      window.location.hash = tab; // إعادة الهاش لتبويب الصفحة الحالية
+    };
+    openFromHash();
+    window.addEventListener("hashchange", openFromHash);
+    return () => window.removeEventListener("hashchange", openFromHash);
+  }, [tab, authUid]);
 
   useEffect(() => {
     (async () => {
@@ -5544,7 +5559,7 @@ function FamilyAppInner({ meId }) {
               {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
               {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} onUploadingChange={setMagazineUploading} onUploadResult={setMagazineUploadMsg} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
-              {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} />}
+              {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} onOpenInbox={() => setInboxOpen(true)} unreadInbox={unreadInbox} />}
               {tab === "admins" && (canManageAdmins || canManageTree || canManageRegistrations || canManageMessages) && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} canManageAdmins={canManageAdmins} canManageRegistrations={canManageRegistrations} canManageMessages={canManageMessages} />}
             </>
           )}
