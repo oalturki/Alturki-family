@@ -5485,12 +5485,14 @@ function FamilyAppInner({ meId }) {
         <div
           onClick={() => setTab("news")}
           style={{
-            height: 88,
+            height: "calc(88px + env(safe-area-inset-top, 0px))",
+            paddingTop: "env(safe-area-inset-top, 0px)",
             background: "rgb(250,250,250)",
             backgroundImage: "url(/Header-Final.jpeg)",
             backgroundSize: "contain",
             backgroundRepeat: "no-repeat",
             backgroundPosition: "right center",
+            backgroundOrigin: "content-box",
             borderBottomLeftRadius: 22,
             borderBottomRightRadius: 22,
             cursor: "pointer",
@@ -5504,7 +5506,7 @@ function FamilyAppInner({ meId }) {
           <button
             onClick={(ev) => { ev.stopPropagation(); setInboxOpen(true); }}
             title="صندوق الوارد"
-            style={{ position: "absolute", top: 12, insetInlineStart: 12, width: 40, height: 40, borderRadius: 999, background: "rgba(23,54,52,0.92)", border: `1.5px solid ${TT.gold500}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.2)" }}
+            style={{ position: "absolute", top: "calc(14px + env(safe-area-inset-top, 0px))", insetInlineStart: 12, width: 44, height: 44, borderRadius: 999, background: "rgba(23,54,52,0.92)", border: `1.5px solid ${TT.gold500}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.2)", zIndex: 2 }}
           >
             <Bell size={18} color={TT.gold500} />
             {unreadInbox > 0 && (
