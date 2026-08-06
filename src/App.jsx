@@ -1207,6 +1207,58 @@ function ExportModal({ members, onClose }) {
   );
 }
 
+// ===== تصدير دليل الهاتف كـ PDF مقروء بأرقام قابلة للضغط للاتصال =====
+function escXml(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function localPhone(p) { p = (p || "").trim(); if (p.startsWith("+966")) return "0" + p.slice(4); if (p.startsWith("966")) return "0" + p.slice(3); return p; }
+async function directoryToPdf(list) {
+  const j = await ensureJsPdf();
+  const PW = 595, PH = 842, M = 34, rowH = 30;
+  const pdf = new j.jsPDF({ unit: "pt", format: "a4" });
+  const rasterize = (svg) => new Promise((resolve, reject) => {
+    const url = "data:image/svg+xml;charset=utf-8;base64," + btoa(unescape(encodeURIComponent(svg)));
+    const img = new Image();
+    img.onload = () => {
+      const scale = 2;
+      const c = document.createElement("canvas"); c.width = PW * scale; c.height = PH * scale;
+      const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL("image/png"));
+    };
+    img.onerror = reject; img.src = url;
+  });
+  const firstTop = M + 52, otherTop = M + 18;
+  const rowsPage1 = Math.floor((PH - firstTop - 28) / rowH);
+  const rowsOther = Math.floor((PH - otherTop - 28) / rowH);
+  const pages = []; let idx = 0;
+  while (idx < list.length) { const cap = pages.length === 0 ? rowsPage1 : rowsOther; pages.push(list.slice(idx, idx + cap)); idx += cap; }
+  const totalPages = pages.length || 1;
+  for (let p = 0; p < pages.length; p++) {
+    const chunk = pages[p]; const isFirst = p === 0; const top = isFirst ? firstTop : otherTop;
+    let body = `<rect width="${PW}" height="${PH}" fill="#ffffff"/>`;
+    if (isFirst) {
+      body += `<text x="${PW / 2}" y="${M + 24}" text-anchor="middle" font-size="22" font-weight="700" fill="#173634">دليل هاتف عائلة آل تركي</text>`;
+      body += `<text x="${PW / 2}" y="${M + 44}" text-anchor="middle" font-size="11" fill="#6B7370">${list.length} رقماً · اضغط على الرقم للاتصال</text>`;
+    }
+    body += `<line x1="${M}" y1="${top - 6}" x2="${PW - M}" y2="${top - 6}" stroke="#B4894A" stroke-width="1.2"/>`;
+    chunk.forEach((x, i) => {
+      const ry = top + i * rowH;
+      body += `<text x="${PW - M}" y="${ry + 19}" text-anchor="end" font-size="13" fill="#1F2A28">${escXml(x.nm)}</text>`;
+      body += `<text x="${M}" y="${ry + 19}" text-anchor="start" font-size="13" fill="#1a4d4d" direction="ltr">${escXml(localPhone(x.phone))}</text>`;
+      body += `<line x1="${M}" y1="${ry + rowH - 6}" x2="${PW - M}" y2="${ry + rowH - 6}" stroke="#EDE6D4"/>`;
+    });
+    body += `<text x="${PW / 2}" y="${PH - 14}" text-anchor="middle" font-size="10" fill="#6B7370">صفحة ${p + 1} من ${totalPages}</text>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PW}" height="${PH}" viewBox="0 0 ${PW} ${PH}" font-family="sans-serif">${body}</svg>`;
+    const png = await rasterize(svg);
+    if (p > 0) pdf.addPage();
+    pdf.addImage(png, "PNG", 0, 0, PW, PH);
+    chunk.forEach((x, i) => {
+      const ry = top + i * rowH;
+      const digits = (x.phone || "").replace(/[^0-9+]/g, "");
+      if (digits) pdf.link(M, ry, (PW / 2 - M), rowH, { url: "tel:" + digits });
+    });
+  }
+  pdf.save("دليل_الهاتف_عائلة_آل_تركي.pdf");
+}
+
 // ===== دليل الهاتف العائلي (مؤقّتاً: يعرض الأرقام الموجودة حالياً لأعضاء العائلة، لحين اكتمال البيانات) =====
 function PhoneDirectoryModal({ members, onClose }) {
   const byId = useMemo(() => Object.fromEntries(members.map((m) => [m.id, m])), [members]);
@@ -1237,12 +1289,20 @@ function PhoneDirectoryModal({ members, onClose }) {
   const nq = normalizeArabicLetters(q).trim();
   const all = list || [];
   const shown = nq ? all.filter((x) => normalizeArabicLetters(x.nm).includes(nq)) : all;
-  const lp = (p) => { p = (p || "").trim(); if (p.startsWith("+966")) return "0" + p.slice(4); if (p.startsWith("966")) return "0" + p.slice(3); return p; };
-  const download = () => {
-    const rows = [["الاسم", "الجوال", "المدينة"], ...all.map((x) => [x.nm, lp(x.phone), x.region])];
-    const csv = "﻿" + rows.map((r) => r.map((c) => `"${String(c == null ? "" : c).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "دليل_الهاتف.csv"; document.body.appendChild(a); a.click(); a.remove();
+  const lp = (p) => localPhone(p);
+  const [saving, setSaving] = useState(false);
+  const download = async () => {
+    if (saving || all.length === 0) return;
+    setSaving(true);
+    try {
+      await directoryToPdf(all);
+    } catch (e) {
+      const rows = [["الاسم", "الجوال", "المدينة"], ...all.map((x) => [x.nm, lp(x.phone), x.region])];
+      const csv = "﻿" + rows.map((r) => r.map((c) => `"${String(c == null ? "" : c).replace(/"/g, '""')}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "دليل_الهاتف.csv"; document.body.appendChild(a); a.click(); a.remove();
+    }
+    setSaving(false);
   };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }} onClick={onClose}>
@@ -1250,7 +1310,7 @@ function PhoneDirectoryModal({ members, onClose }) {
         <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 2 }}>
           <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif", display: "flex", alignItems: "center", gap: 8 }}><Phone size={17} color={TT.gold400} /> دليل الهاتف</span>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button onClick={download} title="تنزيل Excel/CSV" style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8, padding: "6px 10px", color: "#fff", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}><Download size={14} /> تنزيل</button>
+            <button onClick={download} disabled={saving} title="حفظ PDF" style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8, padding: "6px 10px", color: "#fff", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>{saving ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : <Download size={14} />} PDF</button>
             <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
           </div>
         </div>
@@ -1276,7 +1336,7 @@ function PhoneDirectoryModal({ members, onClose }) {
                   <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 8, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "10px 12px", marginBottom: 7 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{x.nm}</div>
-                      <div style={{ fontSize: 12, color: T.muted, direction: "ltr", textAlign: "right" }}>{lp(x.phone)}</div>
+                      <a href={`tel:${x.phone}`} style={{ fontSize: 12, color: TT.teal800, direction: "ltr", textAlign: "right", display: "block", textDecoration: "none", fontWeight: 700 }}>{lp(x.phone)}</a>
                     </div>
                     <a href={`tel:${x.phone}`} style={{ width: 36, height: 36, borderRadius: "50%", background: T.gold, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", flexShrink: 0 }}><Phone size={16} /></a>
                     <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" style={{ width: 36, height: 36, borderRadius: "50%", background: "#25863f", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", flexShrink: 0 }}><MessageCircle size={16} /></a>
@@ -1305,6 +1365,26 @@ function shuffleArr(a) {
 }
 const WIN_PHRASES = ["أحسنت! صلةٌ موصولة 🎉", "عين الصواب! 👏", "ما شاء الله، تعرفهم حق المعرفة 🌿", "إجابة موفّقة! ✨", "بارك الله فيك، صحيحة! 🎯"];
 const LOSE_PHRASES = ["للأسف! 🥴", "قريبة… لكن ليست هي 😅", "لا بأس، تُعرف الرجال بمجالسها 🤍", "خانك التوفيق هذه المرة 🙈"];
+
+// ألعاب نارية للاحتفاء بالإجابة الصحيحة
+function Fireworks() {
+  const parts = useMemo(() => Array.from({ length: 32 }, (_, i) => {
+    const ang = (i / 32) * 2 * Math.PI + Math.random() * 0.4;
+    const dist = 70 + Math.random() * 120;
+    const col = ["#ffd54a", "#ff7043", "#4fc3f7", "#81c784", "#ba68c8", "#fff59d", "#f06292", "#4dd0e1"][i % 8];
+    return { tx: Math.cos(ang) * dist, ty: Math.sin(ang) * dist, col, delay: Math.random() * 0.14, size: 6 + Math.random() * 7 };
+  }), []);
+  return (
+    <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 90, overflow: "hidden" }}>
+      <style>{"@keyframes fw-burst{0%{transform:translate(0,0) scale(1);opacity:1}75%{opacity:1}100%{transform:translate(var(--tx),var(--ty)) scale(0.3);opacity:0}}"}</style>
+      <div style={{ position: "absolute", top: "40%", left: "50%" }}>
+        {parts.map((p, i) => (
+          <span key={i} style={{ position: "absolute", width: p.size, height: p.size, borderRadius: "50%", background: p.col, boxShadow: `0 0 7px ${p.col}`, ["--tx"]: `${p.tx}px`, ["--ty"]: `${p.ty}px`, animation: `fw-burst 1s ease-out ${p.delay}s forwards` }} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function RelationGameModal({ members, onClose }) {
   const pools = useMemo(() => {
@@ -1381,7 +1461,7 @@ function RelationGameModal({ members, onClose }) {
             <span style={{ color: "#cfe0dc", fontSize: 12, fontWeight: 700 }}>هل تعرف ابن عمك؟</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 4, color: TT.gold400, fontSize: 13, fontWeight: 800 }}><Sparkles size={14} /> {streak}</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4, color: TT.gold400, fontSize: 13, fontWeight: 800 }} title="نقاطك"><Sparkles size={14} /> {streak * 10}</span>
             <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
           </div>
         </div>
@@ -1416,11 +1496,15 @@ function RelationGameModal({ members, onClose }) {
   return shell(
     <div>
       {/* الاحتفاء / خيبة الأمل */}
+      {phase === "correct" && <Fireworks key={rounds} />}
       {phase === "correct" && (
         <div style={{ textAlign: "center", background: "linear-gradient(160deg,#1b7a3d,#12602f)", color: "#fff", borderRadius: 14, padding: "12px 14px", marginBottom: 14, border: `1px solid ${TT.gold500}` }}>
           <div style={{ fontSize: 26, marginBottom: 2 }}>🎉</div>
           <div style={{ fontSize: 15, fontWeight: 800 }}>{winPhrase}</div>
-          <div style={{ fontSize: 12, color: "#d9f2e1", marginTop: 3 }}>سلسلتك الآن: {streak} {streak >= 5 ? "🔥" : ""}</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 6 }}>
+            <span style={{ fontSize: 13.5, fontWeight: 800, background: "rgba(255,255,255,0.22)", borderRadius: 999, padding: "3px 12px" }}>+١٠ نقاط</span>
+            <span style={{ fontSize: 12, color: "#d9f2e1" }}>مجموعك: {streak * 10} نقطة {streak >= 5 ? "🔥" : ""}</span>
+          </div>
         </div>
       )}
       {phase === "wrong" && (
@@ -1475,9 +1559,9 @@ function RelationGameModal({ members, onClose }) {
         )}
         {phase === "wrong" && (
           <div style={{ textAlign: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: T.card, border: `1px solid ${TT.gold500}`, borderRadius: 12, padding: "10px", marginBottom: 10 }}>
-              <Trophy size={18} color={T.gold} />
-              <span style={{ fontSize: 13.5, fontWeight: 800, color: T.ink }}>انتهت الجولة · أطول سلسلة: {best}</span>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, background: T.card, border: `1px solid ${TT.gold500}`, borderRadius: 12, padding: "12px 10px", marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Trophy size={18} color={T.gold} /><span style={{ fontSize: 15, fontWeight: 800, color: T.ink }}>نتيجتك: {streak * 10} نقطة</span></div>
+              <span style={{ fontSize: 11.5, color: T.muted }}>{streak} إجابة صحيحة متتالية · أطول سلسلة لك: {best}</span>
             </div>
             <button onClick={restart} style={{ width: "100%", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, padding: "13px", fontSize: 14, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
               <RotateCcw size={17} /> العب مجدّداً
@@ -1485,7 +1569,7 @@ function RelationGameModal({ members, onClose }) {
           </div>
         )}
         {phase === "play" && (
-          <div style={{ textAlign: "center", fontSize: 11.5, color: T.muted }}>سلسلتك الحالية: {streak} · أطول سلسلة: {best}</div>
+          <div style={{ textAlign: "center", fontSize: 11.5, color: T.muted }}>نقاطك: {streak * 10} · كل إجابة صحيحة +١٠ · أطول سلسلة: {best}</div>
         )}
       </div>
     </div>
@@ -1785,14 +1869,17 @@ function FanChartModal({ centerId, members, onClose }) {
             {segs.map((s) => (
               <path key={s.id} d={segPath(R0 + (s.depth - 1) * RW, R0 + s.depth * RW, s.a0, s.a1)} fill={s.color} stroke="#ffffff" strokeWidth={0.8} fillRule="evenodd" />
             ))}
-            {segs.filter((s) => s.depth <= 3 && (s.a1 - s.a0) * (R0 + (s.depth - 0.5) * RW) > 15).map((s) => {
+            {segs.filter((s) => (s.a1 - s.a0) * (R0 + (s.depth - 0.5) * RW) > 20).map((s) => {
               const mid = (s.a0 + s.a1) / 2;
               const rr = R0 + (s.depth - 0.5) * RW;
               const [tx, ty] = polar(rr, mid);
               let deg = mid * 180 / Math.PI;
               if (deg > 90 && deg < 270) deg += 180;
-              const nm = s.name.length > 9 ? s.name.slice(0, 8) + "…" : s.name;
-              return <text key={"t" + s.id} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={s.depth === 1 ? 12 : 10} fontWeight={s.depth <= 2 ? 800 : 700} fill="#12302e" style={{ fontFamily: "'Tajawal', sans-serif" }}>{nm}</text>;
+              const arc = (s.a1 - s.a0) * rr;
+              const maxCh = Math.max(3, Math.floor(arc / 8));
+              const nm = s.name.length > maxCh ? s.name.slice(0, maxCh - 1) + "…" : s.name;
+              const fs = s.depth === 1 ? 13 : s.depth <= 3 ? 11 : 9.5;
+              return <text key={"t" + s.id} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={s.depth <= 2 ? 800 : 700} fill="#12302e" style={{ fontFamily: "'Tajawal', sans-serif" }}>{nm}</text>;
             })}
             <circle cx={cx} cy={cy} r={R0 - 4} fill={TT.teal900} stroke={TT.gold500} strokeWidth={2} />
             <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={800} fill="#ffffff" style={{ fontFamily: "'Aref Ruqaa', serif" }}>{center.name.length > 7 ? center.name.slice(0, 6) + "…" : center.name}</text>
@@ -2344,18 +2431,18 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         </button>
         {toolsOpen && (
           <div style={{ marginTop: 7 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
               {[
-                ["مَن هذا؟", <Camera size={15} color={T.gold} />, () => setWhoOpen(true)],
-                ["حاسبة القرابة", <GitBranch size={15} color={T.gold} />, () => setKinOpen(true)],
-                ["الخريطة", <MapPin size={15} color={T.gold} />, () => setMapOpen(true)],
-                ["الإحصاءات", <Newspaper size={15} color={T.gold} />, () => setStatsOpen(true)],
-                ["المخطط الشعاعي", <Sun size={15} color={T.gold} />, () => setFanOpen(true)],
-                ["دليل الهاتف", <Phone size={15} color={T.gold} />, () => setPhoneDirOpen(true)],
+                ["مَن هذا؟", <Camera size={16} color={T.gold} />, () => setWhoOpen(true)],
+                ["القرابة", <GitBranch size={16} color={T.gold} />, () => setKinOpen(true)],
+                ["الخريطة", <MapPin size={16} color={T.gold} />, () => setMapOpen(true)],
+                ["الإحصاءات", <Newspaper size={16} color={T.gold} />, () => setStatsOpen(true)],
+                ["الشعاعي", <Sun size={16} color={T.gold} />, () => setFanOpen(true)],
+                ["دليل الهاتف", <Phone size={16} color={T.gold} />, () => setPhoneDirOpen(true)],
               ].map(([lbl, icn, fn], i) => (
-                <button key={i} onClick={fn} style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 8px", background: T.card, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+                <button key={i} onClick={fn} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, padding: "8px 3px", minHeight: 48, background: T.card, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
                   {icn}
-                  <span style={{ whiteSpace: "nowrap" }}>{lbl}</span>
+                  <span style={{ textAlign: "center", lineHeight: 1.15 }}>{lbl}</span>
                 </button>
               ))}
             </div>
