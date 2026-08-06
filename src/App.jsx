@@ -1182,7 +1182,7 @@ function ExportModal({ members, onClose }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }} onClick={onClose}>
       <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.card, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 420, fontFamily: "'Tajawal', sans-serif" }}>
         <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif" }}>تصدير الكشوف</span>
+          <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif" }}>تقارير وإحصاءات</span>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
         </div>
         <div style={{ padding: 16 }}>
@@ -4299,7 +4299,7 @@ function FamilyAppInner({ meId }) {
             </>
           )}
         </div>
-        <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: T.card, borderTop: `1px solid ${T.line}`, display: "flex", alignItems: "stretch", padding: "0 0 4px", overflow: "visible" }}>
+        <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: T.ink, borderTop: `2px solid ${TT.gold500}`, display: "flex", alignItems: "stretch", padding: "0 0 4px", overflow: "visible" }}>
           {TABS.map((t) => {
             const Icon = t.icon;
             const active = tab === t.key;
@@ -4308,16 +4308,15 @@ function FamilyAppInner({ meId }) {
                 position: "relative", flex: 1, cursor: "pointer", fontFamily: "inherit",
                 display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end",
                 background: active ? T.sand : "transparent",
-                border: active ? `1px solid ${T.line}` : "none",
-                borderBottom: "none",
+                border: "none",
                 borderTopLeftRadius: active ? 14 : 0,
                 borderTopRightRadius: active ? 14 : 0,
-                marginTop: active ? -12 : 0,
-                paddingTop: active ? 20 : 8,
+                marginTop: active ? -14 : 0,
+                paddingTop: active ? 22 : 8,
                 paddingBottom: 4,
               }}>
-                <Icon size={19} color={active ? T.ink : T.muted} strokeWidth={active ? 2.4 : 2} />
-                <span style={{ fontSize: 9.5, fontWeight: active ? 800 : 500, color: active ? T.ink : T.muted, marginTop: 3 }}>{t.label}</span>
+                <Icon size={19} color={active ? T.ink : T.goldLight} strokeWidth={active ? 2.4 : 2} />
+                <span style={{ fontSize: 9.5, fontWeight: active ? 800 : 600, color: active ? T.ink : "#e7dfc9", marginTop: 3 }}>{t.label}</span>
               </button>
             );
           })}
