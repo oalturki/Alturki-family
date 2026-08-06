@@ -1207,7 +1207,91 @@ function ExportModal({ members, onClose }) {
   );
 }
 
-// ===== لعبة «اختبر صلتك» — خمّن الشخص =====
+// ===== دليل الهاتف العائلي (مؤقّتاً: يعرض الأرقام الموجودة حالياً لأعضاء العائلة، لحين اكتمال البيانات) =====
+function PhoneDirectoryModal({ members, onClose }) {
+  const byId = useMemo(() => Object.fromEntries(members.map((m) => [m.id, m])), [members]);
+  const [q, setQ] = useState("");
+  const [list, setList] = useState(null); // null = تحميل
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    supabase.rpc("family_phone_directory").then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { setErr("تعذّر تحميل الدليل الآن."); setList([]); return; }
+      const rows = (data || []).map((r) => {
+        const m = byId[r.member_id];
+        return {
+          id: r.member_id,
+          phone: r.phone || "",
+          region: (m && m.region) || r.region || "",
+          nm: (m && (m.fullNasab || m.nasab || m.name)) || r.name || "",
+          sortName: (m && m.name) || r.name || "",
+        };
+      }).filter((x) => x.phone);
+      rows.sort((a, b) => a.sortName.localeCompare(b.sortName, "ar"));
+      setList(rows);
+    });
+    return () => { cancelled = true; };
+  }, [byId]);
+
+  const nq = normalizeArabicLetters(q).trim();
+  const all = list || [];
+  const shown = nq ? all.filter((x) => normalizeArabicLetters(x.nm).includes(nq)) : all;
+  const lp = (p) => { p = (p || "").trim(); if (p.startsWith("+966")) return "0" + p.slice(4); if (p.startsWith("966")) return "0" + p.slice(3); return p; };
+  const download = () => {
+    const rows = [["الاسم", "الجوال", "المدينة"], ...all.map((x) => [x.nm, lp(x.phone), x.region])];
+    const csv = "﻿" + rows.map((r) => r.map((c) => `"${String(c == null ? "" : c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "دليل_الهاتف.csv"; document.body.appendChild(a); a.click(); a.remove();
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }} onClick={onClose}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.sand, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto", fontFamily: "'Tajawal', sans-serif" }}>
+        <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 2 }}>
+          <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif", display: "flex", alignItems: "center", gap: 8 }}><Phone size={17} color={TT.gold400} /> دليل الهاتف</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button onClick={download} title="تنزيل Excel/CSV" style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8, padding: "6px 10px", color: "#fff", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}><Download size={14} /> تنزيل</button>
+            <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
+          </div>
+        </div>
+        <div style={{ padding: 16 }}>
+          <div style={{ position: "relative", marginBottom: 10 }}>
+            <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بالاسم" style={{ ...inputStyle, padding: "9px 36px 9px 12px" }} />
+          </div>
+          {list === null ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "40px 0", color: TT.teal800 }}>
+              <Loader2 size={24} style={{ animation: "rosette-spin 1.2s linear infinite" }} /> <span style={{ fontSize: 13 }}>جارِ تحميل الدليل...</span>
+            </div>
+          ) : err ? (
+            <div style={{ textAlign: "center", color: T.clay, fontSize: 13, padding: "24px 0" }}>{err}</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 10, textAlign: "center" }}>{all.length} رقماً مسجّلاً حالياً · الدليل يُحدَّث مع اكتمال البيانات</div>
+              {shown.length === 0 ? (
+                <div style={{ textAlign: "center", color: T.muted, fontSize: 13, padding: "24px 0" }}>لا نتائج مطابقة.</div>
+              ) : shown.map((x) => {
+                const wa = x.phone.replace(/[^0-9]/g, "");
+                return (
+                  <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 8, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "10px 12px", marginBottom: 7 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{x.nm}</div>
+                      <div style={{ fontSize: 12, color: T.muted, direction: "ltr", textAlign: "right" }}>{lp(x.phone)}</div>
+                    </div>
+                    <a href={`tel:${x.phone}`} style={{ width: 36, height: 36, borderRadius: "50%", background: T.gold, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", flexShrink: 0 }}><Phone size={16} /></a>
+                    <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" style={{ width: 36, height: 36, borderRadius: "50%", background: "#25863f", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", flexShrink: 0 }}><MessageCircle size={16} /></a>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== لعبة «اختبر صلتك» =====
 function fourPartName(m) {
   return (m.fullNasab || m.nasab || m.name).split(" بن ").slice(0, 4).join(" بن ");
 }
@@ -1598,23 +1682,41 @@ function DescendantsReportModal({ member, members, onClose }) {
 }
 
 // ===== المخطط الشعاعي (Fan) — ذرية شخص في حلقات =====
+function ensureJsPdf() {
+  return new Promise((resolve, reject) => {
+    if (window.jspdf && window.jspdf.jsPDF) return resolve(window.jspdf);
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    s.onload = () => resolve(window.jspdf);
+    s.onerror = reject;
+    document.body.appendChild(s);
+  });
+}
+const FAN_TRUNK = "#2e5b57";
+
 function FanChartModal({ centerId, members, onClose }) {
   const { byId, childrenMap } = useMemo(() => treeMaps(members), [members]);
   const center = byId[centerId];
+  const svgRef = useRef(null);
+  const [saving, setSaving] = useState(false);
   const { segs, maxDepth } = useMemo(() => {
     if (!center) return { segs: [], maxDepth: 0 };
     const leaf = {};
     const cl = (id) => { const ks = sonsOf(id, childrenMap, byId); if (!ks.length) { leaf[id] = 1; return 1; } let s = 0; ks.forEach((k) => { s += cl(k.id); }); leaf[id] = s; return s; };
     cl(centerId);
     const out = []; let md = 0; const off = -Math.PI / 2;
+    // نلوّن الفروع عند أول تفرّع حقيقي (نقطة تعدُّد الأبناء)، فالجذع أحادي الابن يبقى بلون موحّد
     const assign = (id, a0, a1, depth, color) => {
       const ks = sonsOf(id, childrenMap, byId); let a = a0; const total = leaf[id] || 1;
+      const fork = color == null && ks.length > 1;
       ks.forEach((k, idx) => {
         const b1 = a + (a1 - a0) * ((leaf[k.id] || 1) / total);
-        const baseCol = depth === 0 ? FAN_PALETTE[idx % FAN_PALETTE.length] : color;
-        out.push({ id: k.id, name: k.name, depth: depth + 1, a0: a, a1: b1, color: mixToWhite(baseCol, Math.min(0.6, depth * 0.11)) });
-        md = Math.max(md, depth + 1);
-        assign(k.id, a, b1, depth + 1, baseCol);
+        const baseCol = fork ? FAN_PALETTE[idx % FAN_PALETTE.length] : color;
+        const cd = depth + 1;
+        const fill = baseCol ? mixToWhite(baseCol, Math.min(0.62, cd * 0.085)) : mixToWhite(FAN_TRUNK, Math.min(0.4, cd * 0.1));
+        out.push({ id: k.id, name: k.name, depth: cd, a0: a, a1: b1, color: fill });
+        md = Math.max(md, cd);
+        assign(k.id, a, b1, cd, baseCol);
         a = b1;
       });
     };
@@ -1638,33 +1740,67 @@ function FanChartModal({ centerId, members, onClose }) {
   };
   const total = segs.length;
 
+  const exportPdf = async () => {
+    const svg = svgRef.current; if (!svg || saving) return;
+    setSaving(true);
+    try {
+      const xml = new XMLSerializer().serializeToString(svg);
+      const svg64 = "data:image/svg+xml;charset=utf-8;base64," + btoa(unescape(encodeURIComponent(xml)));
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = svg64; });
+      const scale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(size * scale); canvas.height = Math.round(size * scale);
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const png = canvas.toDataURL("image/png");
+      try {
+        const j = await ensureJsPdf();
+        const pdf = new j.jsPDF({ orientation: "p", unit: "pt", format: [size, size] });
+        pdf.addImage(png, "PNG", 0, 0, size, size);
+        pdf.save("المخطط_الشعاعي_" + (center ? center.name : "") + ".pdf");
+      } catch (e) {
+        const a = document.createElement("a"); a.href = png; a.download = "المخطط_الشعاعي.png"; document.body.appendChild(a); a.click(); a.remove();
+      }
+    } catch (e) { /* تعذّر التصدير */ }
+    setSaving(false);
+  };
+
+  const extra = total > 0 ? (
+    <button onClick={exportPdf} disabled={saving} title="حفظ / طباعة PDF" style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8, padding: "6px 10px", color: "#fff", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
+      {saving ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : <Download size={14} />} PDF
+    </button>
+  ) : null;
+
   return modalShell("المخطط الشعاعي · " + (center ? center.name : ""), <Sun size={17} color={TT.gold400} />, onClose, (
     total === 0 ? (
       <div style={{ textAlign: "center", color: T.muted, fontSize: 13, padding: "24px 0" }}>لا ذرّية مسجّلة لهذا الفرد لعرضها شعاعياً.</div>
     ) : (
       <div>
-        <div style={{ fontSize: 12, color: T.muted, textAlign: "center", marginBottom: 10 }}>حلقاتٌ ملوّنة لذرّية {center.name} ({total} فرداً · {maxDepth} أجيال) — كل لون فرعٌ رئيسي. للطباعة أو الحفظ: التقط لقطة شاشة.</div>
+        <div style={{ fontSize: 12, color: T.muted, textAlign: "center", marginBottom: 10 }}>حلقاتٌ ملوّنة لذرّية {center.name} ({total} فرداً · {maxDepth} أجيال) — كل لون فرعٌ رئيسي. للحفظ أو الطباعة استخدم زر «PDF» بالأعلى.</div>
         <div style={{ overflow: "auto", border: `1px solid ${T.line}`, borderRadius: 12, background: "#fff", maxHeight: "66vh" }}>
-          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block", margin: "0 auto" }}>
+          <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block", margin: "0 auto" }}>
+            <rect x={0} y={0} width={size} height={size} fill="#ffffff" />
             {segs.map((s) => (
-              <path key={s.id} d={segPath(R0 + (s.depth - 1) * RW, R0 + s.depth * RW, s.a0, s.a1)} fill={s.color} stroke="#fff" strokeWidth={0.8} fillRule="evenodd" />
+              <path key={s.id} d={segPath(R0 + (s.depth - 1) * RW, R0 + s.depth * RW, s.a0, s.a1)} fill={s.color} stroke="#ffffff" strokeWidth={0.8} fillRule="evenodd" />
             ))}
-            {segs.filter((s) => s.depth <= 2 && (s.a1 - s.a0) * (R0 + (s.depth - 0.5) * RW) > 16).map((s) => {
+            {segs.filter((s) => s.depth <= 3 && (s.a1 - s.a0) * (R0 + (s.depth - 0.5) * RW) > 15).map((s) => {
               const mid = (s.a0 + s.a1) / 2;
               const rr = R0 + (s.depth - 0.5) * RW;
               const [tx, ty] = polar(rr, mid);
               let deg = mid * 180 / Math.PI;
               if (deg > 90 && deg < 270) deg += 180;
-              const nm = s.name.length > 8 ? s.name.slice(0, 7) + "…" : s.name;
-              return <text key={"t" + s.id} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={s.depth === 1 ? 12 : 10} fontWeight={s.depth === 1 ? 800 : 600} fill={T.ink} style={{ fontFamily: "'Tajawal', sans-serif" }}>{nm}</text>;
+              const nm = s.name.length > 9 ? s.name.slice(0, 8) + "…" : s.name;
+              return <text key={"t" + s.id} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={s.depth === 1 ? 12 : 10} fontWeight={s.depth <= 2 ? 800 : 700} fill="#12302e" style={{ fontFamily: "'Tajawal', sans-serif" }}>{nm}</text>;
             })}
             <circle cx={cx} cy={cy} r={R0 - 4} fill={TT.teal900} stroke={TT.gold500} strokeWidth={2} />
-            <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={800} fill="#fff" style={{ fontFamily: "'Aref Ruqaa', serif" }}>{center.name.length > 7 ? center.name.slice(0, 6) + "…" : center.name}</text>
+            <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={800} fill="#ffffff" style={{ fontFamily: "'Aref Ruqaa', serif" }}>{center.name.length > 7 ? center.name.slice(0, 6) + "…" : center.name}</text>
           </svg>
         </div>
       </div>
     )
-  ));
+  ), extra);
 }
 
 // ===== حاسبة القرابة =====
@@ -1889,7 +2025,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [kinOpen, setKinOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
+  const [phoneDirOpen, setPhoneDirOpen] = useState(false);
   const [gameOpen, setGameOpen] = useState(false);
   const [fanOpen, setFanOpen] = useState(false);
   const centeredRef = useRef(false);
@@ -2208,23 +2344,23 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         </button>
         {toolsOpen && (
           <div style={{ marginTop: 7 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
               {[
-                ["مَن هذا؟", <Camera size={16} color={T.gold} />, () => setWhoOpen(true)],
-                ["حاسبة القرابة", <GitBranch size={16} color={T.gold} />, () => setKinOpen(true)],
-                ["الخريطة", <MapPin size={16} color={T.gold} />, () => setMapOpen(true)],
-                ["الإحصاءات", <Newspaper size={16} color={T.gold} />, () => setStatsOpen(true)],
-                ["المخطط الشعاعي", <Sun size={16} color={T.gold} />, () => setFanOpen(true)],
-                ["تصدير", <FileText size={16} color={T.gold} />, () => setExportOpen(true)],
+                ["مَن هذا؟", <Camera size={15} color={T.gold} />, () => setWhoOpen(true)],
+                ["حاسبة القرابة", <GitBranch size={15} color={T.gold} />, () => setKinOpen(true)],
+                ["الخريطة", <MapPin size={15} color={T.gold} />, () => setMapOpen(true)],
+                ["الإحصاءات", <Newspaper size={15} color={T.gold} />, () => setStatsOpen(true)],
+                ["المخطط الشعاعي", <Sun size={15} color={T.gold} />, () => setFanOpen(true)],
+                ["دليل الهاتف", <Phone size={15} color={T.gold} />, () => setPhoneDirOpen(true)],
               ].map(([lbl, icn, fn], i) => (
-                <button key={i} onClick={fn} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, padding: "8px 3px", minHeight: 52, background: T.card, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, fontSize: 10, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+                <button key={i} onClick={fn} style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 8px", background: T.card, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
                   {icn}
-                  <span style={{ textAlign: "center", lineHeight: 1.15 }}>{lbl}</span>
+                  <span style={{ whiteSpace: "nowrap" }}>{lbl}</span>
                 </button>
               ))}
             </div>
             <button onClick={() => setGameOpen(true)} style={{ width: "100%", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "9px 8px", background: `linear-gradient(160deg, ${T.gold}, #9c7238)`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 10, fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
-              <Gamepad2 size={15} color="#fff" /> اختبر صلتك
+              <Gamepad2 size={15} color="#fff" /> لعبة الشجرة: اختبر صلتك!
             </button>
           </div>
         )}
@@ -2393,8 +2529,8 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       {statsOpen && (
         <StatsModal members={members} onClose={() => setStatsOpen(false)} />
       )}
-      {exportOpen && (
-        <ExportModal members={members} onClose={() => setExportOpen(false)} />
+      {phoneDirOpen && (
+        <PhoneDirectoryModal members={members} onClose={() => setPhoneDirOpen(false)} />
       )}
       {gameOpen && (
         <RelationGameModal members={members} onClose={() => setGameOpen(false)} />
@@ -3376,6 +3512,7 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
   const [actBusy, setActBusy] = useState(false);
   const [actMsg, setActMsg] = useState("");
   const [actErr, setActErr] = useState("");
+  const [showReports, setShowReports] = useState(false);
 
   const handleActivateAccount = async () => {
     setActErr(""); setActMsg("");
@@ -3573,6 +3710,15 @@ function AdminsTab({ members, setMembers, profilesMap, canManageTree, canManageA
 
       {canManageTree && (
         <>
+      <SectionTitle>التقارير والكشوف (خاصّة بالإشراف)</SectionTitle>
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
+        <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.8, marginBottom: 10 }}>كشوف تتضمّن بياناتٍ خاصّة (كل الأعضاء، كشف الأطراف، كشف الأحياء، دليل الهاتف الكامل) — متاحة للإشراف فقط.</div>
+        <button onClick={() => setShowReports(true)} style={{ display: "flex", alignItems: "center", gap: 8, background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, padding: "11px 18px", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+          <FileText size={16} color={TT.gold400} /> فتح التقارير والكشوف
+        </button>
+      </div>
+      {showReports && <ExportModal members={members} onClose={() => setShowReports(false)} />}
+
       <SectionTitle>إدارة الشجرة (بحث، تعديل، حذف)</SectionTitle>
       <div style={{ position: "relative", marginBottom: 10 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
