@@ -754,18 +754,23 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [reading, setReading] = useState(null);
+  const [size, setSize] = useState("normal");
+  const [pinned, setPinned] = useState(false);
   const [issueCount, setIssueCount] = useState(null);
+  const [latestIssue, setLatestIssue] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     supabase.from("magazine_issues").select("id", { count: "exact", head: true }).then(({ count }) => { if (!cancelled) setIssueCount(count ?? null); });
+    supabase.from("magazine_issues").select("issue_number,title,published_date").order("issue_number", { ascending: false }).limit(1).then(({ data }) => { if (!cancelled && data && data[0]) setLatestIssue(data[0]); });
     return () => { cancelled = true; };
   }, []);
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const nextEvent = (events || []).filter((e) => e.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date))[0];
+  const daysTo = (d) => { try { const n = Math.ceil((new Date(d + "T00:00:00") - new Date(todayStr + "T00:00:00")) / 86400000); return n; } catch (e) { return null; } };
 
-  const resetForm = () => { setEditingId(null); setType("عام"); setTitle(""); setText(""); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); };
+  const resetForm = () => { setEditingId(null); setType("عام"); setTitle(""); setText(""); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); setSize("normal"); setPinned(false); };
   const openComposer = () => { resetForm(); setOpen(true); };
 
   const submit = async () => {
@@ -777,7 +782,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
       const uploaded = await uploadNewsImage(compressed);
       if (uploaded) imageUrl = uploaded;
     }
-    const payload = { type, title: title.trim() || null, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null };
+    const payload = { type, title: title.trim() || null, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null, size, pinned };
     if (editingId) {
       const updated = await updateNews(editingId, payload);
       if (updated) setNews(news.map((n) => (n.id === editingId ? updated : n)));
@@ -799,6 +804,8 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
     setExistingImageUrl(n.image_url || "");
     setImageFile(null);
     setLocationUrl(n.location_url || "");
+    setSize(n.size || "normal");
+    setPinned(!!n.pinned);
     setOpen(true);
   };
 
@@ -811,8 +818,10 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
     setReading(null);
   };
 
-  const hero = news[0];
-  const rest = news.slice(1);
+  // القالب الذكي: ترتيب حسب التثبيت ثم التاريخ، والخبر الرئيسي من مقاس «رئيسي» أو أحدث خبر
+  const sortedNews = [...news].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || String(b.date || "").localeCompare(String(a.date || "")));
+  const hero = sortedNews.find((n) => n.size === "hero") || sortedNews[0];
+  const rest = sortedNews.filter((n) => hero && n.id !== hero.id);
   const fmtDate = (d) => { try { return new Date(d).toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "long", day: "numeric" }); } catch (e) { return d; } };
 
   return (
@@ -847,30 +856,27 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
         </div>
       </button>
 
+      {/* بطاقتان حيّتان تعرضان المحتوى الفعلي */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-        <button
-          onClick={() => onNavigate?.("magazine")}
-          style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 12px", cursor: "pointer", fontFamily: "inherit" }}
-        >
-          <div style={{ width: 34, height: 34, borderRadius: "50%", background: T.sandDark, border: `1.5px solid ${T.gold}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <BookOpen size={16} color={T.gold} />
+        <button onClick={() => onNavigate?.("magazine")} style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "12px 12px", cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", minHeight: 96 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: NEWS_TYPES["زواج"].soft, display: "flex", alignItems: "center", justifyContent: "center" }}><BookOpen size={15} color={T.gold} /></div>
+            {issueCount != null && <span style={{ fontSize: 9.5, fontWeight: 600, color: T.gold, background: T.sandDark, borderRadius: 999, padding: "2px 8px" }}>{issueCount} عددًا</span>}
           </div>
-          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>مجلة الصلة</div>
-          <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: T.gold, background: T.sandDark, border: `1px solid ${T.gold}`, borderRadius: 999, padding: "2px 9px", marginTop: 6 }}>
-            {issueCount != null ? `${issueCount} عددًا` : "تصفّح الأعداد"}
-          </span>
+          <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, marginTop: 8 }}>مجلة الصلة</div>
+          <div style={{ fontSize: 10.5, color: T.muted, marginTop: "auto", paddingTop: 4, lineHeight: 1.5 }}>
+            {latestIssue ? `أحدث عدد: ${latestIssue.title || "الصلة"} (${latestIssue.issue_number})` : "تصفّح الأعداد"}
+          </div>
         </button>
-        <button
-          onClick={() => onNavigate?.("events")}
-          style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 12px", cursor: "pointer", fontFamily: "inherit" }}
-        >
-          <div style={{ width: 34, height: 34, borderRadius: "50%", background: T.sandDark, border: `1.5px solid ${T.gold}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <CalendarDays size={16} color={T.gold} />
+        <button onClick={() => onNavigate?.("events")} style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "12px 12px", cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", minHeight: 96 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: NEWS_TYPES["مولود"].soft, display: "flex", alignItems: "center", justifyContent: "center" }}><CalendarDays size={15} color="#1b7a3d" /></div>
+            {nextEvent && daysTo(nextEvent.date) != null && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", background: "#1b7a3d", borderRadius: 999, padding: "2px 8px" }}>{daysTo(nextEvent.date) <= 0 ? "اليوم" : `بعد ${daysTo(nextEvent.date)} يوم`}</span>}
           </div>
-          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>المناسبات</div>
-          <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: nextEvent ? T.gold : T.muted, background: T.sandDark, border: `1px solid ${nextEvent ? T.gold : T.line}`, borderRadius: 999, padding: "2px 9px", marginTop: 6 }}>
-            {nextEvent ? nextEvent.date : "لا شي قريب"}
-          </span>
+          <div style={{ fontSize: 14, fontWeight: 700, color: T.ink, marginTop: 8 }}>المناسبات</div>
+          <div style={{ fontSize: 10.5, color: T.muted, marginTop: "auto", paddingTop: 4, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+            {nextEvent ? (nextEvent.title || "مناسبة قادمة") : "لا مناسبات قريبة"}
+          </div>
         </button>
       </div>
 
@@ -917,26 +923,42 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
         );
       })()}
 
-      {/* بقية الأخبار — شبكة بطاقتين، صورة ١٦:٩ فوق */}
+      {/* بقية الأخبار — قالب ذكي: الحجم يحدّد عرض البطاقة (كبير/عادي مصغّر) */}
       {rest.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {rest.map((n) => {
             const meta = NEWS_TYPES[n.type] || NEWS_TYPES["عام"];
             const Icon = meta.icon;
+            const span = { gridColumn: n.size === "normal" ? "auto" : "1 / -1" };
+            const badge = (small) => (
+              <span style={{ position: "absolute", top: small ? 8 : 12, insetInlineStart: small ? 8 : 12, display: "inline-flex", alignItems: "center", gap: 4, background: meta.color, color: "#fff", borderRadius: small ? 7 : 8, padding: small ? "3px 8px" : "4px 11px", fontSize: small ? 9.5 : 11, fontWeight: 600 }}><Icon size={small ? 10 : 12} /> {n.type}</span>
+            );
+            if (n.size === "compact") {
+              return (
+                <button key={n.id} onClick={() => setReading(n)} style={{ ...span, display: "flex", gap: 10, alignItems: "center", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderInlineStart: `4px solid ${meta.color}`, borderRadius: 12, padding: "10px 12px", cursor: "pointer", fontFamily: "inherit" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: meta.color, fontSize: 10, fontWeight: 600 }}><Icon size={11} /> {n.type}</span>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: T.ink, lineHeight: 1.5, marginTop: 2, display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsTitle(n)}</div>
+                    <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>{fmtDate(n.date)}</div>
+                  </div>
+                  {n.image_url && <img src={n.image_url} alt="" style={{ width: 54, height: 54, objectFit: "cover", borderRadius: 10, flexShrink: 0 }} />}
+                </button>
+              );
+            }
+            const big = n.size === "large" || n.size === "hero";
             return (
-              <button key={n.id} onClick={() => setReading(n)} style={{ display: "flex", flexDirection: "column", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 16, overflow: "hidden", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
+              <button key={n.id} onClick={() => setReading(n)} style={{ ...span, display: "flex", flexDirection: "column", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 16, overflow: "hidden", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
                 {n.image_url ? (
-                  <NewsImage src={n.image_url} overlay={
-                    <span style={{ position: "absolute", top: 8, insetInlineStart: 8, display: "inline-flex", alignItems: "center", gap: 3, background: meta.color, color: "#fff", borderRadius: 7, padding: "3px 8px", fontSize: 9.5, fontWeight: 600 }}><Icon size={10} /> {n.type}</span>
-                  } />
+                  <NewsImage src={n.image_url} overlay={badge(!big)} />
                 ) : (
                   <div style={{ width: "100%", aspectRatio: "16 / 9", background: meta.soft, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-                    <Icon size={30} color={meta.color} style={{ opacity: 0.55 }} />
+                    <Icon size={big ? 38 : 30} color={meta.color} style={{ opacity: 0.55 }} />
                     <span style={{ position: "absolute", top: 8, insetInlineStart: 8, color: meta.color, fontSize: 9.5, fontWeight: 700 }}>{n.type}</span>
                   </div>
                 )}
-                <div style={{ padding: "9px 11px 11px", flex: 1, display: "flex", flexDirection: "column" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: T.ink, lineHeight: 1.55, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsTitle(n)}</div>
+                <div style={{ padding: big ? "12px 15px 14px" : "9px 11px 11px", flex: 1, display: "flex", flexDirection: "column" }}>
+                  <div style={{ fontSize: big ? 16.5 : 13, fontWeight: big ? 700 : 600, color: T.ink, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsTitle(n)}</div>
+                  {big && <div style={{ fontSize: 12.5, color: T.text, lineHeight: 1.65, marginTop: 6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsExcerpt(n.text, 130)}</div>}
                   <div style={{ fontSize: 10, color: T.muted, marginTop: "auto", paddingTop: 8 }}>{fmtDate(n.date)}</div>
                 </div>
               </button>
@@ -1022,7 +1044,22 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
                 )}
               </div>
               <input type="url" placeholder="رابط الموقع من خرائط جوجل (اختياري)" value={locationUrl} onChange={(e) => setLocationUrl(e.target.value)} style={{ ...inputStyle, marginTop: 10 }} />
-              <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+
+              {/* حجم الخبر في الصفحة + تثبيت (تحكّم الإشراف بالإخراج) */}
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: T.ink, margin: "14px 0 6px" }}>حجم الخبر في الصفحة</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[["hero", "رئيسي (بارز أعلى الصفحة)"], ["large", "كبير (عرض كامل)"], ["normal", "عادي"], ["compact", "مصغّر (سطر)"]].map(([k, lbl]) => {
+                  const on = size === k;
+                  return (
+                    <button key={k} onClick={() => setSize(k)} style={{ border: `1.5px solid ${on ? TT.teal800 : T.line}`, background: on ? "#e6efec" : "transparent", color: on ? TT.teal800 : T.text, borderRadius: 10, padding: "7px 12px", fontSize: 11.5, fontWeight: on ? 800 : 600, fontFamily: "inherit", cursor: "pointer" }}>{lbl}</button>
+                  );
+                })}
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12.5, color: T.ink, cursor: "pointer", fontWeight: 700 }}>
+                <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} /> تثبيت الخبر في المقدّمة
+              </label>
+
+              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
                 <button onClick={submit} disabled={uploadingImg} style={{ ...primaryBtnStyle, marginTop: 0, flex: 1 }}>
                   {uploadingImg ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : editingId ? "حفظ التعديل" : "نشر الخبر"}
                 </button>
