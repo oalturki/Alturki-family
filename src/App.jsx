@@ -10,7 +10,7 @@ import {
   Camera, ImagePlus, QrCode,
   Trophy, Sparkles, RotateCcw, Gamepad2,
   Download, Sun, ScrollText, ListTree, Eye, Clock,
-  Bell, Send, Inbox, Users2
+  Bell, Send, Inbox, Users2, Menu
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -4613,9 +4613,11 @@ function ContactUsView({ onBack, meId }) {
   );
 }
 
-function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, onOpenInbox, unreadInbox = 0 }) {
+function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, onOpenInbox, unreadInbox = 0, jumpView }) {
   const me = members.find((m) => m.id === meId);
   const [profileView, setProfileView] = useState("menu"); // menu | info | settings
+  // فتح قسم محدّد عند القدوم من القائمة الجانبية في الترويسة
+  useEffect(() => { if (jumpView && jumpView.view) setProfileView(jumpView.view); }, [jumpView]);
   const [mode, setMode] = useState("view");
   const [form, setForm] = useState(me);
   const [daughterName, setDaughterName] = useState("");
@@ -5485,6 +5487,78 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, on
 }
 
 // المناسبات نُقلت من الشريط السفلي إلى الوصول السريع بالرئيسية لتخفيف الازدحام (≤٥ أيقونات)
+/* ============ قائمة الترويسة الجانبية ============ */
+function HeaderMenu({ onClose, onGo, onOpenInbox, unreadInbox = 0 }) {
+  const [confirmOut, setConfirmOut] = useState(false);
+  const doLogout = async () => {
+    await supabase.auth.signOut();
+    window.location.href = "/";
+  };
+  const Row = ({ icon: Icon, label, sublabel, badge, onClick }) => (
+    <button onClick={onClick}
+      style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", background: "none", border: "none", padding: "13px 4px", cursor: "pointer", fontFamily: "inherit", textAlign: "right", borderBottom: `1px solid ${T.line}` }}>
+      <div style={{ width: 32, height: 32, borderRadius: "50%", background: T.sandDark, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <Icon size={15} color={T.gold} />
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{label}</div>
+        {sublabel && <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{sublabel}</div>}
+      </div>
+      {badge > 0 && (
+        <span style={{ minWidth: 20, height: 20, padding: "0 5px", borderRadius: 999, background: T.clay, color: "#fff", fontSize: 10.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{badge > 99 ? "99+" : badge}</span>
+      )}
+      <ChevronLeft size={15} color={T.muted} />
+    </button>
+  );
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.5)", zIndex: 97, display: "flex", justifyContent: "flex-start" }}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()}
+        style={{ width: "82%", maxWidth: 320, height: "100%", background: T.sand, display: "flex", flexDirection: "column", boxShadow: "0 0 24px rgba(0,0,0,0.25)" }}>
+        <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "calc(env(safe-area-inset-top, 0px) + 16px) 16px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Logo size={34} />
+            <div>
+              <div style={{ color: TT.gold500, fontWeight: 800, fontSize: 14 }}>عائلة آل تركي</div>
+              <div style={{ color: "#CFE0DC", fontSize: 10.5 }}>الموقع الرسمي</div>
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="إغلاق" style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={20} /></button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "6px 14px 20px" }}>
+          <Row icon={UserCircle2} label="ملفي" sublabel="بياناتي، السيرة، الأبناء والبنات" onClick={() => onGo("info")} />
+          <Row icon={Inbox} label="رسائلي" sublabel="رسائل العائلة والردود" badge={unreadInbox} onClick={() => { onClose(); onOpenInbox(); }} />
+          <Row icon={Settings} label="الإعدادات" sublabel="الخصوصية والإشعارات" onClick={() => onGo("settings")} />
+          <Row icon={HelpCircle} label="الأسئلة الشائعة" onClick={() => onGo("faq")} />
+          <Row icon={Shield} label="سياسة الخصوصية" onClick={() => onGo("privacy-policy")} />
+          <Row icon={MessageCircle} label="تواصل معنا" onClick={() => onGo("contact")} />
+          <button
+            onClick={() => setConfirmOut(true)}
+            style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", background: "none", border: "none", padding: "16px 4px", cursor: "pointer", fontFamily: "inherit", textAlign: "right" }}
+          >
+            <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#FBEAEA", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <LogOut size={15} color={T.clay} />
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: T.clay }}>تسجيل الخروج</span>
+          </button>
+        </div>
+        {confirmOut && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 98, padding: 20 }} onClick={() => setConfirmOut(false)}>
+            <div dir="rtl" style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 320, fontFamily: "'Readex Pro', sans-serif" }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ fontSize: 13, color: T.text, marginBottom: 16, textAlign: "center" }}>تأكيد تسجيل الخروج من حسابك؟</div>
+              <button onClick={doLogout} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>
+                تسجيل الخروج
+              </button>
+              <button onClick={() => setConfirmOut(false)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>
+                تراجع
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const BASE_TABS = [
   { key: "news", label: "الرئيسية", icon: Newspaper },
   { key: "tree", label: "الشجرة", icon: GitBranch },
@@ -5520,6 +5594,9 @@ function FamilyAppInner({ meId }) {
   const [authUid, setAuthUid] = useState(null);
   const [inboxItems, setInboxItems] = useState([]);
   const [inboxOpen, setInboxOpen] = useState(() => { try { return window.location.hash.replace("#", "") === "inbox"; } catch (e) { return false; } });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [jumpView, setJumpView] = useState(null);
+  const goProfileView = (view) => { setMenuOpen(false); setTab("profile"); setJumpView({ view, n: Date.now() }); };
 
   const reloadInbox = async (uid) => {
     const id = uid || authUid;
@@ -5600,7 +5677,7 @@ function FamilyAppInner({ meId }) {
             backgroundImage: "url(/Header-Final.jpeg)",
             backgroundSize: "contain",
             backgroundRepeat: "no-repeat",
-            backgroundPosition: "right center",
+            backgroundPosition: "center center",
             backgroundOrigin: "content-box",
             borderBottomLeftRadius: 22,
             borderBottomRightRadius: 22,
@@ -5613,9 +5690,17 @@ function FamilyAppInner({ meId }) {
           title="الرجوع للرئيسية"
         >
           <button
+            onClick={(ev) => { ev.stopPropagation(); setMenuOpen(true); }}
+            title="القائمة"
+            aria-label="القائمة"
+            style={{ position: "absolute", top: "calc(14px + env(safe-area-inset-top, 0px))", insetInlineStart: 12, width: 44, height: 44, borderRadius: 999, background: "rgba(23,54,52,0.92)", border: `1.5px solid ${TT.gold500}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.2)", zIndex: 2 }}
+          >
+            <Menu size={19} color={TT.gold500} />
+          </button>
+          <button
             onClick={(ev) => { ev.stopPropagation(); setInboxOpen(true); }}
             title="صندوق الوارد"
-            style={{ position: "absolute", top: "calc(14px + env(safe-area-inset-top, 0px))", insetInlineStart: 12, width: 44, height: 44, borderRadius: 999, background: "rgba(23,54,52,0.92)", border: `1.5px solid ${TT.gold500}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.2)", zIndex: 2 }}
+            style={{ position: "absolute", top: "calc(14px + env(safe-area-inset-top, 0px))", insetInlineEnd: 12, width: 44, height: 44, borderRadius: 999, background: "rgba(23,54,52,0.92)", border: `1.5px solid ${TT.gold500}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.2)", zIndex: 2 }}
           >
             <Bell size={18} color={TT.gold500} />
             {unreadInbox > 0 && (
@@ -5623,6 +5708,9 @@ function FamilyAppInner({ meId }) {
             )}
           </button>
         </div>
+        {menuOpen && (
+          <HeaderMenu onClose={() => setMenuOpen(false)} onGo={goProfileView} onOpenInbox={() => setInboxOpen(true)} unreadInbox={unreadInbox} />
+        )}
         {inboxOpen && (
           <InboxOverlay uid={authUid} items={inboxItems} onClose={() => setInboxOpen(false)} reload={() => reloadInbox()} />
         )}
@@ -5670,7 +5758,7 @@ function FamilyAppInner({ meId }) {
               {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
               {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} onUploadingChange={setMagazineUploading} onUploadResult={setMagazineUploadMsg} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
-              {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} onOpenInbox={() => setInboxOpen(true)} unreadInbox={unreadInbox} />}
+              {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} onOpenInbox={() => setInboxOpen(true)} unreadInbox={unreadInbox} jumpView={jumpView} />}
               {tab === "admins" && (canManageAdmins || canManageTree || canManageRegistrations || canManageMessages) && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} canManageAdmins={canManageAdmins} canManageRegistrations={canManageRegistrations} canManageMessages={canManageMessages} />}
             </>
           )}
