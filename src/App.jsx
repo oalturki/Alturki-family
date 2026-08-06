@@ -603,11 +603,13 @@ function formatDate(dateStr, precision) {
 }
 
 const NEWS_TYPES = {
-  "مولود": { icon: Baby, color: T.gold },
-  "وفاة": { icon: Cross, color: T.clay },
-  "زواج": { icon: HeartHandshake, color: T.gold },
-  "عام": { icon: Megaphone, color: T.inkSoft },
+  "مولود": { icon: Baby, color: "#1b7a3d", soft: "#e7f4ec" },
+  "وفاة": { icon: Cross, color: "#5f6f68", soft: "#e9eeec" },
+  "زواج": { icon: HeartHandshake, color: "#B4894A", soft: "#f6efe1" },
+  "عام": { icon: Megaphone, color: "#1a4d4d", soft: "#e6efec" },
 };
+function newsExcerpt(t, n = 120) { const s = (t || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+function newsTitle(item) { return (item.title && item.title.trim()) || (item.text || "").split("\n")[0].slice(0, 70) || "خبر"; }
 
 function Avatar({ name, photoUrl, gender, size = 44 }) {
   if (photoUrl && gender !== "female") {
@@ -716,6 +718,7 @@ function ConfirmModal({ onConfirm, onCancel }) {
 function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigate }) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState("عام");
+  const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [imageFile, setImageFile] = useState(null);
   const [existingImageUrl, setExistingImageUrl] = useState("");
@@ -723,19 +726,23 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
   const [uploadingImg, setUploadingImg] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [reading, setReading] = useState(null);
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const nextEvent = (events || []).filter((e) => e.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date))[0];
 
+  const resetForm = () => { setEditingId(null); setType("عام"); setTitle(""); setText(""); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); };
+  const openComposer = () => { resetForm(); setOpen(true); };
+
   const submit = async () => {
-    if (!text.trim()) return;
+    if (!text.trim() && !title.trim()) return;
     setUploadingImg(true);
     let imageUrl = existingImageUrl || null;
     if (imageFile) {
       const uploaded = await uploadNewsImage(imageFile);
       if (uploaded) imageUrl = uploaded;
     }
-    const payload = { type, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null };
+    const payload = { type, title: title.trim() || null, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null };
     if (editingId) {
       const updated = await updateNews(editingId, payload);
       if (updated) setNews(news.map((n) => (n.id === editingId ? updated : n)));
@@ -743,17 +750,17 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
       const created = await insertNews({ ...payload, date: new Date().toISOString().slice(0, 10) });
       if (created) setNews([created, ...news]);
     }
-    setText(""); setImageFile(null); setExistingImageUrl(""); setLocationUrl("");
-    setType("عام");
-    setEditingId(null);
+    resetForm();
     setOpen(false);
     setUploadingImg(false);
   };
 
   const startEdit = (n) => {
+    setReading(null);
     setEditingId(n.id);
     setType(n.type);
-    setText(n.text);
+    setTitle(n.title || "");
+    setText(n.text || "");
     setExistingImageUrl(n.image_url || "");
     setImageFile(null);
     setLocationUrl(n.location_url || "");
@@ -766,7 +773,12 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
     const ok = await deleteNews(confirmDeleteId);
     if (ok) setNews(news.filter((n) => n.id !== confirmDeleteId));
     setConfirmDeleteId(null);
+    setReading(null);
   };
+
+  const hero = news[0];
+  const rest = news.slice(1);
+  const fmtDate = (d) => { try { return new Date(d).toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "long", day: "numeric" }); } catch (e) { return d; } };
 
   return (
     <div>
@@ -831,97 +843,165 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
         {[0, 1, 2, 3, 4].map((i) => <Rosette key={i} size={13} color={T.gold} />)}
       </div>
 
-      <SectionTitle action={canManageNews && (
-        <IconButton onClick={() => { setOpen((v) => !v); setEditingId(null); setText(""); setType("عام"); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); }} active={open}>
-          <Plus size={14} /> إضافة خبر
-        </IconButton>
-      )}>
-        الأخبار
-      </SectionTitle>
-
-      {open && canManageNews && (
-        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
-          <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {Object.keys(NEWS_TYPES).map((t) => (
-              <button key={t} onClick={() => setType(t)} style={{ border: `1px solid ${type === t ? T.gold : T.line}`, background: type === t ? T.sandDark : "transparent", borderRadius: 999, padding: "5px 12px", fontSize: 12, fontFamily: "inherit", color: T.text, cursor: "pointer" }}>
-                {t}
-              </button>
-            ))}
-          </div>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="اكتب نص الخبر هنا..." rows={10} style={{ ...inputStyle, resize: "vertical", minHeight: 180, lineHeight: 1.7 }} />
-
-          <div style={{ marginTop: 8 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: T.text, cursor: "pointer" }}>
-              <Upload size={14} color={T.gold} />
-              {imageFile ? imageFile.name : existingImageUrl ? "استبدال الصورة الحالية" : "إضافة صورة (اختياري)"}
-              <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files[0])} style={{ display: "none" }} />
-            </label>
-            {existingImageUrl && !imageFile && (
-              <div style={{ marginTop: 8, position: "relative", display: "inline-block" }}>
-                <img src={existingImageUrl} alt="" style={{ maxWidth: 140, borderRadius: 10, display: "block" }} />
-                <button onClick={() => setExistingImageUrl("")} style={{ position: "absolute", top: -6, left: -6, background: T.clay, color: "#fff", border: "none", borderRadius: "50%", width: 20, height: 20, cursor: "pointer", fontSize: 11, lineHeight: 1 }}>×</button>
-              </div>
-            )}
-          </div>
-
-          <input type="url" placeholder="رابط الموقع من خرائط جوجل (اختياري)" value={locationUrl} onChange={(e) => setLocationUrl(e.target.value)} style={{ ...inputStyle, marginTop: 8 }} />
-
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button onClick={submit} disabled={uploadingImg} style={{ ...primaryBtnStyle, marginTop: 0, flex: 1 }}>
-              {uploadingImg ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : editingId ? "حفظ التعديل" : "نشر الخبر"}
-            </button>
-            <button
-              onClick={() => { setOpen(false); setEditingId(null); setText(""); setType("عام"); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); }}
-              style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}
-            >
-              تراجع
-            </button>
+      {/* ترويسة قسم الأخبار — كاسم مجلة */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 22, fontWeight: 700, color: T.ink }}>أخبار العائلة</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
+            <span style={{ width: 26, height: 2, background: T.gold, borderRadius: 2 }} />
+            <span style={{ fontSize: 10.5, color: T.muted, fontWeight: 700, letterSpacing: 1 }}>آخر ما يهمّ آل تركي</span>
           </div>
         </div>
-      )}
+        {canManageNews && (
+          <button onClick={openComposer} style={{ display: "flex", alignItems: "center", gap: 6, background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${T.gold}`, borderRadius: 999, padding: "8px 15px", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+            <Plus size={15} color={T.goldLight} /> خبر
+          </button>
+        )}
+      </div>
 
       {news.length === 0 && <EmptyState text="لا توجد أخبار بعد. كونوا أول من ينشر خبرًا للعائلة." />}
 
-      {news.map((n) => {
+      {/* الخبر الرئيسي البارز */}
+      {hero && (() => {
+        const meta = NEWS_TYPES[hero.type] || NEWS_TYPES["عام"];
+        const HIcon = meta.icon;
+        return (
+          <button onClick={() => setReading(hero)} style={{ display: "block", width: "100%", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 18, overflow: "hidden", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, boxShadow: "0 6px 20px rgba(13,43,43,0.08)", padding: 0 }}>
+            {hero.image_url ? (
+              <div style={{ position: "relative", width: "100%", height: 210, background: T.sandDark }}>
+                <img src={hero.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(13,43,43,0.82) 12%, rgba(13,43,43,0.15) 60%, transparent)" }} />
+                <span style={{ position: "absolute", top: 12, insetInlineStart: 12, display: "inline-flex", alignItems: "center", gap: 5, background: meta.color, color: "#fff", borderRadius: 999, padding: "4px 11px", fontSize: 11, fontWeight: 800 }}><HIcon size={12} /> {hero.type}</span>
+                <div style={{ position: "absolute", bottom: 0, insetInline: 0, padding: "14px 16px" }}>
+                  <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 20, fontWeight: 700, color: "#fff", lineHeight: 1.45 }}>{newsTitle(hero)}</div>
+                  <div style={{ fontSize: 11, color: "#cfe0dc", marginTop: 5 }}>{fmtDate(hero.date)}</div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: "16px 16px 14px", borderInlineStart: `4px solid ${meta.color}` }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: meta.color, fontSize: 11, fontWeight: 800 }}><HIcon size={13} /> {hero.type}</span>
+                <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 20, fontWeight: 700, color: T.ink, lineHeight: 1.5, marginTop: 6 }}>{newsTitle(hero)}</div>
+                <div style={{ fontSize: 13, color: T.text, lineHeight: 1.7, marginTop: 6 }}>{newsExcerpt(hero.text, 150)}</div>
+                <div style={{ fontSize: 11, color: T.muted, marginTop: 8 }}>{fmtDate(hero.date)}</div>
+              </div>
+            )}
+            {hero.image_url && (
+              <div style={{ padding: "12px 16px 14px" }}>
+                <div style={{ fontSize: 13, color: T.text, lineHeight: 1.7 }}>{newsExcerpt(hero.text, 140)}</div>
+              </div>
+            )}
+          </button>
+        );
+      })()}
+
+      {/* بقية الأخبار كبطاقات */}
+      {rest.map((n) => {
         const meta = NEWS_TYPES[n.type] || NEWS_TYPES["عام"];
         const Icon = meta.icon;
         return (
-          <div key={n.id} style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 13, marginBottom: 10 }}>
-            <div style={{ display: "flex", gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", background: T.sandDark, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: meta.color }}>
-                <Icon size={17} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, color: T.text, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{n.text}</div>
-                {n.image_url && (
-                  <img src={n.image_url} alt="" style={{ width: "100%", maxHeight: 260, objectFit: "cover", borderRadius: 10, marginTop: 10, display: "block" }} />
-                )}
-                {n.location_url && (
-                  <a
-                    href={safeExternalUrl(n.location_url) || undefined}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 8, fontSize: 11.5, fontWeight: 700, color: T.gold, textDecoration: "none" }}
-                  >
-                    <MapPin size={13} /> عرض الموقع على الخريطة
-                  </a>
-                )}
-                <div style={{ fontSize: 11, color: T.muted, marginTop: 4 }}>{n.type} · {n.date}</div>
-              </div>
+          <button key={n.id} onClick={() => setReading(n)} style={{ display: "flex", gap: 12, width: "100%", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderInlineStart: `4px solid ${meta.color}`, borderRadius: 14, padding: 12, marginBottom: 10, cursor: "pointer", fontFamily: "inherit", alignItems: "stretch" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: meta.color, fontSize: 10.5, fontWeight: 800 }}><Icon size={12} /> {n.type}</span>
+              <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, lineHeight: 1.5, marginTop: 4 }}>{newsTitle(n)}</div>
+              <div style={{ fontSize: 12.5, color: T.text, lineHeight: 1.6, marginTop: 4 }}>{newsExcerpt(n.text, 90)}</div>
+              <div style={{ fontSize: 10.5, color: T.muted, marginTop: 6 }}>{fmtDate(n.date)}</div>
             </div>
-            {canManageNews && (
-              <div style={{ display: "flex", gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.line}` }}>
-                <button onClick={() => startEdit(n)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: "transparent", color: T.gold, borderRadius: 8, padding: "5px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
-                  <Pencil size={12} /> تعديل
-                </button>
-                <button onClick={() => remove(n.id)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: "transparent", color: T.clay, borderRadius: 8, padding: "5px 12px", fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>
-                  <Trash2 size={12} /> حذف
-                </button>
-              </div>
+            {n.image_url && (
+              <img src={n.image_url} alt="" style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 10, flexShrink: 0 }} />
             )}
-          </div>
+          </button>
         );
       })}
+
+      {/* نافذة قراءة الخبر كاملاً */}
+      {reading && (() => {
+        const meta = NEWS_TYPES[reading.type] || NEWS_TYPES["عام"];
+        const RIcon = meta.icon;
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} onClick={() => setReading(null)}>
+            <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.sand, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 460, maxHeight: "92vh", overflowY: "auto", fontFamily: "'Tajawal', sans-serif" }}>
+              {reading.image_url ? (
+                <div style={{ position: "relative", width: "100%", height: 230 }}>
+                  <img src={reading.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(13,43,43,0.55), transparent 55%)" }} />
+                  <button onClick={() => setReading(null)} style={{ position: "absolute", top: 12, insetInlineEnd: 12, width: 34, height: 34, borderRadius: "50%", background: "rgba(0,0,0,0.4)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={18} /></button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 14px 0" }}>
+                  <button onClick={() => setReading(null)} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer" }}><X size={20} /></button>
+                </div>
+              )}
+              <div style={{ padding: "16px 18px 22px" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "#fff", background: meta.color, borderRadius: 999, padding: "4px 12px", fontSize: 11.5, fontWeight: 800 }}><RIcon size={13} /> {reading.type}</span>
+                <h1 style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 23, fontWeight: 700, color: T.ink, lineHeight: 1.5, margin: "12px 0 6px" }}>{newsTitle(reading)}</h1>
+                <div style={{ fontSize: 11.5, color: T.muted, marginBottom: 14, paddingBottom: 12, borderBottom: `1px solid ${T.line}` }}>{fmtDate(reading.date)}</div>
+                <div style={{ fontSize: 15, color: T.text, lineHeight: 1.95, whiteSpace: "pre-wrap" }}>{reading.text}</div>
+                {reading.location_url && (
+                  <a href={safeExternalUrl(reading.location_url) || undefined} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 16, background: T.sandDark, border: `1px solid ${T.gold}`, borderRadius: 999, padding: "8px 16px", fontSize: 12.5, fontWeight: 700, color: T.ink, textDecoration: "none" }}>
+                    <MapPin size={14} color={T.gold} /> عرض الموقع على الخريطة
+                  </a>
+                )}
+                {canManageNews && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 18, paddingTop: 14, borderTop: `1px solid ${T.line}` }}>
+                    <button onClick={() => startEdit(reading)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: T.card, color: T.gold, borderRadius: 8, padding: "7px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", fontWeight: 700 }}>
+                      <Pencil size={13} /> تعديل
+                    </button>
+                    <button onClick={() => remove(reading.id)} style={{ display: "flex", alignItems: "center", gap: 5, border: `1px solid ${T.line}`, background: T.card, color: T.clay, borderRadius: 8, padding: "7px 14px", fontSize: 12, fontFamily: "inherit", cursor: "pointer", fontWeight: 700 }}>
+                      <Trash2 size={13} /> حذف
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* محرّر الأخبار (للمشرف) — نافذة منفصلة */}
+      {open && canManageNews && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 75 }} onClick={() => { setOpen(false); resetForm(); }}>
+          <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.sand, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 460, maxHeight: "94vh", overflowY: "auto", fontFamily: "'Tajawal', sans-serif" }}>
+            <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 2 }}>
+              <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif" }}>{editingId ? "تعديل الخبر" : "خبر جديد"}</span>
+              <button onClick={() => { setOpen(false); resetForm(); }} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
+            </div>
+            <div style={{ padding: 16 }}>
+              <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+                {Object.keys(NEWS_TYPES).map((t) => {
+                  const on = type === t; const c = NEWS_TYPES[t].color;
+                  return (
+                    <button key={t} onClick={() => setType(t)} style={{ border: `1.5px solid ${on ? c : T.line}`, background: on ? NEWS_TYPES[t].soft : "transparent", color: on ? c : T.text, borderRadius: 999, padding: "6px 14px", fontSize: 12, fontWeight: on ? 800 : 600, fontFamily: "inherit", cursor: "pointer" }}>
+                      {t}
+                    </button>
+                  );
+                })}
+              </div>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="عنوان الخبر (بارز وملوّن)" style={{ ...inputStyle, fontFamily: "'Aref Ruqaa', serif", fontSize: 16, fontWeight: 700, marginBottom: 8 }} />
+              <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="اكتب تفاصيل الخبر هنا..." rows={9} style={{ ...inputStyle, resize: "vertical", minHeight: 160, lineHeight: 1.8 }} />
+              <div style={{ marginTop: 10 }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: T.ink, cursor: "pointer", background: T.card, border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 14px", fontWeight: 700 }}>
+                  <Upload size={15} color={T.gold} />
+                  {imageFile ? "تم اختيار صورة" : existingImageUrl ? "استبدال الصورة" : "إضافة صورة (اختياري)"}
+                  <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files[0])} style={{ display: "none" }} />
+                </label>
+                {existingImageUrl && !imageFile && (
+                  <div style={{ marginTop: 8, position: "relative", display: "inline-block" }}>
+                    <img src={existingImageUrl} alt="" style={{ maxWidth: 150, borderRadius: 10, display: "block" }} />
+                    <button onClick={() => setExistingImageUrl("")} style={{ position: "absolute", top: -6, insetInlineStart: -6, background: T.clay, color: "#fff", border: "none", borderRadius: "50%", width: 20, height: 20, cursor: "pointer", fontSize: 11, lineHeight: 1 }}>×</button>
+                  </div>
+                )}
+              </div>
+              <input type="url" placeholder="رابط الموقع من خرائط جوجل (اختياري)" value={locationUrl} onChange={(e) => setLocationUrl(e.target.value)} style={{ ...inputStyle, marginTop: 10 }} />
+              <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                <button onClick={submit} disabled={uploadingImg} style={{ ...primaryBtnStyle, marginTop: 0, flex: 1 }}>
+                  {uploadingImg ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : editingId ? "حفظ التعديل" : "نشر الخبر"}
+                </button>
+                <button onClick={() => { setOpen(false); resetForm(); }} style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>تراجع</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmDeleteId && (
         <ConfirmModal
