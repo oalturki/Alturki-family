@@ -8,7 +8,8 @@ import {
   BookOpen, ChevronRight, ChevronLeft, Upload, LogOut, KeyRound,
   Settings, Fingerprint, Lock, HelpCircle, MessageCircle, ChevronsRight, Video,
   Camera, ImagePlus, QrCode,
-  Trophy, Sparkles, RotateCcw, Gamepad2
+  Trophy, Sparkles, RotateCcw, Gamepad2,
+  Download, Sun, ScrollText, ListTree
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -1400,6 +1401,227 @@ function RelationGameModal({ members, onClose }) {
   );
 }
 
+// ===== أدوات النسب والذرية: مساعدات مشتركة =====
+function treeMaps(members) {
+  const byId = {}; const childrenMap = {};
+  members.forEach((m) => { byId[m.id] = m; });
+  members.forEach((m) => { if (m.fatherId && byId[m.fatherId]) { (childrenMap[m.fatherId] = childrenMap[m.fatherId] || []).push(m.id); } });
+  return { byId, childrenMap };
+}
+function sonsOf(id, childrenMap, byId) {
+  return (childrenMap[id] || []).map((cid) => byId[cid]).filter((m) => m && m.gender !== "female").sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
+}
+function ancestorsToRoot(member, byId) {
+  const chain = []; let c = member; const seen = new Set();
+  while (c && !seen.has(c.id)) { seen.add(c.id); chain.push(c); c = c.fatherId ? byId[c.fatherId] : null; }
+  return chain; // [العضو ... تركي]
+}
+function descendantRows(id, childrenMap, byId) {
+  const out = [];
+  const walk = (pid, depth) => {
+    sonsOf(pid, childrenMap, byId).forEach((k) => { out.push({ member: k, depth }); walk(k.id, depth + 1); });
+  };
+  walk(id, 1);
+  return out;
+}
+function mixToWhite(hex, t) {
+  const n = parseInt(hex.slice(1), 16); let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  r = Math.round(r + (255 - r) * t); g = Math.round(g + (255 - g) * t); b = Math.round(b + (255 - b) * t);
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+const FAN_PALETTE = ["#1a4d4d", "#B4894A", "#A24936", "#1b7a3d", "#6b5b95", "#2e7d8c", "#c9a227", "#8a5a44", "#4a7c59", "#9c6b3f", "#556b2f", "#7a4d6b"];
+
+function modalShell(title, icon, onClose, inner, extra) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 75 }} onClick={onClose}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.sand, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 460, maxHeight: "92vh", overflowY: "auto", fontFamily: "'Tajawal', sans-serif" }}>
+        <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "15px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 3 }}>
+          <span style={{ color: "#fff", fontSize: 15.5, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif", display: "flex", alignItems: "center", gap: 8 }}>{icon} {title}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {extra}
+            <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
+          </div>
+        </div>
+        <div style={{ padding: 16 }}>{inner}</div>
+      </div>
+    </div>
+  );
+}
+
+// ===== سلسلة نسبي / ذريتي =====
+function LineageModal({ member, members, onClose }) {
+  const { byId, childrenMap } = useMemo(() => treeMaps(members), [members]);
+  const [view, setView] = useState("up");
+  const chain = useMemo(() => ancestorsToRoot(member, byId), [member, byId]);
+  const rows = useMemo(() => descendantRows(member.id, childrenMap, byId), [member.id, childrenMap, byId]);
+  const upList = [...chain].reverse(); // تركي ... العضو
+
+  const seg = (
+    <div style={{ display: "flex", gap: 5, background: T.sandDark, borderRadius: 12, padding: 4, marginBottom: 14 }}>
+      {[["up", "سلسلة النسب"], ["down", "الذرّية"]].map(([k, lbl]) => (
+        <button key={k} onClick={() => setView(k)} style={{ flex: 1, padding: "8px 6px", borderRadius: 9, border: "none", fontFamily: "inherit", fontSize: 12.5, fontWeight: 800, cursor: "pointer", background: view === k ? TT.teal800 : "transparent", color: view === k ? "#fff" : T.ink }}>{lbl}</button>
+      ))}
+    </div>
+  );
+
+  const upView = (
+    <div>
+      <div style={{ fontSize: 12, color: T.muted, textAlign: "center", marginBottom: 12 }}>من الجذّ الأعلى «تركي» نزولاً حتى {member.name} ({upList.length} أجيال)</div>
+      {upList.map((m, i) => {
+        const isMe = m.id === member.id;
+        return (
+          <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", maxWidth: 340, background: isMe ? `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})` : T.card, border: `1px solid ${isMe ? TT.gold500 : T.line}`, borderRadius: 12, padding: "9px 12px" }}>
+              <div style={{ width: 26, height: 26, borderRadius: "50%", background: isMe ? TT.gold500 : T.sandDark, color: isMe ? "#fff" : T.gold, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>{i + 1}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: isMe ? "#fff" : T.ink }}>{m.name}</div>
+                <div style={{ fontSize: 10.5, color: isMe ? "#d9e6e0" : T.muted }}>{i === 0 ? "الجذّ الأعلى" : `الجيل ${i + 1}`}{m.isAlive === false ? " · رحمه الله" : ""}</div>
+              </div>
+            </div>
+            {i < upList.length - 1 && <div style={{ width: 2, height: 16, background: T.gold, opacity: 0.5 }} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const downView = (
+    <div>
+      <div style={{ fontSize: 12, color: T.muted, textAlign: "center", marginBottom: 12 }}>ذرّية {member.name} — {rows.length} فرداً عبر {rows.reduce((mx, r) => Math.max(mx, r.depth), 0)} أجيال</div>
+      {rows.length === 0 ? (
+        <div style={{ textAlign: "center", color: T.muted, fontSize: 13, padding: "20px 0" }}>لا ذرّية مسجّلة لهذا الفرد بعد.</div>
+      ) : (
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "8px 6px" }}>
+          {rows.map((r) => (
+            <div key={r.member.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 4px", paddingInlineStart: (r.depth - 1) * 16 + 4, borderBottom: `1px dashed ${T.line}` }}>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: r.member.isAlive === false ? T.clay : TT.teal800, flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: r.depth === 1 ? 800 : 600, color: r.member.isAlive === false ? T.muted : T.ink }}>{r.member.name}</span>
+              {r.member.region && <span style={{ fontSize: 10, color: T.muted }}>· {r.member.region}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  return modalShell("سلسلة النسب والذرّية", <ScrollText size={17} color={TT.gold400} />, onClose, (
+    <div>{seg}{view === "up" ? upView : downView}</div>
+  ));
+}
+
+// ===== كشف ذرية فرع =====
+function DescendantsReportModal({ member, members, onClose }) {
+  const { byId, childrenMap } = useMemo(() => treeMaps(members), [members]);
+  const rows = useMemo(() => descendantRows(member.id, childrenMap, byId), [member.id, childrenMap, byId]);
+  const sons = rows.filter((r) => r.depth === 1).length;
+  const gens = rows.reduce((mx, r) => Math.max(mx, r.depth), 0);
+  const alive = rows.filter((r) => r.member.isAlive !== false).length;
+  const fourP = (m) => (m.fullNasab || m.nasab || m.name).split(" بن ").slice(0, 4).join(" بن ");
+  const download = () => {
+    const H = ["الاسم", "الجيل", "الرقم التعريفي", "المدينة", "الحالة"];
+    const data = rows.map((r) => [fourP(r.member), r.depth, r.member.memberNumber || "", r.member.region || "", r.member.isAlive !== false ? "حي" : "متوفى"]);
+    const csv = "﻿" + [H, ...data].map((row) => row.map((c) => `"${String(c == null ? "" : c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `ذرية_${member.name}.csv`; document.body.appendChild(a); a.click(); a.remove();
+  };
+  const sc = (v, l) => (<div style={{ flex: 1, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "10px 6px", textAlign: "center" }}><div style={{ fontSize: 20, fontWeight: 800, color: T.ink }}>{v}</div><div style={{ fontSize: 10.5, color: T.muted, marginTop: 2 }}>{l}</div></div>);
+
+  const extra = rows.length > 0 ? (
+    <button onClick={download} title="تنزيل Excel/CSV" style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8, padding: "6px 10px", color: "#fff", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}><Download size={14} /> تنزيل</button>
+  ) : null;
+
+  return modalShell("كشف ذرّية " + member.name, <ListTree size={17} color={TT.gold400} />, onClose, (
+    rows.length === 0 ? (
+      <div style={{ textAlign: "center", color: T.muted, fontSize: 13, padding: "24px 0" }}>لا ذرّية مسجّلة لهذا الفرد بعد.</div>
+    ) : (
+      <div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>{sc(rows.length, "إجمالي الذرّية")}{sc(sons, "الأبناء المباشرون")}{sc(gens, "عدد الأجيال")}{sc(alive, "الأحياء")}</div>
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "8px 6px" }}>
+          {rows.map((r) => (
+            <div key={r.member.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 4px", paddingInlineStart: (r.depth - 1) * 16 + 4, borderBottom: `1px dashed ${T.line}` }}>
+              <span style={{ fontSize: 9.5, color: T.gold, fontWeight: 700, flexShrink: 0 }}>ج{r.depth}</span>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: r.member.isAlive === false ? T.clay : TT.teal800, flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: r.depth === 1 ? 800 : 600, color: r.member.isAlive === false ? T.muted : T.ink }}>{r.member.name}</span>
+              {r.member.memberNumber && <span style={{ fontSize: 10, color: T.muted }}>· {r.member.memberNumber}</span>}
+              {r.member.region && <span style={{ fontSize: 10, color: T.muted }}>· {r.member.region}</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  ), extra);
+}
+
+// ===== المخطط الشعاعي (Fan) — ذرية شخص في حلقات =====
+function FanChartModal({ centerId, members, onClose }) {
+  const { byId, childrenMap } = useMemo(() => treeMaps(members), [members]);
+  const center = byId[centerId];
+  const { segs, maxDepth } = useMemo(() => {
+    if (!center) return { segs: [], maxDepth: 0 };
+    const leaf = {};
+    const cl = (id) => { const ks = sonsOf(id, childrenMap, byId); if (!ks.length) { leaf[id] = 1; return 1; } let s = 0; ks.forEach((k) => { s += cl(k.id); }); leaf[id] = s; return s; };
+    cl(centerId);
+    const out = []; let md = 0; const off = -Math.PI / 2;
+    const assign = (id, a0, a1, depth, color) => {
+      const ks = sonsOf(id, childrenMap, byId); let a = a0; const total = leaf[id] || 1;
+      ks.forEach((k, idx) => {
+        const b1 = a + (a1 - a0) * ((leaf[k.id] || 1) / total);
+        const baseCol = depth === 0 ? FAN_PALETTE[idx % FAN_PALETTE.length] : color;
+        out.push({ id: k.id, name: k.name, depth: depth + 1, a0: a, a1: b1, color: mixToWhite(baseCol, Math.min(0.6, depth * 0.11)) });
+        md = Math.max(md, depth + 1);
+        assign(k.id, a, b1, depth + 1, baseCol);
+        a = b1;
+      });
+    };
+    assign(centerId, off, off + 2 * Math.PI, 0, null);
+    return { segs: out, maxDepth: md };
+  }, [centerId, byId, childrenMap]);
+
+  const R0 = 42, RW = 40, PAD = 22;
+  const maxR = R0 + maxDepth * RW;
+  const size = Math.max(2 * (maxR + PAD), 240);
+  const cx = size / 2, cy = size / 2;
+  const polar = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  const segPath = (ri, ro, a0, a1) => {
+    const span = a1 - a0;
+    if (span >= 2 * Math.PI - 0.002) {
+      return `M ${cx + ro} ${cy} A ${ro} ${ro} 0 1 1 ${cx - ro} ${cy} A ${ro} ${ro} 0 1 1 ${cx + ro} ${cy} Z M ${cx + ri} ${cy} A ${ri} ${ri} 0 1 0 ${cx - ri} ${cy} A ${ri} ${ri} 0 1 0 ${cx + ri} ${cy} Z`;
+    }
+    const large = span > Math.PI ? 1 : 0;
+    const [xo0, yo0] = polar(ro, a0), [xo1, yo1] = polar(ro, a1), [xi1, yi1] = polar(ri, a1), [xi0, yi0] = polar(ri, a0);
+    return `M ${xo0} ${yo0} A ${ro} ${ro} 0 ${large} 1 ${xo1} ${yo1} L ${xi1} ${yi1} A ${ri} ${ri} 0 ${large} 0 ${xi0} ${yi0} Z`;
+  };
+  const total = segs.length;
+
+  return modalShell("المخطط الشعاعي · " + (center ? center.name : ""), <Sun size={17} color={TT.gold400} />, onClose, (
+    total === 0 ? (
+      <div style={{ textAlign: "center", color: T.muted, fontSize: 13, padding: "24px 0" }}>لا ذرّية مسجّلة لهذا الفرد لعرضها شعاعياً.</div>
+    ) : (
+      <div>
+        <div style={{ fontSize: 12, color: T.muted, textAlign: "center", marginBottom: 10 }}>حلقاتٌ ملوّنة لذرّية {center.name} ({total} فرداً · {maxDepth} أجيال) — كل لون فرعٌ رئيسي. للطباعة أو الحفظ: التقط لقطة شاشة.</div>
+        <div style={{ overflow: "auto", border: `1px solid ${T.line}`, borderRadius: 12, background: "#fff", maxHeight: "66vh" }}>
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block", margin: "0 auto" }}>
+            {segs.map((s) => (
+              <path key={s.id} d={segPath(R0 + (s.depth - 1) * RW, R0 + s.depth * RW, s.a0, s.a1)} fill={s.color} stroke="#fff" strokeWidth={0.8} fillRule="evenodd" />
+            ))}
+            {segs.filter((s) => s.depth <= 2 && (s.a1 - s.a0) * (R0 + (s.depth - 0.5) * RW) > 16).map((s) => {
+              const mid = (s.a0 + s.a1) / 2;
+              const rr = R0 + (s.depth - 0.5) * RW;
+              const [tx, ty] = polar(rr, mid);
+              let deg = mid * 180 / Math.PI;
+              if (deg > 90 && deg < 270) deg += 180;
+              const nm = s.name.length > 8 ? s.name.slice(0, 7) + "…" : s.name;
+              return <text key={"t" + s.id} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={s.depth === 1 ? 12 : 10} fontWeight={s.depth === 1 ? 800 : 600} fill={T.ink} style={{ fontFamily: "'Tajawal', sans-serif" }}>{nm}</text>;
+            })}
+            <circle cx={cx} cy={cy} r={R0 - 4} fill={TT.teal900} stroke={TT.gold500} strokeWidth={2} />
+            <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={800} fill="#fff" style={{ fontFamily: "'Aref Ruqaa', serif" }}>{center.name.length > 7 ? center.name.slice(0, 6) + "…" : center.name}</text>
+          </svg>
+        </div>
+      </div>
+    )
+  ));
+}
+
 // ===== حاسبة القرابة =====
 function chainIds(id, byId) {
   const s = []; let c = id; const seen = new Set();
@@ -1624,6 +1846,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [statsOpen, setStatsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [gameOpen, setGameOpen] = useState(false);
+  const [fanOpen, setFanOpen] = useState(false);
   const centeredRef = useRef(false);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -1932,6 +2155,11 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
           <FileText size={15} color={T.gold} /> تصدير
         </button>
       </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button onClick={() => setFanOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 6px", background: T.card, color: T.ink, border: `1px solid ${T.gold}`, borderRadius: 12, fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+          <Sun size={15} color={T.gold} /> المخطط الشعاعي
+        </button>
+      </div>
       <div style={{ marginBottom: 12 }}>
         <button onClick={() => setGameOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 8px", background: `linear-gradient(160deg, ${T.gold}, #9c7238)`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 2px 8px rgba(180,137,74,0.3)" }}>
           <Gamepad2 size={17} color="#fff" /> اختبر صلتك — لعبة خمّن الشخص
@@ -2095,6 +2323,9 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       )}
       {gameOpen && (
         <RelationGameModal members={members} onClose={() => setGameOpen(false)} />
+      )}
+      {fanOpen && rootId && (
+        <FanChartModal centerId={rootId} members={members} onClose={() => setFanOpen(false)} />
       )}
     </div>
   );
@@ -2776,6 +3007,9 @@ function MemberDetailModal({ member, members, canManageTree, onClose, onSaved })
   const [error, setError] = useState("");
   const [showFullNasab, setShowFullNasab] = useState(false);
   const [showCard, setShowCard] = useState(false);
+  const [showLineage, setShowLineage] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [showFan, setShowFan] = useState(false);
 
   const daughters = members.filter((m) => m.fatherId === member.id && m.gender === "female");
   const wives = members.filter((m) => m.spouseOf === member.id);
@@ -2820,6 +3054,14 @@ function MemberDetailModal({ member, members, canManageTree, onClose, onSaved })
           </button>
           {showCard && <NasabCardModal member={member} onClose={() => setShowCard(false)} />}
         </div>
+        <div style={{ display: "flex", gap: 7, marginBottom: 4 }}>
+          {[["السلسلة والذرّية", <ScrollText size={14} color={T.gold} />, () => setShowLineage(true)], ["كشف الذرّية", <ListTree size={14} color={T.gold} />, () => setShowReport(true)], ["شعاعي", <Sun size={14} color={T.gold} />, () => setShowFan(true)]].map(([lbl, icn, fn], i) => (
+            <button key={i} onClick={fn} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, background: T.sand, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px 4px", fontSize: 11.5, fontWeight: 700, color: T.ink, fontFamily: "inherit", cursor: "pointer" }}>{icn} {lbl}</button>
+          ))}
+        </div>
+        {showLineage && <LineageModal member={member} members={members} onClose={() => setShowLineage(false)} />}
+        {showReport && <DescendantsReportModal member={member} members={members} onClose={() => setShowReport(false)} />}
+        {showFan && <FanChartModal centerId={member.id} members={members} onClose={() => setShowFan(false)} />}
         <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13, color: T.text }}>
           {member.region && <div style={{ display: "flex", alignItems: "center", gap: 8 }}><MapPin size={15} color={T.gold} /> {member.region}</div>}
           {member.birthDate && (
@@ -3554,6 +3796,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoErr, setPhotoErr] = useState("");
   const [faceStatus, setFaceStatus] = useState("");
+  const [myTool, setMyTool] = useState(null); // card | lineage | report | fan
 
   const handlePhotoUpload = async (file) => {
     if (!file) return;
@@ -3843,6 +4086,18 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
             </div>
           )}
         </div>
+
+        {me && (
+          <div style={{ display: "flex", gap: 7, marginBottom: 14 }}>
+            {[["بطاقتي", <QrCode size={15} color={T.gold} />, "card"], ["سلسلتي", <ScrollText size={15} color={T.gold} />, "lineage"], ["ذرّيتي", <ListTree size={15} color={T.gold} />, "report"], ["شعاعي", <Sun size={15} color={T.gold} />, "fan"]].map(([lbl, icn, key]) => (
+              <button key={key} onClick={() => setMyTool(key)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "10px 4px", fontSize: 10.5, fontWeight: 700, color: T.ink, fontFamily: "inherit", cursor: "pointer" }}>{icn} {lbl}</button>
+            ))}
+          </div>
+        )}
+        {me && myTool === "card" && <NasabCardModal member={me} onClose={() => setMyTool(null)} />}
+        {me && myTool === "lineage" && <LineageModal member={me} members={members} onClose={() => setMyTool(null)} />}
+        {me && myTool === "report" && <DescendantsReportModal member={me} members={members} onClose={() => setMyTool(null)} />}
+        {me && myTool === "fan" && <FanChartModal centerId={me.id} members={members} onClose={() => setMyTool(null)} />}
 
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "2px 14px", marginBottom: 14 }}>
           <MenuRow icon={UserCircle2} label="ملفي" sublabel="المعلومات الشخصية، السيرة، الأبناء والبنات" onClick={() => setProfileView("info")} />
