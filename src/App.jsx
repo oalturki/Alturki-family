@@ -150,7 +150,7 @@ async function fetchInbox(uid) {
   if (!uid) return [];
   const { data, error } = await supabase
     .from("inbox")
-    .select("id, read_at, created_at, broadcasts(id, title, body, created_at, deleted)")
+    .select("id, read_at, created_at, broadcasts(id, title, body, audience_label, created_at, deleted)")
     .eq("recipient_account_id", uid)
     .order("created_at", { ascending: false });
   if (error) { console.error("fetchInbox failed", error); return []; }
@@ -3803,17 +3803,50 @@ function InboxThread({ item, isAdmin, onBack, onChanged }) {
 
 function InboxOverlay({ uid, items, onClose, reload }) {
   const [openItem, setOpenItem] = useState(null);
+  const [filter, setFilter] = useState("all");
+  const [busyAll, setBusyAll] = useState(false);
   const openThread = async (it) => {
     setOpenItem(it);
     if (!it.read_at) { await markInboxRead(it.id); reload && reload(); }
   };
+  const markOne = async (ev, it) => {
+    ev.stopPropagation();
+    await markInboxRead(it.id);
+    reload && reload();
+  };
+  const unreadCount = items.filter((i) => !i.read_at).length;
+  const markAll = async () => {
+    setBusyAll(true);
+    for (const it of items.filter((i) => !i.read_at)) { await markInboxRead(it.id); }
+    reload && reload();
+    setBusyAll(false);
+  };
+  const shown = items.filter((it) => (filter === "unread" ? !it.read_at : filter === "read" ? !!it.read_at : true));
+  const TABS_IB = [
+    { key: "all", label: `الكل (${items.length})` },
+    { key: "unread", label: `غير مقروء (${unreadCount})` },
+    { key: "read", label: "المقروءة" },
+  ];
   return (
     <div style={{ position: "fixed", inset: 0, background: T.sand, zIndex: 95, display: "flex", flexDirection: "column", maxWidth: 430, margin: "0 auto" }}>
-      <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "calc(env(safe-area-inset-top, 0px) + 16px) 18px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 2 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, color: TT.gold500, fontWeight: 800, fontSize: 15 }}><Inbox size={18} /> صندوق الوارد</div>
-        <button onClick={onClose} aria-label="إغلاق" style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={22} /></button>
+      <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, position: "sticky", top: 0, zIndex: 2 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 999, background: "rgba(244,239,227,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Inbox size={17} color={TT.gold500} />
+          </div>
+          <div>
+            <div style={{ color: TT.gold500, fontWeight: 800, fontSize: 15, lineHeight: 1.3 }}>صندوق الوارد</div>
+            <div style={{ color: "#CFE0DC", fontSize: 10.5 }}>رسائل العائلة والردود عليها</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          {unreadCount > 0 && (
+            <span style={{ background: "rgba(217,184,118,0.16)", border: `1px solid ${TT.gold500}55`, color: TT.gold500, fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999, whiteSpace: "nowrap" }}>{unreadCount} جديدة</span>
+          )}
+          <button onClick={onClose} aria-label="إغلاق" style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={22} /></button>
+        </div>
       </div>
-      <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
+      <div style={{ flex: 1, overflow: "auto", padding: 14 }}>
         {openItem ? (
           <InboxThread item={openItem} isAdmin={false} onBack={() => setOpenItem(null)} onChanged={reload} />
         ) : items.length === 0 ? (
@@ -3821,20 +3854,74 @@ function InboxOverlay({ uid, items, onClose, reload }) {
             <Inbox size={30} /> <span style={{ fontSize: 13 }}>لا رسائل في صندوقك بعد.</span>
           </div>
         ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {items.map((it) => {
-              const bc = it.broadcasts || {};
-              const unread = !it.read_at;
-              return (
-                <div key={it.id} onClick={() => openThread(it)} style={{ background: T.card, border: `1.5px solid ${unread ? T.gold : T.line}`, borderRadius: 14, padding: 14, cursor: "pointer", position: "relative" }}>
-                  {unread && <span style={{ position: "absolute", top: 14, insetInlineStart: 14, width: 9, height: 9, borderRadius: 999, background: T.gold }} />}
-                  <div style={{ fontSize: 13.5, fontWeight: 800, color: T.ink, marginBottom: 3, paddingInlineStart: unread ? 16 : 0 }}>{bc.title}</div>
-                  <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.7, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{bc.body}</div>
-                  <div style={{ fontSize: 10, color: T.muted, marginTop: 6 }}>{fmtInboxDate(bc.created_at)}</div>
-                </div>
-              );
-            })}
-          </div>
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, overflowX: "auto", paddingBottom: 10 }}>
+              {TABS_IB.map((t) => (
+                <button key={t.key} onClick={() => setFilter(t.key)}
+                  style={{ whiteSpace: "nowrap", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, padding: "6px 12px", borderRadius: 999, cursor: "pointer",
+                    background: filter === t.key ? T.ink : T.card, color: filter === t.key ? T.sand : T.muted,
+                    border: `1px solid ${filter === t.key ? T.ink : T.line}` }}>
+                  {t.label}
+                </button>
+              ))}
+              {unreadCount > 0 && (
+                <button onClick={markAll} disabled={busyAll}
+                  style={{ marginInlineStart: "auto", whiteSpace: "nowrap", fontFamily: "inherit", fontSize: 11, fontWeight: 700, padding: "6px 10px", borderRadius: 999, cursor: "pointer", background: "none", color: T.gold, border: `1px dashed ${T.gold}` }}>
+                  {busyAll ? "..." : "تعليم الكل كمقروء"}
+                </button>
+              )}
+            </div>
+            {shown.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px 0", color: T.muted, fontSize: 12.5 }}>لا رسائل في هذا التصنيف.</div>
+            ) : (
+            <div style={{ display: "grid", gap: 10 }}>
+              {shown.map((it) => {
+                const bc = it.broadcasts || {};
+                const unread = !it.read_at;
+                return (
+                  <div key={it.id} onClick={() => openThread(it)}
+                    style={{ background: unread ? T.card : "rgba(255,253,248,0.75)", border: `1px solid ${T.line}`, borderInlineEndWidth: 4, borderInlineEndColor: unread ? T.gold : T.sandDark, borderRadius: 14, padding: 13, cursor: "pointer", boxShadow: unread ? "0 2px 8px rgba(23,54,52,0.06)" : "none" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 999, flexShrink: 0, background: unread ? "#F6EFE1" : T.sandDark, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Megaphone size={17} color={unread ? T.gold : T.muted} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 700, color: T.ink }}>إدارة الموقع</span>
+                          {bc.audience_label && (
+                            <span style={{ fontSize: 9.5, fontWeight: 700, color: T.gold, background: "#F6EFE1", borderRadius: 6, padding: "2px 6px" }}>{bc.audience_label}</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 10, color: T.muted, marginTop: 2 }}>{fmtInboxDate(bc.created_at)}</div>
+                      </div>
+                    </div>
+                    <div style={{ paddingInlineStart: 46, marginTop: 6 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 800, color: unread ? T.ink : T.text, marginBottom: 3 }}>{bc.title}</div>
+                      <div style={{ fontSize: 11.5, color: T.muted, lineHeight: 1.8, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{bc.body}</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 10, paddingTop: 8, borderTop: `1px solid ${T.line}` }}>
+                      {unread ? (
+                        <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: T.gold }}>
+                          <span style={{ width: 7, height: 7, borderRadius: 999, background: T.gold }} /> جديدة
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 11, color: T.muted }}>مقروءة</span>
+                      )}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {unread && (
+                          <button onClick={(ev) => markOne(ev, it)} style={{ background: "none", border: `1px solid ${T.line}`, color: T.muted, borderRadius: 8, padding: "4px 9px", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>تعليم كمقروء</button>
+                        )}
+                        <span style={{ display: "flex", alignItems: "center", gap: 4, background: T.ink, color: T.sand, borderRadius: 8, padding: "5px 10px", fontSize: 10.5, fontWeight: 700 }}>
+                          <MessageCircle size={12} /> قراءة والرد
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            )}
+          </>
         )}
       </div>
     </div>
