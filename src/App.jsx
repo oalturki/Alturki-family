@@ -2121,10 +2121,14 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
 
     assign(rootId, 0, 0);
     const rawWidth = subtreeWidth(rootId);
-    const canvasW = Math.max(rawWidth, 260);
-    // نُزيح الشجرة أفقياً بحيث يقع «تركي» تماماً في منتصف اللوحة
     const rootNode = nodes.find((n) => n.id === rootId);
-    const offset = rootNode ? canvasW / 2 - rootNode.x : 0;
+    const rootX = rootNode ? rootNode.x : rawWidth / 2;
+    // لوحةٌ متماثلة حول «تركي» ليبقى في المنتصف، مع ضمان بقاء كل العقد والخطوط داخل حدود اللوحة
+    // (سابقاً كان التوسيط يدفع بعض العقد خارج العرض في الفروع غير المتوازنة فتُقصّ خطوطها ⇒ تقطّع الأسهم)
+    let half = Math.max(rootX, rawWidth - rootX);
+    let canvasW = 2 * half;
+    let offset = half - rootX;
+    if (canvasW < 260) { offset += (260 - canvasW) / 2; canvasW = 260; }
     if (offset) {
       nodes.forEach((n) => { n.x += offset; });
       edges.forEach((e) => { e.x1 += offset; e.x2 += offset; });
@@ -2165,40 +2169,35 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
         )}
       </div>
 
-      {/* تبويبان: التفاعلية (نشطة) + المصوّرة (زر يفتح النافذة) */}
-      <div style={{ display: "flex", gap: 5, background: T.sandDark, borderRadius: 12, padding: 4, marginBottom: 12 }}>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 8px", background: TT.teal800, color: "#fff", borderRadius: 9, fontSize: 12.5, fontWeight: 800, boxShadow: "0 1px 3px rgba(13,43,43,0.2)" }}>
-          <GitBranch size={16} color={TT.gold400} /> الشجرة التفاعلية
+      {/* المبدّل الرئيسي لطريقة العرض: التفاعلية / المصوّرة — عنصرٌ داكن مميّز يعلو بقية الأدوات */}
+      <div style={{ display: "flex", background: T.ink, borderRadius: 14, padding: 5, gap: 5, marginBottom: 16, boxShadow: "0 4px 14px rgba(23,54,52,0.22)" }}>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "13px 8px", background: T.card, color: T.ink, borderRadius: 10, fontSize: 13.5, fontWeight: 800, boxShadow: "0 2px 7px rgba(0,0,0,0.22)" }}>
+          <GitBranch size={17} color={T.gold} /> الشجرة التفاعلية
         </div>
-        <button onClick={() => setPdfOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 8px", background: "transparent", color: T.ink, border: "none", borderRadius: 9, fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
-          <FileText size={16} color={T.gold} /> الشجرة المصوّرة
+        <button onClick={() => setPdfOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "13px 8px", background: "transparent", color: "#efe7d5", border: "none", borderRadius: 10, fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+          <FileText size={17} color={TT.gold400} /> الشجرة المصوّرة
         </button>
       </div>
 
-      {/* أدوات: التعرّف بالصورة + حاسبة القرابة */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button onClick={() => setWhoOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "10px 8px", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
-          <Camera size={16} color={TT.gold400} /> مَن هذا؟
-        </button>
-        <button onClick={() => setKinOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "10px 8px", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
-          <GitBranch size={16} color={TT.gold400} /> حاسبة القرابة
-        </button>
+      {/* أدوات الشجرة (ثانوية) — شبكة موحّدة هادئة تحت المبدّل */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 2px 8px" }}>
+        <span style={{ fontSize: 11.5, fontWeight: 800, color: T.muted }}>أدوات الشجرة</span>
+        <span style={{ flex: 1, height: 1, background: T.line }} />
       </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button onClick={() => setMapOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 6px", background: T.card, color: T.ink, border: `1px solid ${T.gold}`, borderRadius: 12, fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
-          <MapPin size={15} color={T.gold} /> الخريطة
-        </button>
-        <button onClick={() => setStatsOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 6px", background: T.card, color: T.ink, border: `1px solid ${T.gold}`, borderRadius: 12, fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
-          <Newspaper size={15} color={T.gold} /> الإحصاءات
-        </button>
-        <button onClick={() => setExportOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 6px", background: T.card, color: T.ink, border: `1px solid ${T.gold}`, borderRadius: 12, fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
-          <FileText size={15} color={T.gold} /> تصدير
-        </button>
-      </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button onClick={() => setFanOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 6px", background: T.card, color: T.ink, border: `1px solid ${T.gold}`, borderRadius: 12, fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
-          <Sun size={15} color={T.gold} /> المخطط الشعاعي
-        </button>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 14 }}>
+        {[
+          ["مَن هذا؟", <Camera size={18} color={T.gold} />, () => setWhoOpen(true)],
+          ["حاسبة القرابة", <GitBranch size={18} color={T.gold} />, () => setKinOpen(true)],
+          ["الخريطة", <MapPin size={18} color={T.gold} />, () => setMapOpen(true)],
+          ["الإحصاءات", <Newspaper size={18} color={T.gold} />, () => setStatsOpen(true)],
+          ["المخطط الشعاعي", <Sun size={18} color={T.gold} />, () => setFanOpen(true)],
+          ["تصدير", <FileText size={18} color={T.gold} />, () => setExportOpen(true)],
+        ].map(([lbl, icn, fn], i) => (
+          <button key={i} onClick={fn} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, padding: "11px 4px", minHeight: 66, background: T.card, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 12, fontSize: 11, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+            {icn}
+            <span style={{ textAlign: "center", lineHeight: 1.2 }}>{lbl}</span>
+          </button>
+        ))}
       </div>
       <div style={{ marginBottom: 12 }}>
         <button onClick={() => setGameOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 8px", background: `linear-gradient(160deg, ${T.gold}, #9c7238)`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 2px 8px rgba(180,137,74,0.3)" }}>
