@@ -1577,12 +1577,29 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   }, [query, members, byId]);
 
   const toggle = (id) => {
+    const willExpand = !expanded.has(id);
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    // عند فتح الامتداد: نرفع العقدة تلقائياً نحو أعلى-وسط الإطار ليظهر الأبناء دون تمرير يدوي
+    if (willExpand) {
+      setTimeout(() => {
+        const container = svgWrapRef.current;
+        const el = container?.querySelector(`[data-node-id="${id}"]`);
+        if (container && el) {
+          const elRect = el.getBoundingClientRect();
+          const contRect = container.getBoundingClientRect();
+          container.scrollBy({
+            left: (elRect.left + elRect.width / 2) - (contRect.left + contRect.width / 2),
+            top: (elRect.top + elRect.height / 2) - (contRect.top + contRect.height * 0.28),
+            behavior: "smooth",
+          });
+        }
+      }, 90);
+    }
   };
 
   const layout = useMemo(() => {
@@ -4282,17 +4299,25 @@ function FamilyAppInner({ meId }) {
             </>
           )}
         </div>
-        <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: T.card, borderTop: `1px solid ${T.line}`, display: "flex", padding: "8px 4px" }}>
+        <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: T.card, borderTop: `1px solid ${T.line}`, display: "flex", alignItems: "stretch", padding: "0 0 4px", overflow: "visible" }}>
           {TABS.map((t) => {
             const Icon = t.icon;
             const active = tab === t.key;
             return (
-              <button key={t.key} onClick={() => setTab(t.key)} style={{ position: "relative", flex: 1, background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", padding: "3px 0", cursor: "pointer", fontFamily: "inherit" }}>
-                <span style={{ position: "absolute", top: -8, height: 3, width: active ? 26 : 0, borderRadius: 999, background: T.gold, transition: "width 0.15s" }} />
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "6px 4px" }}>
-                  <Icon size={19} color={active ? T.ink : T.muted} strokeWidth={active ? 2.4 : 2} />
-                  <span style={{ fontSize: 9.5, fontWeight: active ? 800 : 500, color: active ? T.ink : T.muted, marginTop: 1 }}>{t.label}</span>
-                </div>
+              <button key={t.key} onClick={() => setTab(t.key)} style={{
+                position: "relative", flex: 1, cursor: "pointer", fontFamily: "inherit",
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end",
+                background: active ? T.sand : "transparent",
+                border: active ? `1px solid ${T.line}` : "none",
+                borderBottom: "none",
+                borderTopLeftRadius: active ? 14 : 0,
+                borderTopRightRadius: active ? 14 : 0,
+                marginTop: active ? -12 : 0,
+                paddingTop: active ? 20 : 8,
+                paddingBottom: 4,
+              }}>
+                <Icon size={19} color={active ? T.ink : T.muted} strokeWidth={active ? 2.4 : 2} />
+                <span style={{ fontSize: 9.5, fontWeight: active ? 800 : 500, color: active ? T.ink : T.muted, marginTop: 3 }}>{t.label}</span>
               </button>
             );
           })}
