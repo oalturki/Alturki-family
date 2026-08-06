@@ -1629,9 +1629,17 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
     };
 
     assign(rootId, 0, 0);
-    const width = subtreeWidth(rootId);
+    const rawWidth = subtreeWidth(rootId);
+    const canvasW = Math.max(rawWidth, 260);
+    // نُزيح الشجرة أفقياً بحيث يقع «تركي» تماماً في منتصف اللوحة
+    const rootNode = nodes.find((n) => n.id === rootId);
+    const offset = rootNode ? canvasW / 2 - rootNode.x : 0;
+    if (offset) {
+      nodes.forEach((n) => { n.x += offset; });
+      edges.forEach((e) => { e.x1 += offset; e.x2 += offset; });
+    }
     const height = (maxDepth + 1) * (TREE_NODE_H + TREE_V_GAP);
-    return { nodes, edges, width, height };
+    return { nodes, edges, width: canvasW, height };
   }, [rootId, byId, childrenMap, expanded]);
 
   // تمركز الجذر «تركي» أفقياً في منتصف الصفحة عند أول عرض
@@ -4279,12 +4287,12 @@ function FamilyAppInner({ meId }) {
             const Icon = t.icon;
             const active = tab === t.key;
             return (
-              <button key={t.key} onClick={() => setTab(t.key)} style={{ flex: 1, background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", padding: "3px 0", cursor: "pointer", fontFamily: "inherit" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: active ? "6px 12px" : "6px 4px", borderRadius: 999, background: active ? T.ink : "transparent", transition: "background 0.15s" }}>
-                  <Icon size={18} color={active ? T.goldLight : T.muted} strokeWidth={active ? 2.3 : 2} />
-                  {active && <span style={{ fontSize: 10.5, fontWeight: 700, color: T.goldLight }}>{t.label}</span>}
+              <button key={t.key} onClick={() => setTab(t.key)} style={{ position: "relative", flex: 1, background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", padding: "3px 0", cursor: "pointer", fontFamily: "inherit" }}>
+                <span style={{ position: "absolute", top: -8, height: 3, width: active ? 26 : 0, borderRadius: 999, background: T.gold, transition: "width 0.15s" }} />
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "6px 4px" }}>
+                  <Icon size={19} color={active ? T.ink : T.muted} strokeWidth={active ? 2.4 : 2} />
+                  <span style={{ fontSize: 9.5, fontWeight: active ? 800 : 500, color: active ? T.ink : T.muted, marginTop: 1 }}>{t.label}</span>
                 </div>
-                {!active && <span style={{ fontSize: 9.5, fontWeight: 500, color: T.muted, marginTop: 3 }}>{t.label}</span>}
               </button>
             );
           })}
