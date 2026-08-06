@@ -997,6 +997,91 @@ function TreeMemberPopup({ member, onClose, onOpenProfile, onLocate }) {
 }
 
 // شاشة «مَن هذا؟» — تعرّف على فرد بصورة/كاميرا بمقارنتها ببصمات العائلة
+// ===== الخريطة الجغرافية (Leaflet من CDN) =====
+const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+const LEAFLET_JS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+let _leafletReady = null;
+function ensureLeaflet() {
+  if (_leafletReady) return _leafletReady;
+  _leafletReady = (async () => {
+    if (!document.querySelector('link[data-leaflet]')) {
+      const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = LEAFLET_CSS; l.setAttribute('data-leaflet', '1'); document.head.appendChild(l);
+    }
+    if (!window.L) {
+      await new Promise((res, rej) => { const s = document.createElement('script'); s.src = LEAFLET_JS; s.onload = res; s.onerror = () => rej(new Error('تعذّر تحميل مكتبة الخريطة')); document.head.appendChild(s); });
+    }
+    return window.L;
+  })().catch((e) => { _leafletReady = null; throw e; });
+  return _leafletReady;
+}
+const CITY_COORD = {
+  "الرياض": [24.7136, 46.6753], "الدمام": [26.4207, 50.0888], "المجمعة": [25.9039, 45.345],
+  "المدينة": [24.5247, 39.5692], "المدينة المنورة": [24.5247, 39.5692], "جلاجل": [25.6862, 45.1719],
+  "حرمة": [25.93, 45.32], "حفر الباطن": [28.4342, 45.9636], "الخرج": [24.1554, 47.312],
+  "الظهران": [26.2861, 50.1146], "جدة": [21.4858, 39.1925], "الخبر": [26.2794, 50.2083],
+  "تبوك": [28.3838, 36.555], "الكويت": [29.3759, 47.9774], "البحرين": [26.0667, 50.5577],
+  "مكة": [21.3891, 39.8579], "مكة المكرمة": [21.3891, 39.8579], "بريدة": [26.3599, 43.9818],
+  "عنيزة": [26.0843, 43.9935], "الأحساء": [25.3833, 49.5867], "الهفوف": [25.3833, 49.5867],
+  "ينبع": [24.0895, 38.0618], "الطائف": [21.2703, 40.4158], "القصيم": [26.2078, 43.9836],
+};
+function FamilyMapModal({ members, onClose }) {
+  const ref = useRef(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+  const counts = useMemo(() => {
+    const c = {};
+    members.forEach((m) => { const r = (m.region || "").trim(); if (r) c[r] = (c[r] || 0) + 1; });
+    return c;
+  }, [members]);
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const totalPlaced = sorted.filter(([c]) => CITY_COORD[c]).reduce((s, [, n]) => s + n, 0);
+  useEffect(() => {
+    let map, cancelled = false;
+    ensureLeaflet().then((L) => {
+      if (cancelled || !ref.current) return;
+      map = L.map(ref.current, { scrollWheelZoom: true, attributionControl: false }).setView([25.0, 45.5], 5);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 12 }).addTo(map);
+      const mx = Math.max(1, ...Object.values(counts));
+      sorted.forEach(([city, n]) => {
+        const c = CITY_COORD[city]; if (!c) return;
+        const r = 9 + 26 * Math.sqrt(n / mx);
+        L.circleMarker(c, { radius: r, color: "#123838", weight: 1.5, fillColor: "#B4894A", fillOpacity: 0.72 })
+          .addTo(map).bindPopup(`<b>${city}</b><br>${n} فرداً`).bindTooltip(`${city} · ${n}`);
+      });
+      setLoading(false);
+      setTimeout(() => { try { map.invalidateSize(); } catch (e) {} }, 250);
+    }).catch((e) => { setErr(e.message || "تعذّر تحميل الخريطة"); setLoading(false); });
+    return () => { cancelled = true; if (map) { try { map.remove(); } catch (e) {} } };
+  }, [counts]);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: TT.tealDark, zIndex: 70, display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, borderBottom: `2px solid ${TT.gold500}` }}>
+        <span style={{ color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif" }}>خريطة توزيع العائلة</span>
+        <button onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(244,239,227,0.12)", border: "none", borderRadius: 999, color: "#F4EFE3", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}><X size={16} /> إغلاق</button>
+      </div>
+      <div style={{ flex: 1, position: "relative", background: TT.sand100 }}>
+        <div ref={ref} style={{ position: "absolute", inset: 0 }} />
+        {loading && !err && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: TT.teal800 }}>
+            <Loader2 size={26} style={{ animation: "rosette-spin 1.1s linear infinite" }} /> <span style={{ fontSize: 13 }}>جارِ تحميل الخريطة...</span>
+          </div>
+        )}
+        {err && (
+          <div style={{ position: "absolute", inset: 0, overflow: "auto", padding: 18, background: T.sand }}>
+            <div style={{ fontSize: 13, color: T.clay, marginBottom: 12 }}>{err} — إليك التوزيع كقائمة:</div>
+            {sorted.map(([c, n]) => (
+              <div key={c} style={{ display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${T.line}`, padding: "7px 4px", fontSize: 13, color: T.text }}><span>{c}</span><b>{n}</b></div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div style={{ padding: "8px 14px", background: TT.teal900, color: "#CFE0DC", fontSize: 11.5, textAlign: "center" }}>
+        {totalPlaced} فرداً موزّعين على {sorted.filter(([c]) => CITY_COORD[c]).length} مدينة · المس أي دائرة لعدد أفرادها
+      </div>
+    </div>
+  );
+}
+
 // ===== حاسبة القرابة =====
 function chainIds(id, byId) {
   const s = []; let c = id; const seen = new Set();
@@ -1217,6 +1302,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [profileMember, setProfileMember] = useState(null);
   const [whoOpen, setWhoOpen] = useState(false);
   const [kinOpen, setKinOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
   const centeredRef = useRef(false);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -1478,6 +1564,9 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
           <GitBranch size={16} color={TT.gold400} /> حاسبة القرابة
         </button>
       </div>
+      <button onClick={() => setMapOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px", marginBottom: 12, background: T.card, color: T.ink, border: `1px solid ${T.gold}`, borderRadius: 12, fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+        <MapPin size={16} color={T.gold} /> خريطة توزيع العائلة
+      </button>
 
       {/* نتائج البحث */}
       {query.trim() && (
@@ -1615,6 +1704,9 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       )}
       {kinOpen && (
         <KinshipModal members={members} onClose={() => setKinOpen(false)} />
+      )}
+      {mapOpen && (
+        <FamilyMapModal members={members} onClose={() => setMapOpen(false)} />
       )}
     </div>
   );
