@@ -4283,6 +4283,114 @@ function ContactUsView({ onBack, meId }) {
   );
 }
 
+// إدارة أسرة البنت: زوجها وأولادها (الأولاد يُنسبون لأبيهم الزوج، ويظهرون في ملفها فقط)
+function DaughterFamilyManager({ daughter, members, setMembers, profilesMap }) {
+  const husbands = members.filter((m) => m.spouseOf === daughter.id && m.gender !== "female").sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
+  const [showAddH, setShowAddH] = useState(false);
+  const [hName, setHName] = useState("");
+  const [hPhone, setHPhone] = useState("");
+  const [childFor, setChildFor] = useState(null); // husband id
+  const [cName, setCName] = useState("");
+  const [cGender, setCGender] = useState("male");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [confirmDel, setConfirmDel] = useState(null);
+
+  const addHusband = async () => {
+    if (!hName.trim()) { setErr("اكتب اسم الزوج."); return; }
+    setBusy(true); setErr("");
+    try {
+      const created = await insertMember({ name: hName.trim(), spouseOf: daughter.id, gender: "male", phone: hPhone.trim() || null });
+      setMembers(enrichMembers([...members, created], profilesMap));
+      setHName(""); setHPhone(""); setShowAddH(false);
+    } catch (e) { setErr(e.message || "تعذّرت الإضافة."); }
+    setBusy(false);
+  };
+  const addChild = async (husbandId) => {
+    if (!cName.trim()) { setErr("اكتب اسم الابن/الابنة."); return; }
+    setBusy(true); setErr("");
+    try {
+      const created = await insertMember({ name: cName.trim(), fatherId: husbandId, gender: cGender });
+      setMembers(enrichMembers([...members, created], profilesMap));
+      setCName(""); setCGender("male"); setChildFor(null);
+    } catch (e) { setErr(e.message || "تعذّرت الإضافة."); }
+    setBusy(false);
+  };
+  const del = async () => {
+    if (!confirmDel) return;
+    setBusy(true);
+    try { await deleteMember(confirmDel.id); setMembers(members.filter((m) => m.id !== confirmDel.id)); } catch (e) {}
+    setConfirmDel(null); setBusy(false);
+  };
+
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
+      {err && <div style={{ color: T.clay, fontSize: 12, marginBottom: 8 }}>{err}</div>}
+
+      {/* الزوج */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 800, color: T.ink }}>الزوج</span>
+        <button onClick={() => { setShowAddH((v) => !v); setErr(""); }} style={{ display: "flex", alignItems: "center", gap: 4, border: `1px solid ${T.gold}`, background: showAddH ? T.sandDark : "transparent", color: T.gold, borderRadius: 999, padding: "4px 11px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", fontWeight: 700 }}><Plus size={12} /> إضافة زوج</button>
+      </div>
+      {husbands.length === 0 && !showAddH && <div style={{ fontSize: 11.5, color: T.muted, textAlign: "center", padding: "6px 0 10px" }}>لم يُضَف الزوج بعد. أضيفيه ثم أضيفي الأولاد تحته.</div>}
+      {showAddH && (
+        <div style={{ display: "grid", gap: 6, marginBottom: 10, paddingBottom: 10, borderBottom: `1px dashed ${T.line}` }}>
+          <input placeholder="اسم الزوج (كاملاً)" value={hName} onChange={(e) => setHName(e.target.value)} style={inputStyle} />
+          <input placeholder="جواله (اختياري)" value={hPhone} onChange={(e) => setHPhone(e.target.value)} style={inputStyle} />
+          <button onClick={addHusband} disabled={busy} style={primaryBtnStyle}>{busy ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "حفظ الزوج"}</button>
+        </div>
+      )}
+
+      {husbands.map((h) => {
+        const kids = members.filter((m) => m.fatherId === h.id).sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
+        return (
+          <div key={h.id} style={{ border: `1px solid ${T.line}`, borderRadius: 12, padding: 12, marginBottom: 10, background: T.sand }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: T.ink }}>{h.name}{h.phone ? <span style={{ fontSize: 11, color: T.muted, fontWeight: 500, direction: "ltr" }}>  ·  {h.phone}</span> : null}</div>
+              <button onClick={() => setConfirmDel({ id: h.id, name: h.name, kind: "husband" })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف الزوج"><Trash2 size={15} /></button>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: T.gold }}>الأبناء والبنات</span>
+              <button onClick={() => { setChildFor(childFor === h.id ? null : h.id); setErr(""); }} style={{ display: "flex", alignItems: "center", gap: 4, border: `1px solid ${T.line}`, background: childFor === h.id ? T.sandDark : "transparent", color: T.ink, borderRadius: 999, padding: "4px 10px", fontSize: 10.5, fontFamily: "inherit", cursor: "pointer", fontWeight: 700 }}><Plus size={11} /> إضافة</button>
+            </div>
+            {kids.length === 0 && childFor !== h.id && <div style={{ fontSize: 11, color: T.muted, textAlign: "center", padding: "6px 0" }}>لا أولاد مضافون بعد.</div>}
+            {kids.map((k) => (
+              <div key={k.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px dashed ${T.line}` }}>
+                <span style={{ fontSize: 12.5, color: T.text }}>{k.name} <span style={{ fontSize: 10, color: T.muted }}>· {k.gender === "female" ? "ابنة" : "ابن"}</span></span>
+                <button onClick={() => setConfirmDel({ id: k.id, name: k.name, kind: "child" })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف"><Trash2 size={14} /></button>
+              </div>
+            ))}
+            {childFor === h.id && (
+              <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                <input placeholder="اسم الابن/الابنة" value={cName} onChange={(e) => setCName(e.target.value)} style={inputStyle} />
+                <div style={{ display: "flex", gap: 6 }}>
+                  {[["male", "ابن"], ["female", "ابنة"]].map(([g, lbl]) => (
+                    <button key={g} onClick={() => setCGender(g)} style={{ flex: 1, border: `1.5px solid ${cGender === g ? T.gold : T.line}`, background: cGender === g ? T.sandDark : "transparent", color: T.ink, borderRadius: 10, padding: "8px", fontSize: 12.5, fontWeight: cGender === g ? 800 : 600, fontFamily: "inherit", cursor: "pointer" }}>{lbl}</button>
+                  ))}
+                </div>
+                <button onClick={() => addChild(h.id)} disabled={busy} style={primaryBtnStyle}>{busy ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "حفظ"}</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <div style={{ fontSize: 10.5, color: T.muted, marginTop: 4, lineHeight: 1.6 }}>يُنسب الأولاد لأبيهم (الزوج) وأسرته، ويظهرون في ملفكِ فقط — لا على لوحة الشجرة.</div>
+
+      {confirmDel && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 20 }} onClick={() => setConfirmDel(null)}>
+          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 13, color: T.text, marginBottom: 16, textAlign: "center", lineHeight: 1.7 }}>تأكيد حذف «{confirmDel.name}»{confirmDel.kind === "husband" ? " وكل أولاده المسجّلين تحته؟" : "؟"}</div>
+            <button onClick={del} disabled={busy} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>حذف</button>
+            <button onClick={() => setConfirmDel(null)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>تراجع</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) {
   const me = members.find((m) => m.id === meId);
   const [profileView, setProfileView] = useState("menu"); // menu | info | settings
@@ -5076,6 +5184,13 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {form.gender === "female" && (
+        <div style={{ marginTop: 14, marginBottom: 14 }}>
+          <SectionTitle>أسرتي (الزوج والأولاد)</SectionTitle>
+          <DaughterFamilyManager daughter={me} members={members} setMembers={setMembers} profilesMap={profilesMap} />
         </div>
       )}
 
