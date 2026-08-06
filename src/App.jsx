@@ -4391,6 +4391,85 @@ function DaughterFamilyManager({ daughter, members, setMembers, profilesMap }) {
   );
 }
 
+// تفعيل الأخت التي والدها متوفى: الأخ الذكر (من نفس الأب) يضيفها ببريدها فتفعّل حسابها بنفسها.
+function SisterActivationManager({ me, members, setMembers, profilesMap }) {
+  const father = me?.fatherId ? members.find((m) => m.id === me.fatherId) : null;
+  const fatherDeceased = father && (father.isAlive === false || father.deathDate);
+  const sisters = members
+    .filter((m) => m.gender === "female" && m.fatherId === me?.fatherId && m.id !== me?.id)
+    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
+  const [showAdd, setShowAdd] = useState(false);
+  const [sName, setSName] = useState("");
+  const [sEmail, setSEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [ok, setOk] = useState("");
+  const [confirmDel, setConfirmDel] = useState(null);
+
+  if (me?.gender === "female" || !fatherDeceased) return null;
+
+  const addSister = async () => {
+    if (!sName.trim()) return setErr("اكتب اسم الأخت رباعيًا.");
+    if (!isValidEmail(sEmail)) return setErr("صيغة البريد الإلكتروني غير صحيحة.");
+    setBusy(true); setErr(""); setOk("");
+    try {
+      const created = await insertMember({ name: sName.trim(), fatherId: me.fatherId, gender: "female", prefilledEmail: sEmail.trim() });
+      setMembers(enrichMembers([...members, created], profilesMap));
+      sendFamilyEmail({ type: "welcome", email: sEmail.trim(), name: sName.trim() });
+      setOk(`تمت إضافة ${created.name}. ستصلها دعوة على بريدها لتفعّل حسابها بنفسها.`);
+      setSName(""); setSEmail(""); setShowAdd(false);
+    } catch (e) { setErr(e.message || "تعذّرت الإضافة."); }
+    setBusy(false);
+  };
+  const del = async () => {
+    if (!confirmDel) return;
+    setBusy(true);
+    try { await deleteMember(confirmDel.id); setMembers(members.filter((m) => m.id !== confirmDel.id)); } catch (e) { setErr(e.message || "تعذّر الحذف."); }
+    setConfirmDel(null); setBusy(false);
+  };
+
+  return (
+    <div style={{ marginTop: 14, marginBottom: 14 }}>
+      <SectionTitle action={<IconButton onClick={() => { setShowAdd((v) => !v); setErr(""); setOk(""); }} active={showAdd}><Plus size={13} /> إضافة</IconButton>}>أخواتي (تفعيل حساباتهن)</SectionTitle>
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14 }}>
+        <div style={{ fontSize: 10.5, color: T.muted, lineHeight: 1.7, marginBottom: 10 }}>لأن والدكم — رحمه الله — لم يعد يستطيع الإضافة، تقدر تضيف أخواتك ببريد كل واحدة فتصلها دعوة تفعّل حسابها بنفسها.</div>
+        {err && <div style={{ color: T.clay, fontSize: 12, marginBottom: 8 }}>{err}</div>}
+        {ok && <div style={{ color: "#2F7D4F", fontSize: 12, marginBottom: 8 }}>{ok}</div>}
+        {sisters.length === 0 && !showAdd && <div style={{ fontSize: 12, color: T.muted, textAlign: "center", padding: "8px 0" }}>لا أخوات مضافات بعد.</div>}
+        {sisters.map((s) => (
+          <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
+            <div>
+              <div style={{ fontSize: 12.5, color: T.text, fontWeight: 700 }}>{s.name}</div>
+              <div style={{ fontSize: 10.5, color: T.muted }}>{s.prefilledEmail}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: s.userAccountId ? "#2F7D4F" : T.muted, marginTop: 2 }}>الحساب: {s.userAccountId ? "مفعّل" : "غير مفعّل"}</div>
+            </div>
+            {!s.userAccountId && (
+              <button onClick={() => setConfirmDel({ id: s.id, name: s.name })} style={{ background: "none", border: "none", color: T.clay, cursor: "pointer" }} title="حذف"><Trash2 size={15} /></button>
+            )}
+          </div>
+        ))}
+        {showAdd && (
+          <div style={{ display: "grid", gap: 6, marginTop: 10, paddingTop: 10, borderTop: sisters.length ? `1px dashed ${T.line}` : "none" }}>
+            <input placeholder="اسم الأخت رباعيًا" value={sName} onChange={(e) => setSName(e.target.value)} style={inputStyle} />
+            <input type="email" placeholder="بريدها الإلكتروني (إجباري للتفعيل)" value={sEmail} onChange={(e) => setSEmail(e.target.value)} style={inputStyle} />
+            <button onClick={addSister} disabled={busy} style={primaryBtnStyle}>{busy ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : "إضافة"}</button>
+            <div style={{ fontSize: 10.5, color: T.muted }}>تُنسب لأبيكم مباشرةً، وتظهر أسرتها (زوجها وأولادها) في ملفها هي بعد التفعيل.</div>
+          </div>
+        )}
+      </div>
+      {confirmDel && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 20 }} onClick={() => setConfirmDel(null)}>
+          <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 13, color: T.text, marginBottom: 16, textAlign: "center", lineHeight: 1.7 }}>حذف «{confirmDel.name}»؟ (متاح ما دام حسابها غير مفعّل)</div>
+            <button onClick={del} disabled={busy} style={{ width: "100%", background: T.clay, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", marginBottom: 8 }}>حذف</button>
+            <button onClick={() => setConfirmDel(null)} style={{ width: "100%", background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 13, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>تراجع</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) {
   const me = members.find((m) => m.id === meId);
   const [profileView, setProfileView] = useState("menu"); // menu | info | settings
@@ -5186,6 +5265,8 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId }) 
           </div>
         </div>
       )}
+
+      {form.gender !== "female" && <SisterActivationManager me={me} members={members} setMembers={setMembers} profilesMap={profilesMap} />}
 
       {form.gender === "female" && (
         <div style={{ marginTop: 14, marginBottom: 14 }}>
