@@ -611,6 +611,33 @@ const NEWS_TYPES = {
 function newsExcerpt(t, n = 120) { const s = (t || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
 function newsTitle(item) { return (item.title && item.title.trim()) || (item.text || "").split("\n")[0].slice(0, 70) || "خبر"; }
 
+// إطار صورة الخبر: يملأ الإطار بخلفية مموّهة ويُظهر الصورة كاملةً دون اقتطاع الوجوه — تتناسب مع أي مقاس
+function NewsImage({ src, ratio = "16 / 9", overlay }) {
+  return (
+    <div style={{ position: "relative", width: "100%", aspectRatio: ratio, overflow: "hidden", background: "#e7dfc9" }}>
+      <img src={src} alt="" aria-hidden="true" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", filter: "blur(16px)", transform: "scale(1.18)", opacity: 0.55 }} />
+      <img src={src} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }} />
+      {overlay}
+    </div>
+  );
+}
+
+// ضغط الصورة وتصغيرها قبل الرفع (تخفيف الحجم وتسريع التحميل)
+async function compressImage(file, maxW = 1400, quality = 0.85) {
+  try {
+    const url = URL.createObjectURL(file);
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const scale = Math.min(1, maxW / (img.width || maxW));
+    const w = Math.max(1, Math.round((img.width || maxW) * scale)), h = Math.max(1, Math.round((img.height || maxW) * scale));
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    c.getContext("2d").drawImage(img, 0, 0, w, h);
+    const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", quality));
+    URL.revokeObjectURL(url);
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], (file.name || "news").replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+  } catch (e) { return file; }
+}
+
 function Avatar({ name, photoUrl, gender, size = 44 }) {
   if (photoUrl && gender !== "female") {
     return <img src={photoUrl} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", border: `1.5px solid ${T.gold}`, flexShrink: 0 }} />;
@@ -739,7 +766,8 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
     setUploadingImg(true);
     let imageUrl = existingImageUrl || null;
     if (imageFile) {
-      const uploaded = await uploadNewsImage(imageFile);
+      const compressed = await compressImage(imageFile);
+      const uploaded = await uploadNewsImage(compressed);
       if (uploaded) imageUrl = uploaded;
     }
     const payload = { type, title: title.trim() || null, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null };
@@ -868,10 +896,9 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
         return (
           <button onClick={() => setReading(hero)} style={{ display: "block", width: "100%", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 18, overflow: "hidden", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, boxShadow: "0 4px 16px rgba(13,43,43,0.06)", padding: 0 }}>
             {hero.image_url && (
-              <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: T.sandDark }}>
-                <img src={hero.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              <NewsImage src={hero.image_url} overlay={
                 <span style={{ position: "absolute", top: 12, insetInlineStart: 12, display: "inline-flex", alignItems: "center", gap: 5, background: meta.color, color: "#fff", borderRadius: 8, padding: "4px 11px", fontSize: 11, fontWeight: 600 }}><HIcon size={12} /> {hero.type}</span>
-              </div>
+              } />
             )}
             <div style={{ padding: "14px 16px 15px", borderInlineStart: hero.image_url ? "none" : `4px solid ${meta.color}` }}>
               {!hero.image_url && <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: meta.color, fontSize: 11, fontWeight: 600, marginBottom: 6 }}><HIcon size={13} /> {hero.type}</span>}
@@ -892,10 +919,9 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
             return (
               <button key={n.id} onClick={() => setReading(n)} style={{ display: "flex", flexDirection: "column", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 16, overflow: "hidden", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
                 {n.image_url ? (
-                  <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: T.sandDark }}>
-                    <img src={n.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  <NewsImage src={n.image_url} overlay={
                     <span style={{ position: "absolute", top: 8, insetInlineStart: 8, display: "inline-flex", alignItems: "center", gap: 3, background: meta.color, color: "#fff", borderRadius: 7, padding: "3px 8px", fontSize: 9.5, fontWeight: 600 }}><Icon size={10} /> {n.type}</span>
-                  </div>
+                  } />
                 ) : (
                   <div style={{ width: "100%", aspectRatio: "16 / 9", background: meta.soft, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
                     <Icon size={30} color={meta.color} style={{ opacity: 0.55 }} />
@@ -920,11 +946,9 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
           <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }} onClick={() => setReading(null)}>
             <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.sand, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 460, maxHeight: "92vh", overflowY: "auto", fontFamily: "'Readex Pro', sans-serif" }}>
               {reading.image_url ? (
-                <div style={{ position: "relative", width: "100%", height: 230 }}>
-                  <img src={reading.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                  <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(13,43,43,0.55), transparent 55%)" }} />
-                  <button onClick={() => setReading(null)} style={{ position: "absolute", top: 12, insetInlineEnd: 12, width: 34, height: 34, borderRadius: "50%", background: "rgba(0,0,0,0.4)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={18} /></button>
-                </div>
+                <NewsImage src={reading.image_url} overlay={
+                  <button onClick={() => setReading(null)} style={{ position: "absolute", top: 12, insetInlineEnd: 12, width: 34, height: 34, borderRadius: "50%", background: "rgba(0,0,0,0.45)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={18} /></button>
+                } />
               ) : (
                 <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 14px 0" }}>
                   <button onClick={() => setReading(null)} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer" }}><X size={20} /></button>
