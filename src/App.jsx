@@ -7,7 +7,7 @@ import {
   FileText, Phone, Cake, Shield, UserPlus, Trash2, Save, Pencil,
   BookOpen, ChevronRight, ChevronLeft, Upload, LogOut, KeyRound,
   Settings, Fingerprint, Lock, HelpCircle, MessageCircle, ChevronsRight, Video,
-  Camera, ImagePlus
+  Camera, ImagePlus, QrCode
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -1082,6 +1082,125 @@ function FamilyMapModal({ members, onClose }) {
   );
 }
 
+// ===== لوحة الإحصاءات داخل الصفحة =====
+function StatsModal({ members, onClose }) {
+  const s = useMemo(() => {
+    const males = members.filter((m) => m.gender !== "female");
+    const byId = Object.fromEntries(males.map((m) => [m.id, m]));
+    const ch = {}; males.forEach((m) => { if (m.fatherId) (ch[m.fatherId] = ch[m.fatherId] || []).push(m.id); });
+    const leaves = males.filter((m) => !ch[m.id]);
+    const depth = (m) => { let d = 1, c = m, seen = new Set(); while (c && c.fatherId && byId[c.fatherId] && !seen.has(c.id)) { seen.add(c.id); c = byId[c.fatherId]; d++; } return d; };
+    const alive = leaves.filter((m) => m.isAlive).length;
+    const maxg = males.length ? Math.max(...males.map(depth)) : 0;
+    const cnt = (arr, key) => { const o = {}; arr.forEach((m) => { const v = key(m); if (v) o[v] = (o[v] || 0) + 1; }); return Object.entries(o).sort((a, b) => b[1] - a[1]); };
+    const names = cnt(leaves, (m) => m.name).slice(0, 8);
+    const cities = cnt(leaves, (m) => (m.region || "").trim()).slice(0, 8);
+    const withphone = leaves.filter((m) => m.hasPhone).length;
+    const distinct = new Set(leaves.map((m) => m.name)).size;
+    return { total: members.length, males: males.length, leaves: leaves.length, alive, maxg, names, cities, withphone, distinct };
+  }, [members]);
+  const bar = (data, color) => {
+    const mx = Math.max(1, ...data.map((d) => d[1]));
+    return data.map(([l, v]) => (
+      <div key={l} style={{ display: "flex", alignItems: "center", gap: 8, margin: "5px 0", fontSize: 12.5 }}>
+        <span style={{ width: 78, flexShrink: 0, textAlign: "right", fontWeight: 700, color: T.ink }}>{l}</span>
+        <span style={{ flex: 1, height: 13, background: T.sandDark, borderRadius: 999, overflow: "hidden" }}><span style={{ display: "block", height: "100%", width: `${v / mx * 100}%`, background: color, borderRadius: 999 }} /></span>
+        <span style={{ width: 34, flexShrink: 0, fontSize: 11.5, color: T.muted }}>{v}</span>
+      </div>
+    ));
+  };
+  const sc = (v, l, c = T.ink) => (<div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 8px", textAlign: "center" }}><div style={{ fontSize: 22, fontWeight: 800, color: c }}>{v}</div><div style={{ fontSize: 11.5, color: T.muted, marginTop: 3 }}>{l}</div></div>);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }} onClick={onClose}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.sand, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto", fontFamily: "'Tajawal', sans-serif" }}>
+        <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0 }}>
+          <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif" }}>إحصاءات العائلة</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
+        </div>
+        <div style={{ padding: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+            {sc(s.leaves, "الأطراف", T.gold)}{sc(s.alive, "الأحياء", "#1b7a3d")}{sc(s.maxg, "الأجيال")}
+            {sc(s.males, "الذكور")}{sc(s.withphone, "بجوال", TT.teal800)}{sc(s.distinct, "تنوّع الأسماء", T.gold)}
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: T.ink, margin: "16px 0 6px" }}>أكثر أسماء الأطراف</div>
+          <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "10px 12px" }}>{bar(s.names, T.gold)}</div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: T.ink, margin: "16px 0 6px" }}>مدن الأطراف</div>
+          <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: "10px 12px" }}>{bar(s.cities, TT.teal800)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== بطاقة النسب بـQR =====
+function NasabCardModal({ member, onClose }) {
+  const link = (typeof window !== "undefined" ? window.location.origin : "") + "/?m=" + member.id;
+  const qr = "https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=8&data=" + encodeURIComponent(link);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} dir="rtl" style={{ width: "100%", maxWidth: 360, fontFamily: "'Tajawal', sans-serif" }}>
+        <div style={{ background: T.card, borderRadius: 18, overflow: "hidden", border: `2px solid ${TT.gold500}`, boxShadow: "0 12px 40px rgba(0,0,0,0.35)" }}>
+          <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "18px 16px", textAlign: "center" }}>
+            <div style={{ color: TT.gold400, fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>عائلة آل تركي</div>
+            <div style={{ display: "flex", justifyContent: "center", margin: "12px 0 8px" }}><Avatar name={member.name} photoUrl={member.photoUrl} gender={member.gender} size={78} /></div>
+            <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 20, color: "#fff", fontWeight: 700 }}>{member.name}</div>
+          </div>
+          <div style={{ padding: "16px" }}>
+            <div style={{ fontSize: 12.5, color: T.text, lineHeight: 1.9, textAlign: "center", wordBreak: "break-word" }}>{member.fullNasab || member.nasab}</div>
+            {member.memberNumber && <div style={{ textAlign: "center", fontSize: 11.5, color: T.gold, fontWeight: 700, marginTop: 8 }}>الرقم التعريفي: {member.memberNumber}</div>}
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+              <img src={qr} alt="QR" width={150} height={150} style={{ borderRadius: 10, border: `1px solid ${T.line}` }} />
+            </div>
+            <div style={{ textAlign: "center", fontSize: 10.5, color: T.muted, marginTop: 8 }}>امسح الرمز لفتح صفحته في الموقع</div>
+          </div>
+        </div>
+        <button onClick={onClose} style={{ width: "100%", marginTop: 12, background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>إغلاق · (لحفظها: التقط لقطة شاشة)</button>
+      </div>
+    </div>
+  );
+}
+
+// ===== تصدير الكشوف (CSV) =====
+function ExportModal({ members, onClose }) {
+  const dl = (name, rows) => {
+    const csv = "﻿" + rows.map((r) => r.map((c) => `"${String(c == null ? "" : c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  };
+  const males = members.filter((m) => m.gender !== "female");
+  const ch = {}; males.forEach((m) => { if (m.fatherId) ch[m.fatherId] = true; });
+  const leaves = males.filter((m) => !ch[m.id]);
+  const H = ["الاسم / النسب", "الرقم التعريفي", "المدينة", "الجوال", "الحالة"];
+  const row = (m) => [m.fullNasab || m.nasab || m.name, m.memberNumber || "", m.region || "", (m.isAlive && m.phone && m.phoneVisible) ? m.phone : "", m.isAlive ? "حي" : "متوفى"];
+  const btns = [
+    ["كل الأعضاء", () => dl("كل_الأعضاء.csv", [H, ...males.map(row)]), males.length],
+    ["كشف الأطراف", () => dl("كشف_الأطراف.csv", [H, ...leaves.map(row)]), leaves.length],
+    ["كشف الأحياء", () => dl("كشف_الأحياء.csv", [H, ...males.filter((m) => m.isAlive).map(row)]), males.filter((m) => m.isAlive).length],
+    ["دليل الهاتف", () => dl("دليل_الهاتف.csv", [["الاسم", "الجوال", "المدينة"], ...males.filter((m) => m.phone && m.phoneVisible).map((m) => [m.fullNasab || m.name, m.phone, m.region || ""])]), males.filter((m) => m.phone && m.phoneVisible).length],
+  ];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }} onClick={onClose}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.card, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 420, fontFamily: "'Tajawal', sans-serif" }}>
+        <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, fontFamily: "'Aref Ruqaa', serif" }}>تصدير الكشوف</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
+        </div>
+        <div style={{ padding: 16 }}>
+          <div style={{ fontSize: 12, color: T.muted, marginBottom: 12 }}>تنزيل ملف Excel/CSV (يفتح بالعربية). الجوال يظهر فقط لِمن أتاحه.</div>
+          <div style={{ display: "grid", gap: 9 }}>
+            {btns.map(([label, fn, n]) => (
+              <button key={label} onClick={fn} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: T.sand, border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px 14px", cursor: "pointer", fontFamily: "inherit" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 700, color: T.ink }}><FileText size={15} color={T.gold} /> {label}</span>
+                <span style={{ fontSize: 11.5, color: T.muted }}>{n} · تنزيل</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ===== حاسبة القرابة =====
 function chainIds(id, byId) {
   const s = []; let c = id; const seen = new Set();
@@ -1303,6 +1422,8 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [whoOpen, setWhoOpen] = useState(false);
   const [kinOpen, setKinOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const centeredRef = useRef(false);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -1564,9 +1685,17 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
           <GitBranch size={16} color={TT.gold400} /> حاسبة القرابة
         </button>
       </div>
-      <button onClick={() => setMapOpen(true)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px", marginBottom: 12, background: T.card, color: T.ink, border: `1px solid ${T.gold}`, borderRadius: 12, fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
-        <MapPin size={16} color={T.gold} /> خريطة توزيع العائلة
-      </button>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button onClick={() => setMapOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 6px", background: T.card, color: T.ink, border: `1px solid ${T.gold}`, borderRadius: 12, fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+          <MapPin size={15} color={T.gold} /> الخريطة
+        </button>
+        <button onClick={() => setStatsOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 6px", background: T.card, color: T.ink, border: `1px solid ${T.gold}`, borderRadius: 12, fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+          <Newspaper size={15} color={T.gold} /> الإحصاءات
+        </button>
+        <button onClick={() => setExportOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 6px", background: T.card, color: T.ink, border: `1px solid ${T.gold}`, borderRadius: 12, fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+          <FileText size={15} color={T.gold} /> تصدير
+        </button>
+      </div>
 
       {/* نتائج البحث */}
       {query.trim() && (
@@ -1707,6 +1836,12 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       )}
       {mapOpen && (
         <FamilyMapModal members={members} onClose={() => setMapOpen(false)} />
+      )}
+      {statsOpen && (
+        <StatsModal members={members} onClose={() => setStatsOpen(false)} />
+      )}
+      {exportOpen && (
+        <ExportModal members={members} onClose={() => setExportOpen(false)} />
       )}
     </div>
   );
@@ -2387,6 +2522,7 @@ function MemberDetailModal({ member, members, canManageTree, onClose, onSaved })
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [showFullNasab, setShowFullNasab] = useState(false);
+  const [showCard, setShowCard] = useState(false);
 
   const daughters = members.filter((m) => m.fatherId === member.id && m.gender === "female");
   const wives = members.filter((m) => m.spouseOf === member.id);
@@ -2426,6 +2562,10 @@ function MemberDetailModal({ member, members, canManageTree, onClose, onSaved })
               رقم العضوية: {member.memberNumber}
             </div>
           )}
+          <button onClick={() => setShowCard(true)} style={{ marginTop: 10, display: "inline-flex", alignItems: "center", gap: 6, background: T.sandDark, border: `1px solid ${T.gold}`, borderRadius: 999, padding: "6px 14px", fontSize: 11.5, fontWeight: 700, color: T.ink, fontFamily: "inherit", cursor: "pointer" }}>
+            <QrCode size={14} color={T.gold} /> بطاقة النسب
+          </button>
+          {showCard && <NasabCardModal member={member} onClose={() => setShowCard(false)} />}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13, color: T.text }}>
           {member.region && <div style={{ display: "flex", alignItems: "center", gap: 8 }}><MapPin size={15} color={T.gold} /> {member.region}</div>}
@@ -4193,4 +4333,5 @@ export default function FamilyApp() {
     </AppErrorBoundary>
   );
 }
+
 
