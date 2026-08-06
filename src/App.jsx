@@ -150,11 +150,19 @@ async function fetchInbox(uid) {
   if (!uid) return [];
   const { data, error } = await supabase
     .from("inbox")
-    .select("id, read_at, created_at, broadcasts(id, title, body, audience_label, created_at, deleted)")
+    .select("id, read_at, created_at, hidden, broadcasts(id, title, body, audience_label, created_at, deleted)")
     .eq("recipient_account_id", uid)
+    .eq("hidden", false)
     .order("created_at", { ascending: false });
   if (error) { console.error("fetchInbox failed", error); return []; }
   return (data || []).filter((r) => r.broadcasts && !r.broadcasts.deleted);
+}
+
+// حذف الرسالة من صندوق العضو فقط (تبقى محفوظة عند الإشراف مع إحصاءات المستقبِلين)
+async function hideInboxItem(inboxId) {
+  const { error } = await supabase.from("inbox").update({ hidden: true }).eq("id", inboxId);
+  if (error) { console.error("hideInboxItem failed", error); return false; }
+  return true;
 }
 async function markInboxRead(inboxId) {
   await supabase.from("inbox").update({ read_at: new Date().toISOString() }).eq("id", inboxId);
@@ -3814,6 +3822,15 @@ function InboxOverlay({ uid, items, onClose, reload }) {
     await markInboxRead(it.id);
     reload && reload();
   };
+  const [confirmDel, setConfirmDel] = useState(null);
+  const doDelete = async () => {
+    const id = confirmDel;
+    setConfirmDel(null);
+    if (!id) return;
+    await hideInboxItem(id);
+    if (openItem && openItem.id === id) setOpenItem(null);
+    reload && reload();
+  };
   const unreadCount = items.filter((i) => !i.read_at).length;
   const markAll = async () => {
     setBusyAll(true);
@@ -3908,6 +3925,10 @@ function InboxOverlay({ uid, items, onClose, reload }) {
                         <span style={{ fontSize: 11, color: T.muted }}>مقروءة</span>
                       )}
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <button onClick={(ev) => { ev.stopPropagation(); setConfirmDel(it.id); }} aria-label="حذف الرسالة"
+                          style={{ background: "none", border: `1px solid ${T.line}`, color: T.clay, borderRadius: 8, width: 30, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}>
+                          <Trash2 size={13} />
+                        </button>
                         {unread && (
                           <button onClick={(ev) => markOne(ev, it)} style={{ background: "none", border: `1px solid ${T.line}`, color: T.muted, borderRadius: 8, padding: "4px 9px", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer" }}>تعليم كمقروء</button>
                         )}
@@ -3924,6 +3945,7 @@ function InboxOverlay({ uid, items, onClose, reload }) {
           </>
         )}
       </div>
+      {confirmDel && <ConfirmModal onConfirm={doDelete} onCancel={() => setConfirmDel(null)} />}
     </div>
   );
 }
