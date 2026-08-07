@@ -2650,7 +2650,7 @@ function FanChartModal({ centerId, members, onClose }) {
     return { segs: out, maxDepth: md };
   }, [centerId, byId, childrenMap]);
 
-  const R0 = 42, RW = 40, PAD = 22;
+  const R0 = 44, RW = 54, PAD = 22;
   const maxR = R0 + maxDepth * RW;
   const size = Math.max(2 * (maxR + PAD), 240);
   const cx = size / 2, cy = size / 2;
@@ -2711,16 +2711,24 @@ function FanChartModal({ centerId, members, onClose }) {
             {segs.map((s) => (
               <path key={s.id} d={segPath(R0 + (s.depth - 1) * RW, R0 + s.depth * RW, s.a0, s.a1)} fill={s.color} stroke="#ffffff" strokeWidth={0.8} fillRule="evenodd" />
             ))}
-            {/* الاسم يُكتب مستقيمًا بمحاذاة مماس الحلقة: العربية متصلة الحروف ولا تقبل الانحناء حرفًا حرفًا */}
-            {segs.filter((s) => (s.a1 - s.a0) * (R0 + (s.depth - 0.5) * RW) > 20).map((s) => {
+            {/* الاسم مستقيم دائمًا (العربية متصلة الحروف)، ويُكتب في أطول بُعدٍ للخلية:
+                عرضًا مع الحلقة إن كان القوس أطول، وطولًا مع الشعاع إن كانت الخلية ضيّقة */}
+            {segs.filter((s) => {
+              const rr = R0 + (s.depth - 0.5) * RW;
+              return Math.max((s.a1 - s.a0) * rr, RW - 8) > 20;
+            }).map((s) => {
               const mid = (s.a0 + s.a1) / 2;
               const rr = R0 + (s.depth - 0.5) * RW;
               const [tx, ty] = polar(rr, mid);
-              let deg = mid * 180 / Math.PI;
-              if (deg > 90 && deg < 270) deg += 180;
-              const arc = (s.a1 - s.a0) * rr;
+              const arc = (s.a1 - s.a0) * rr;   // البعد العرضي (مع الحلقة)
+              const radial = RW - 8;            // البعد الطولي (مع الشعاع)
+              const alongArc = arc >= radial;
+              let deg = mid * 180 / Math.PI + (alongArc ? 90 : 0);
+              deg = ((deg % 360) + 360) % 360;
+              if (deg > 90 && deg < 270) deg += 180;  // إبقاء الاسم قائمًا لا مقلوبًا
               const fs = s.depth === 1 ? 13 : s.depth <= 3 ? 11 : 9.5;
-              const maxCh = Math.max(3, Math.floor(arc / (fs * 0.62)));
+              const avail = alongArc ? arc : radial;
+              const maxCh = Math.max(3, Math.floor(avail / (fs * 0.62)));
               const nm = s.name.length > maxCh ? s.name.slice(0, maxCh - 1) + "…" : s.name;
               return <text key={"t" + s.id} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={s.depth <= 2 ? 800 : 700} fill="#12302e" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{nm}</text>;
             })}
