@@ -2699,25 +2699,44 @@ function FanChartModal({ centerId, members, onClose }) {
   const ringW = (d) => (countByDepth[d] === 1 ? RW_TRUNK : RW);
   const ringIn = (d) => { let r = R0; for (let i = 1; i < d; i++) r += ringW(i); return r; };
   const ringMid = (d) => ringIn(d) + ringW(d) / 2;
-  // خلايا الأطراف تمتد شعاعيًا حتى تتّسع لكل الأسماء بلا عدّاد «+»
+  // خلايا الأطراف تمتدّ شعاعيًا لتتّسع للأسماء، بامتدادٍ موحّد لكل حلقة
+  // (حتى تبقى الحافة الخارجية دائرية لا أشواكًا متفاوتة) وبسقفٍ لا يشوّه المخطط
   const groupLayout = useMemo(() => {
-    const map = {};
+    const raw = {}, needByDepth = {};
     segs.filter((x) => x.group).forEach((x) => {
       const rIn = ringIn(x.depth), rW = ringW(x.depth);
       const arc = (x.a1 - x.a0) * (rIn + rW / 2);
       const longest = x.names.reduce((mx, t) => Math.max(mx, t.length), 3);
-      if (arc >= 26) {   // تكفي لكتابة الأسماء عرضًا في أسطر
+      if (arc >= 26) {
         const fs = Math.max(6.5, Math.min(9.5, arc / (longest * 0.62)));
         const maxCh = Math.max(4, Math.floor(arc / (fs * 0.62)));
         const lines = packNames(x.names, maxCh, 99);
         const lineH = fs * 1.28;
-        map[x.id] = { mode: "lines", fs, lines, lineH, cellW: Math.max(rW, lines.length * lineH + 10) };
-      } else {           // ضيّقة: أعمدة طولية (مع الشعاع) بصفوف متتابعة للخارج
+        raw[x.id] = { mode: "lines", fs, lines, lineH, need: lines.length * lineH + 10 };
+      } else {
         const fs = 7;
         const cols = Math.max(1, Math.floor(arc / (fs * 1.2)));
         const colH = longest * fs * 0.62 + 8;
         const rows = Math.ceil(x.names.length / cols);
-        map[x.id] = { mode: "cols", fs, cols, rows, colH, cellW: Math.max(rW, rows * colH) };
+        raw[x.id] = { mode: "cols", fs, cols, colH, need: rows * colH };
+      }
+      needByDepth[x.depth] = Math.max(needByDepth[x.depth] || 0, raw[x.id].need);
+    });
+    const map = {};
+    segs.filter((x) => x.group).forEach((x) => {
+      const rW = ringW(x.depth);
+      const cellW = Math.max(rW, Math.min(needByDepth[x.depth] || rW, rW * 2.2));   // سقف الامتداد
+      const g = raw[x.id];
+      if (g.mode === "lines") {
+        const maxLines = Math.max(1, Math.floor((cellW - 8) / g.lineH));
+        const arc = (x.a1 - x.a0) * (ringIn(x.depth) + cellW / 2);
+        const maxCh = Math.max(4, Math.floor(arc / (g.fs * 0.62)));
+        map[x.id] = { ...g, cellW, lines: packNames(x.names, maxCh, maxLines) };
+      } else {
+        const maxRows = Math.max(1, Math.floor(cellW / g.colH));
+        const cap = maxRows * g.cols;
+        const shown = x.names.length > cap ? x.names.slice(0, cap - 1).concat([`+${x.names.length - cap + 1}`]) : x.names;
+        map[x.id] = { ...g, cellW, shown };
       }
     });
     return map;
@@ -2831,7 +2850,7 @@ function FanChartModal({ centerId, members, onClose }) {
                 }
                 // أعمدة طولية: تُملأ صفًا بعد صف نحو الخارج
                 const step = (s.a1 - s.a0) / g.cols;
-                return <g key={"g" + s.id}>{s.names.map((nm, i) => {
+                return <g key={"g" + s.id}>{(g.shown || s.names).map((nm, i) => {
                   const row = Math.floor(i / g.cols), col = i % g.cols;
                   const ang = s.a0 + step * (col + 0.5);
                   const r = rIn + row * g.colH + g.colH / 2;
