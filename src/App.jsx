@@ -4616,6 +4616,8 @@ function ContactUsView({ onBack, meId }) {
 function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, onOpenInbox, unreadInbox = 0, jumpView }) {
   const me = members.find((m) => m.id === meId);
   const [profileView, setProfileView] = useState("menu"); // menu | info | settings
+  const [showPinSetup, setShowPinSetup] = useState(false);
+  const [pinOn, setPinOn] = useState(() => hasPin());
   // فتح قسم محدّد عند القدوم من القائمة الجانبية في الترويسة
   useEffect(() => { if (jumpView && jumpView.view) setProfileView(jumpView.view); }, [jumpView]);
   const [mode, setMode] = useState("view");
@@ -4949,7 +4951,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, on
           <MenuRow icon={Inbox} label="رسائلي" sublabel={unreadInbox > 0 ? `${unreadInbox} رسالة غير مقروءة` : "رسائل العائلة والردود عليها"} onClick={onOpenInbox} />
           <MenuRow icon={Settings} label="الإعدادات" sublabel="الخصوصية، الإشعارات، وأكثر" onClick={() => setProfileView("settings")} />
           <MenuRow icon={Fingerprint} label="بصمة الوجه / الإصبع" sublabel={faceIdMsg || "دخول سريع بدون كلمة مرور"} onClick={handleEnableFaceId} />
-          <MenuRow icon={KeyRound} label="رمز المرور السريع" disabled />
+          <MenuRow icon={KeyRound} label="رمز المرور السريع" sublabel={pinOn ? "مفعّل على هذا الجهاز — تغييره أو إيقافه" : "دخول سريع برمز من ٤ أرقام"} onClick={() => setShowPinSetup(true)} />
           <MenuRow icon={Lock} label="تغيير كلمة المرور والبريد" onClick={() => { setProfileView("info"); setShowChangePassword(true); }} />
         </div>
 
@@ -4985,6 +4987,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, on
             </div>
           </div>
         )}
+        {showPinSetup && <PinSetup onClose={() => { setShowPinSetup(false); setPinOn(hasPin()); }} />}
       </div>
     );
   }
@@ -5559,6 +5562,189 @@ function HeaderMenu({ onClose, onGo, onOpenInbox, unreadInbox = 0 }) {
   );
 }
 
+/* ============ رمز المرور السريع (يُخزَّن مُشفّرًا على الجهاز فقط) ============ */
+const PIN_KEY = "alturki_pin_v1";
+const PIN_HIDE_KEY = "alturki_pin_hidden_at";
+const PIN_RELOCK_MS = 5 * 60 * 1000; // إعادة القفل إذا غاب التطبيق أكثر من 5 دقائق
+
+async function hashPin(pin, salt) {
+  const buf = new TextEncoder().encode(`${salt}:${pin}`);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function getPinRecord() {
+  try { return JSON.parse(localStorage.getItem(PIN_KEY) || "null"); } catch (e) { return null; }
+}
+function hasPin() { return !!getPinRecord(); }
+async function savePin(pin) {
+  const salt = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const hash = await hashPin(pin, salt);
+  localStorage.setItem(PIN_KEY, JSON.stringify({ salt, hash, v: 1 }));
+}
+async function checkPin(pin) {
+  const rec = getPinRecord();
+  if (!rec) return false;
+  return (await hashPin(pin, rec.salt)) === rec.hash;
+}
+function clearPin() { localStorage.removeItem(PIN_KEY); }
+
+function PinPad({ value, onChange, max = 4 }) {
+  const press = (d) => { if (value.length < max) onChange(value + d); };
+  const back = () => onChange(value.slice(0, -1));
+  const keyStyle = {
+    fontFamily: "inherit", fontSize: 22, fontWeight: 700, color: T.ink, background: T.card,
+    border: `1px solid ${T.line}`, borderRadius: 16, height: 58, cursor: "pointer",
+  };
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, maxWidth: 280, margin: "0 auto", width: "100%" }}>
+      {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
+        <button key={d} onClick={() => press(d)} style={keyStyle}>{d}</button>
+      ))}
+      <span />
+      <button onClick={() => press("0")} style={keyStyle}>0</button>
+      <button onClick={back} aria-label="حذف" style={{ ...keyStyle, background: "transparent", border: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <ChevronRight size={22} color={T.muted} />
+      </button>
+    </div>
+  );
+}
+
+function PinDots({ length, max = 4, error }) {
+  return (
+    <div style={{ display: "flex", gap: 12, justifyContent: "center", margin: "16px 0 22px" }}>
+      {Array.from({ length: max }).map((_, i) => (
+        <span key={i} style={{
+          width: 14, height: 14, borderRadius: 999,
+          background: i < length ? (error ? T.clay : T.gold) : "transparent",
+          border: `2px solid ${error ? T.clay : i < length ? T.gold : T.line}`,
+        }} />
+      ))}
+    </div>
+  );
+}
+
+// شاشة القفل التي تظهر عند فتح التطبيق
+function PinLockScreen({ onUnlock }) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [fails, setFails] = useState(0);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (pin.length !== 4 || busy) return;
+    setBusy(true);
+    (async () => {
+      const ok = await checkPin(pin);
+      if (ok) { onUnlock(); return; }
+      const n = fails + 1;
+      setFails(n);
+      setPin("");
+      setBusy(false);
+      if (n >= 3) {
+        setError("تجاوزت المحاولات. سيُطلب منك الدخول بكلمة المرور.");
+        clearPin();
+        await supabase.auth.signOut();
+        setTimeout(() => { window.location.href = "/"; }, 1200);
+      } else {
+        setError(`رمز غير صحيح. بقي لك ${3 - n} ${3 - n === 1 ? "محاولة" : "محاولتان"}.`);
+      }
+    })();
+  }, [pin]);
+  const forgot = async () => {
+    clearPin();
+    await supabase.auth.signOut();
+    window.location.href = "/";
+  };
+  return (
+    <div dir="rtl" style={{ position: "fixed", inset: 0, background: T.sand, zIndex: 99, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 18px", fontFamily: "'Readex Pro', sans-serif", overflowY: "auto" }}>
+      <Logo size={64} />
+      <div style={{ fontSize: 15, fontWeight: 800, color: T.ink, marginTop: 14 }}>أدخل رمز المرور</div>
+      <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>عائلة آل تركي — الموقع الرسمي</div>
+      <PinDots length={pin.length} error={!!error} />
+      <PinPad value={pin} onChange={(v) => { setError(""); setPin(v); }} />
+      {error && <div style={{ color: T.clay, fontSize: 12, fontWeight: 700, marginTop: 16, textAlign: "center" }}>{error}</div>}
+      <button onClick={forgot} style={{ marginTop: 22, background: "none", border: "none", color: T.muted, fontSize: 12, fontFamily: "inherit", textDecoration: "underline", cursor: "pointer" }}>
+        نسيت الرمز؟ الدخول بكلمة المرور
+      </button>
+    </div>
+  );
+}
+
+// بوابة القفل حول التطبيق كله
+function PinGate({ children }) {
+  const [locked, setLocked] = useState(() => hasPin());
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        sessionStorage.setItem(PIN_HIDE_KEY, String(Date.now()));
+      } else {
+        const at = Number(sessionStorage.getItem(PIN_HIDE_KEY) || 0);
+        if (hasPin() && at && Date.now() - at > PIN_RELOCK_MS) setLocked(true);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+  if (locked) return <PinLockScreen onUnlock={() => setLocked(false)} />;
+  return children;
+}
+
+// شاشة إعداد الرمز وتغييره وإيقافه (من صفحة ملفي)
+function PinSetup({ onClose }) {
+  const enabled = hasPin();
+  const [step, setStep] = useState(enabled ? "menu" : "new"); // menu | new | confirm
+  const [pin, setPin] = useState("");
+  const [first, setFirst] = useState("");
+  const [msg, setMsg] = useState("");
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (pin.length !== 4) return;
+    if (step === "new") {
+      setFirst(pin); setPin(""); setMsg(""); setStep("confirm");
+    } else if (step === "confirm") {
+      if (pin === first) {
+        savePin(pin).then(() => { setDone(true); setTimeout(onClose, 900); });
+      } else {
+        setMsg("الرمزان غير متطابقين. أعد المحاولة.");
+        setFirst(""); setPin(""); setStep("new");
+      }
+    }
+  }, [pin]);
+  const disable = () => { clearPin(); setDone(true); setTimeout(onClose, 700); };
+  return (
+    <div dir="rtl" style={{ position: "fixed", inset: 0, background: T.sand, zIndex: 96, display: "flex", flexDirection: "column", fontFamily: "'Readex Pro', sans-serif" }}>
+      <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: TT.gold500, fontWeight: 800, fontSize: 15 }}><KeyRound size={17} /> رمز المرور السريع</div>
+        <button onClick={onClose} aria-label="إغلاق" style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={20} /></button>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: "22px 18px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        {done ? (
+          <div style={{ marginTop: 40, fontSize: 14, fontWeight: 800, color: "#2F7D4F" }}>تم الحفظ.</div>
+        ) : step === "menu" ? (
+          <div style={{ width: "100%", maxWidth: 320, display: "grid", gap: 10, marginTop: 10 }}>
+            <div style={{ fontSize: 12.5, color: T.muted, lineHeight: 1.9, textAlign: "center", marginBottom: 6 }}>
+              الرمز مفعّل على هذا الجهاز. يُطلب منك عند فتح التطبيق بدل كتابة كلمة المرور.
+            </div>
+            <button onClick={() => { setStep("new"); setPin(""); setFirst(""); }} style={{ background: T.ink, color: T.sand, border: "none", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>تغيير الرمز</button>
+            <button onClick={disable} style={{ background: "transparent", color: T.clay, border: `1px solid ${T.line}`, borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>إيقاف الرمز</button>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 800, color: T.ink, marginTop: 6 }}>
+              {step === "new" ? "اختر رمزًا من ٤ أرقام" : "أعد إدخال الرمز للتأكيد"}
+            </div>
+            <div style={{ fontSize: 11.5, color: T.muted, marginTop: 6, textAlign: "center", maxWidth: 300, lineHeight: 1.8 }}>
+              يُحفظ الرمز مُشفّرًا على جهازك وحده، ولا يُرسل إلى الموقع.
+            </div>
+            <PinDots length={pin.length} error={!!msg} />
+            <PinPad value={pin} onChange={(v) => { setMsg(""); setPin(v); }} />
+            {msg && <div style={{ color: T.clay, fontSize: 12, fontWeight: 700, marginTop: 16, textAlign: "center" }}>{msg}</div>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const BASE_TABS = [
   { key: "news", label: "الرئيسية", icon: Newspaper },
   { key: "tree", label: "الشجرة", icon: GitBranch },
@@ -5827,7 +6013,7 @@ class AppErrorBoundary extends React.Component {
 export default function FamilyApp() {
   return (
     <AppErrorBoundary>
-      <AuthGate>{(me) => <FamilyAppInner meId={me.id} />}</AuthGate>
+      <AuthGate>{(me) => <PinGate><FamilyAppInner meId={me.id} /></PinGate>}</AuthGate>
     </AppErrorBoundary>
   );
 }
