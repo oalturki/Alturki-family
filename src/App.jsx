@@ -2699,7 +2699,54 @@ function FanChartModal({ centerId, members, onClose }) {
   const ringW = (d) => (countByDepth[d] === 1 ? RW_TRUNK : RW);
   const ringIn = (d) => { let r = R0; for (let i = 1; i < d; i++) r += ringW(i); return r; };
   const ringMid = (d) => ringIn(d) + ringW(d) / 2;
-  const maxR = ringIn(maxDepth) + ringW(maxDepth);
+  // خلايا الأطراف تمتد شعاعيًا حتى تتّسع لكل الأسماء بلا عدّاد «+»
+  const groupLayout = useMemo(() => {
+    const map = {};
+    segs.filter((x) => x.group).forEach((x) => {
+      const rIn = ringIn(x.depth), rW = ringW(x.depth);
+      const arc = (x.a1 - x.a0) * (rIn + rW / 2);
+      const longest = x.names.reduce((mx, t) => Math.max(mx, t.length), 3);
+      if (arc >= 26) {   // تكفي لكتابة الأسماء عرضًا في أسطر
+        const fs = Math.max(6.5, Math.min(9.5, arc / (longest * 0.62)));
+        const maxCh = Math.max(4, Math.floor(arc / (fs * 0.62)));
+        const lines = packNames(x.names, maxCh, 99);
+        const lineH = fs * 1.28;
+        map[x.id] = { mode: "lines", fs, lines, lineH, cellW: Math.max(rW, lines.length * lineH + 10) };
+      } else {           // ضيّقة: أعمدة طولية (مع الشعاع) بصفوف متتابعة للخارج
+        const fs = 7;
+        const cols = Math.max(1, Math.floor(arc / (fs * 1.2)));
+        const colH = longest * fs * 0.62 + 8;
+        const rows = Math.ceil(x.names.length / cols);
+        map[x.id] = { mode: "cols", fs, cols, rows, colH, cellW: Math.max(rW, rows * colH) };
+      }
+    });
+    return map;
+  }, [segs, countByDepth]);
+
+  // حجم خط موحّد لكل حلقة حتى لا تتفاوت الأسماء في الجيل الواحد
+  const fsByDepth = useMemo(() => {
+    const buckets = {};
+    segs.filter((x) => !x.group).forEach((x) => {
+      const rW = ringW(x.depth), rr = ringIn(x.depth) + rW / 2;
+      const arc = (x.a1 - x.a0) * rr, radial = rW - 8;
+      const alongArc = arc >= radial;
+      const avail = alongArc ? arc : radial, cross = alongArc ? radial : arc;
+      const fsMax = x.depth === 1 ? 13 : x.depth === 2 ? 11.5 : x.depth <= 4 ? 10 : 8.5;
+      const fit = Math.min(fsMax, cross * 0.82, avail / Math.max(2, x.name.length * 0.6));
+      (buckets[x.depth] = buckets[x.depth] || []).push(fit);
+    });
+    const out = {};
+    Object.entries(buckets).forEach(([d, arr]) => {
+      arr.sort((a, b) => a - b);
+      out[d] = Math.max(6, arr[Math.floor(arr.length * 0.3)] || 8);
+    });
+    return out;
+  }, [segs, countByDepth]);
+
+  const maxR = Math.max(
+    ringIn(maxDepth) + ringW(maxDepth),
+    ...segs.filter((x) => x.group).map((x) => ringIn(x.depth) + (groupLayout[x.id] ? groupLayout[x.id].cellW : ringW(x.depth))),
+  );
   const size = Math.max(2 * (maxR + PAD), 240);
   const cx = size / 2, cy = size / 2;
   const polar = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
@@ -2757,7 +2804,7 @@ function FanChartModal({ centerId, members, onClose }) {
           <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block", margin: "0 auto" }}>
             <rect x={0} y={0} width={size} height={size} fill="#ffffff" />
             {segs.map((s) => (
-              <path key={s.id} d={segPath(ringIn(s.depth), ringIn(s.depth) + ringW(s.depth), s.a0, s.a1)} fill={s.color} stroke="#ffffff" strokeWidth={0.8} fillRule="evenodd" />
+              <path key={s.id} d={segPath(ringIn(s.depth), ringIn(s.depth) + ((s.group && groupLayout[s.id]) ? groupLayout[s.id].cellW : ringW(s.depth)), s.a0, s.a1)} fill={s.color} stroke="#ffffff" strokeWidth={0.8} fillRule="evenodd" />
             ))}
             {/* الاسم مستقيم دائمًا (العربية متصلة الحروف)، ويُكتب في أطول بُعدٍ للخلية:
                 عرضًا مع الحلقة إن كان القوس أطول، وطولًا مع الشعاع إن كانت الخلية ضيّقة */}
@@ -2769,42 +2816,26 @@ function FanChartModal({ centerId, members, onClose }) {
               const rIn = ringIn(s.depth), rW = ringW(s.depth);
               const rr = ringMid(s.depth);
 
-              // خلية الأطراف: عدّة أسماء داخل الخلية نفسها
+              // خلية الأطراف: كل الأسماء داخل الخلية (تتمدّد للخارج عند الحاجة)
               if (s.group) {
-                const arcAt = (r) => (s.a1 - s.a0) * r;
-                const n = s.names.length;
-                const longest = s.names.reduce((mx, x) => Math.max(mx, x.length), 3);
+                const g = groupLayout[s.id];
+                if (!g) return null;
                 const upright = (d) => { d = ((d % 360) + 360) % 360; return (d > 90 && d < 270) ? d + 180 : d; };
-                const label = (key, r, ang, deg, fs, txt, avail) => {
-                  const [tx2, ty2] = polar(r, ang);
-                  const maxCh = Math.max(3, Math.floor(avail / (fs * 0.62)));
-                  const t = txt.length > maxCh ? txt.slice(0, maxCh - 1) + "…" : txt;
-                  return <text key={key} x={tx2} y={ty2} transform={`rotate(${deg} ${tx2} ${ty2})`} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={400} fill="#46534e" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{t}</text>;
+                const put = (key, r, ang, deg, txt) => {
+                  const [x2, y2] = polar(r, ang);
+                  return <text key={key} x={x2} y={y2} transform={`rotate(${deg} ${x2} ${y2})`} textAnchor="middle" dominantBaseline="middle" fontSize={g.fs} fontWeight={400} fill="#46534e" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{txt}</text>;
                 };
-
-                // الخلية عريضة: أسطر مكدّسة من الداخل للخارج، كل سطر يُقرأ مع الحلقة
-                if (arcAt(rr) >= rW - 8) {
-                  const fs = Math.max(6, Math.min(9.5, (rW - 8) / (n * 1.25), arcAt(rr) / (longest * 0.62)));
-                  const lineH = fs * 1.25;
-                  const maxLines = Math.max(1, Math.floor((rW - 8) / lineH));
-                  const maxCh = Math.max(4, Math.floor(arcAt(rr) / (fs * 0.62)));
-                  const rows = packNames(s.names, maxCh, maxLines);
-                  const startR = rIn + (rW - lineH * rows.length) / 2 + lineH / 2;
-                  return <g key={"g" + s.id}>{rows.map((nm, i) => {
-                    const r = startR + i * lineH;
-                    return label(i, r, mid, upright(mid * 180 / Math.PI + 90), fs, nm, arcAt(r));
-                  })}</g>;
+                if (g.mode === "lines") {
+                  const startR = rIn + (g.cellW - g.lineH * g.lines.length) / 2 + g.lineH / 2;
+                  return <g key={"g" + s.id}>{g.lines.map((nm, i) => put(i, startR + i * g.lineH, mid, upright(mid * 180 / Math.PI + 90), nm))}</g>;
                 }
-
-                // الخلية ضيّقة: الأسماء متجاورة، كلٌّ مكتوب بطول الشعاع (أوضح من التكديس العرضي)
-                const fs = Math.max(5.5, Math.min(9, arcAt(rr) / (n * 1.15), (rW - 8) / (longest * 0.62)));
-                const cols = Math.max(1, Math.floor(arcAt(rr) / (fs * 1.15)));
-                const maxChN = Math.max(4, Math.floor((rW - 8) / (fs * 0.62)));
-                const rows = packNames(s.names, maxChN, cols);
-                const step = (s.a1 - s.a0) / rows.length;
-                return <g key={"g" + s.id}>{rows.map((nm, i) => {
-                  const ang = s.a0 + step * (i + 0.5);
-                  return label(i, rr, ang, upright(ang * 180 / Math.PI), fs, nm, rW - 8);
+                // أعمدة طولية: تُملأ صفًا بعد صف نحو الخارج
+                const step = (s.a1 - s.a0) / g.cols;
+                return <g key={"g" + s.id}>{s.names.map((nm, i) => {
+                  const row = Math.floor(i / g.cols), col = i % g.cols;
+                  const ang = s.a0 + step * (col + 0.5);
+                  const r = rIn + row * g.colH + g.colH / 2;
+                  return put(i, r, ang, upright(ang * 180 / Math.PI), nm);
                 })}</g>;
               }
 
@@ -2816,9 +2847,7 @@ function FanChartModal({ centerId, members, onClose }) {
               deg = ((deg % 360) + 360) % 360;
               if (deg > 90 && deg < 270) deg += 180;  // إبقاء الاسم قائمًا لا مقلوبًا
               const avail = alongArc ? arc : radial;
-              const cross = alongArc ? radial : arc;
-              const fsMax = s.depth === 1 ? 13 : s.depth === 2 ? 11.5 : s.depth <= 4 ? 10 : 8.5;
-              const fs = Math.max(6, Math.min(fsMax, cross * 0.82, avail / Math.max(2, s.name.length * 0.6)));
+              const fs = fsByDepth[s.depth] || 8;     // حجم موحّد لكل حلقة
               const maxCh = Math.max(3, Math.floor(avail / (fs * 0.62)));
               const nm = s.name.length > maxCh ? s.name.slice(0, maxCh - 1) + "…" : s.name;
               const fw = s.depth <= 2 ? 700 : s.depth <= 4 ? 500 : 400;
