@@ -2627,20 +2627,40 @@ function FanChartModal({ centerId, members, onClose }) {
   const [saving, setSaving] = useState(false);
   const { segs, maxDepth } = useMemo(() => {
     if (!center) return { segs: [], maxDepth: 0 };
-    const leaf = {};
-    const cl = (id) => { const ks = sonsOf(id, childrenMap, byId); if (!ks.length) { leaf[id] = 1; return 1; } let s = 0; ks.forEach((k) => { s += cl(k.id); }); leaf[id] = s; return s; };
-    cl(centerId);
+    // وزن الفرع: الأطراف الذين لا ذرّية لهم يُجمعون في خلية واحدة، فلا تتضخّم خليةٌ
+    // على حساب أخواتها لمجرّد كثرة أبنائها الأطراف
+    const LEAVES_PER_SLOT = 3;
+    const weight = {};
+    const w = (id) => {
+      if (weight[id] != null) return weight[id];
+      const ks = sonsOf(id, childrenMap, byId);
+      let v;
+      if (ks.length === 0) v = 1;
+      else if (ks.every((k) => sonsOf(k.id, childrenMap, byId).length === 0)) v = Math.max(1, Math.ceil(ks.length / LEAVES_PER_SLOT));
+      else v = ks.reduce((sum, k) => sum + w(k.id), 0);
+      weight[id] = v;
+      return v;
+    };
+    w(centerId);
     const out = []; let md = 0; const off = -Math.PI / 2;
     // نلوّن الفروع عند أول تفرّع حقيقي (نقطة تعدُّد الأبناء)، فالجذع أحادي الابن يبقى بلون موحّد
     const assign = (id, a0, a1, depth, color) => {
-      const ks = sonsOf(id, childrenMap, byId); let a = a0; const total = leaf[id] || 1;
+      const ks = sonsOf(id, childrenMap, byId);
+      if (ks.length === 0) return;
+      const cd = depth + 1;
+      const shade = (c) => (c ? mixToWhite(c, Math.min(0.62, cd * 0.085)) : mixToWhite(FAN_TRUNK, Math.min(0.4, cd * 0.1)));
+      // كل الأبناء أطراف: خلية واحدة تضمّ أسماءهم
+      if (ks.every((k) => sonsOf(k.id, childrenMap, byId).length === 0)) {
+        out.push({ id: id + "-leaves", names: ks.map((k) => k.name), group: true, depth: cd, a0, a1, color: shade(color) });
+        md = Math.max(md, cd);
+        return;
+      }
       const fork = color == null && ks.length > 1;
+      let a = a0; const total = w(id) || 1;
       ks.forEach((k, idx) => {
-        const b1 = a + (a1 - a0) * ((leaf[k.id] || 1) / total);
+        const b1 = a + (a1 - a0) * ((w(k.id) || 1) / total);
         const baseCol = fork ? FAN_PALETTE[idx % FAN_PALETTE.length] : color;
-        const cd = depth + 1;
-        const fill = baseCol ? mixToWhite(baseCol, Math.min(0.62, cd * 0.085)) : mixToWhite(FAN_TRUNK, Math.min(0.4, cd * 0.1));
-        out.push({ id: k.id, name: k.name, depth: cd, a0: a, a1: b1, color: fill });
+        out.push({ id: k.id, name: k.name, depth: cd, a0: a, a1: b1, color: shade(baseCol) });
         md = Math.max(md, cd);
         assign(k.id, a, b1, cd, baseCol);
         a = b1;
@@ -2673,7 +2693,7 @@ function FanChartModal({ centerId, members, onClose }) {
     const [xo0, yo0] = polar(ro, a0), [xo1, yo1] = polar(ro, a1), [xi1, yi1] = polar(ri, a1), [xi0, yi0] = polar(ri, a0);
     return `M ${xo0} ${yo0} A ${ro} ${ro} 0 ${large} 1 ${xo1} ${yo1} L ${xi1} ${yi1} A ${ri} ${ri} 0 ${large} 0 ${xi0} ${yi0} Z`;
   };
-  const total = segs.length;
+  const total = segs.reduce((n, x) => n + (x.group ? x.names.length : 1), 0);
 
   const exportPdf = async () => {
     const svg = svgRef.current; if (!svg || saving) return;
@@ -2727,22 +2747,53 @@ function FanChartModal({ centerId, members, onClose }) {
               return Math.max((s.a1 - s.a0) * rr, ringW(s.depth) - 8) > 20;
             }).map((s) => {
               const mid = (s.a0 + s.a1) / 2;
+              const rIn = ringIn(s.depth), rW = ringW(s.depth);
               const rr = ringMid(s.depth);
+
+              // خلية الأطراف: عدّة أسماء مصفوفة داخل الخلية نفسها
+              if (s.group) {
+                const arcAt = (r) => (s.a1 - s.a0) * r;
+                const n = s.names.length;
+                const longest = s.names.reduce((mx, x) => Math.max(mx, x.length), 3);
+                let fs = Math.min(9.5, (rW - 8) / (n * 1.25), arcAt(rr) / (longest * 0.62));
+                let shown = s.names, extra = 0;
+                if (fs < 6) {   // ضاقت الخلية: نعرض ما يسع ونشير لبقيتهم
+                  fs = 6;
+                  const cap = Math.max(1, Math.floor((rW - 8) / (fs * 1.25)));
+                  if (n > cap) { shown = s.names.slice(0, cap - 1); extra = n - shown.length; }
+                }
+                const lineH = fs * 1.25;
+                const startR = rIn + (rW - lineH * (shown.length + (extra ? 1 : 0))) / 2 + lineH / 2;
+                const rows = shown.concat(extra ? [`+${extra}`] : []);
+                return (
+                  <g key={"g" + s.id}>
+                    {rows.map((nm, i) => {
+                      const r = startR + i * lineH;
+                      const [tx, ty] = polar(r, mid);
+                      let deg = mid * 180 / Math.PI + 90;
+                      deg = ((deg % 360) + 360) % 360;
+                      if (deg > 90 && deg < 270) deg += 180;
+                      const maxCh = Math.max(3, Math.floor(arcAt(r) / (fs * 0.62)));
+                      const t = nm.length > maxCh ? nm.slice(0, maxCh - 1) + "…" : nm;
+                      return <text key={i} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={400} fill="#46534e" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{t}</text>;
+                    })}
+                  </g>
+                );
+              }
+
               const [tx, ty] = polar(rr, mid);
               const arc = (s.a1 - s.a0) * rr;        // البعد العرضي (مع الحلقة)
-              const radial = ringW(s.depth) - 8;     // البعد الطولي (مع الشعاع)
+              const radial = rW - 8;                 // البعد الطولي (مع الشعاع)
               const alongArc = arc >= radial;
               let deg = mid * 180 / Math.PI + (alongArc ? 90 : 0);
               deg = ((deg % 360) + 360) % 360;
               if (deg > 90 && deg < 270) deg += 180;  // إبقاء الاسم قائمًا لا مقلوبًا
-              const avail = alongArc ? arc : radial;      // الطول المتاح للاسم
-              const cross = alongArc ? radial : arc;      // السماكة المتاحة لارتفاع الحرف
+              const avail = alongArc ? arc : radial;
+              const cross = alongArc ? radial : arc;
               const fsMax = s.depth === 1 ? 13 : s.depth === 2 ? 11.5 : s.depth <= 4 ? 10 : 8.5;
-              // يصغر الخط كلما ضاقت الخلية أو طال الاسم، حتى لا تتداخل الأسماء
               const fs = Math.max(6, Math.min(fsMax, cross * 0.82, avail / Math.max(2, s.name.length * 0.6)));
               const maxCh = Math.max(3, Math.floor(avail / (fs * 0.62)));
               const nm = s.name.length > maxCh ? s.name.slice(0, maxCh - 1) + "…" : s.name;
-              // خط أخفّ ولونٌ أهدأ كلما بَعُدت الحلقة، كما في نصوص الأخبار
               const fw = s.depth <= 2 ? 700 : s.depth <= 4 ? 500 : 400;
               const fill = s.depth <= 2 ? "#12302e" : s.depth <= 4 ? "#2b3a36" : "#46534e";
               return <text key={"t" + s.id} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={fw} fill={fill} style={{ fontFamily: "'Readex Pro', sans-serif" }}>{nm}</text>;
