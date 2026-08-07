@@ -1781,6 +1781,383 @@ function RelationGameModal({ members, onClose }) {
   );
 }
 
+/* ===== اللعبة الجماعية: كل لاعب على جواله ===== */
+const ROUND_SECONDS = 15;
+
+function makeRoomCode() {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+function buildRoundPayload(members) {
+  const males = members.filter((m) => m.gender !== "female");
+  const photoMembers = males.filter((m) => m.photoUrl && m.faceConsent);
+  if (photoMembers.length === 0) return null;
+  const answer = photoMembers[Math.floor(Math.random() * photoMembers.length)];
+  const useFaces = photoMembers.length >= 3 && Math.random() < 0.5;
+  if (useFaces) {
+    const others = shuffleArr(photoMembers.filter((m) => m.id !== answer.id)).slice(0, 2);
+    const options = shuffleArr([answer, ...others]).map((m) => ({
+      key: m.id, name: m.name, photo: m.photoUrl || null, gender: m.gender || null, correct: m.id === answer.id,
+    }));
+    return { mode: "faces", prompt: fourPartName(answer), answerName: fourPartName(answer), options };
+  }
+  const correctName = fourPartName(answer);
+  const seen = new Set([correctName]);
+  const distractors = [];
+  for (const m of shuffleArr(males)) {
+    if (distractors.length >= 2) break;
+    const nm = fourPartName(m);
+    if (!seen.has(nm)) { seen.add(nm); distractors.push(nm); }
+  }
+  const options = shuffleArr([correctName, ...distractors]).map((t) => ({ key: t, text: t, correct: t === correctName }));
+  return {
+    mode: "names", answerName: correctName,
+    answerPhoto: answer.photoUrl || null, answerFirstName: answer.name, answerGender: answer.gender || null,
+    options,
+  };
+}
+
+function GroupGameModal({ members, myName, onClose }) {
+  const [view, setView] = useState("menu"); // menu | lobby | play | end
+  const [mode, setMode] = useState("score"); // score | elimination
+  const [codeInput, setCodeInput] = useState("");
+  const [room, setRoom] = useState(null);
+  const [players, setPlayers] = useState([]);
+  const [round, setRound] = useState(null);
+  const [uid, setUid] = useState(null);
+  const [chosen, setChosen] = useState(null);
+  const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS);
+  const [elapsed, setElapsed] = useState(0);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const channelRef = useRef(null);
+  const advancingRef = useRef(false);
+
+  const isHost = !!(room && uid && room.host_account_id === uid);
+  const me = players.find((p) => p.account_id === uid) || null;
+  const active = players.filter((p) => !p.eliminated);
+  const ranked = players.slice().sort((a, b) => b.score - a.score || a.wrong_count - b.wrong_count);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setUid(data?.user?.id || null));
+    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
+  }, []);
+
+  // اشتراك لحظي بغرفة اللعب
+  const subscribe = (roomId) => {
+    if (channelRef.current) supabase.removeChannel(channelRef.current);
+    const ch = supabase
+      .channel(`game-room-${roomId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "game_rooms", filter: `id=eq.${roomId}` },
+        (p) => { if (p.new) setRoom(p.new); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "game_players", filter: `room_id=eq.${roomId}` },
+        () => { refreshPlayers(roomId); })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_rounds", filter: `room_id=eq.${roomId}` },
+        (p) => { if (p.new) { setRound(p.new); setChosen(null); setTimeLeft(ROUND_SECONDS); advancingRef.current = false; } })
+      .subscribe();
+    channelRef.current = ch;
+  };
+
+  const refreshPlayers = async (roomId) => {
+    const { data } = await supabase.from("game_players").select("*").eq("room_id", roomId);
+    setPlayers(data || []);
+  };
+
+  const createRoom = async () => {
+    setBusy(true); setErr("");
+    let created = null;
+    for (let i = 0; i < 5 && !created; i++) {
+      const { data } = await supabase.from("game_rooms").insert({ code: makeRoomCode(), mode, round_seconds: ROUND_SECONDS }).select().single();
+      created = data;
+    }
+    if (!created) { setErr("تعذّر إنشاء الغرفة، حاول مرة أخرى."); setBusy(false); return; }
+    await supabase.from("game_players").insert({ room_id: created.id, display_name: myName || "لاعب" });
+    setRoom(created); await refreshPlayers(created.id); subscribe(created.id);
+    setView("lobby"); setBusy(false);
+  };
+
+  const joinRoom = async () => {
+    setBusy(true); setErr("");
+    const code = codeInput.trim();
+    const { data: found } = await supabase.from("game_rooms").select("*").eq("code", code).order("created_at", { ascending: false }).limit(1);
+    const target = (found || [])[0];
+    if (!target) { setErr("لا توجد غرفة بهذا الرمز."); setBusy(false); return; }
+    if (target.status === "ended") { setErr("انتهت هذه الجولة."); setBusy(false); return; }
+    await supabase.from("game_players").upsert({ room_id: target.id, display_name: myName || "لاعب" }, { onConflict: "room_id,account_id" });
+    setRoom(target); await refreshPlayers(target.id); subscribe(target.id);
+    if (target.status === "running") {
+      const { data: r } = await supabase.from("game_rounds").select("*").eq("room_id", target.id).order("round_no", { ascending: false }).limit(1);
+      if (r && r[0]) setRound(r[0]);
+      setView("play");
+    } else setView("lobby");
+    setBusy(false);
+  };
+
+  const pushRound = async (roomId, no) => {
+    const payload = buildRoundPayload(members);
+    if (!payload) { setErr("لا توجد صور كافية لبدء اللعبة."); return false; }
+    await supabase.from("game_rounds").insert({ room_id: roomId, round_no: no, payload });
+    await supabase.from("game_rooms").update({ current_round: no }).eq("id", roomId);
+    return true;
+  };
+
+  const startGame = async () => {
+    if (!room) return;
+    setBusy(true);
+    const ok = await pushRound(room.id, 1);
+    if (ok) {
+      const { data } = await supabase.from("game_rooms").update({ status: "running", started_at: new Date().toISOString(), current_round: 1 }).eq("id", room.id).select().single();
+      if (data) setRoom(data);
+      setView("play");
+    }
+    setBusy(false);
+  };
+
+  const stopGame = async () => {
+    if (!room) return;
+    const { data } = await supabase.from("game_rooms").update({ status: "ended", ended_at: new Date().toISOString() }).eq("id", room.id).select().single();
+    if (data) setRoom(data);
+    setView("end");
+  };
+
+  // مؤقّت الجولة والوقت الكلي
+  useEffect(() => {
+    if (view !== "play" || !room || room.status !== "running") return;
+    const t = setInterval(() => {
+      setTimeLeft((s) => (s > 0 ? s - 1 : 0));
+      setElapsed((s) => s + 1);
+    }, 1000);
+    return () => clearInterval(t);
+  }, [view, room && room.status]);
+
+  // انتهاء وقت الجولة دون إجابة = خطأ
+  useEffect(() => {
+    if (timeLeft !== 0 || !round || !me || chosen) return;
+    if (me.answered_round >= round.round_no) return;
+    register(false);
+    // eslint-disable-next-line
+  }, [timeLeft]);
+
+  const register = async (correct) => {
+    if (!room || !me || !round) return;
+    const patch = {
+      answered_round: round.round_no,
+      score: me.score + (correct ? 10 : 0),
+      correct_count: me.correct_count + (correct ? 1 : 0),
+      wrong_count: me.wrong_count + (correct ? 0 : 1),
+      eliminated: room.mode === "elimination" && !correct ? true : me.eliminated,
+    };
+    const { data } = await supabase.from("game_players").update(patch).eq("id", me.id).select().single();
+    if (data) setPlayers((prev) => prev.map((p) => (p.id === data.id ? data : p)));
+  };
+
+  const choose = async (opt) => {
+    if (chosen || !round) return;
+    setChosen(opt);
+    await register(!!opt.correct);
+  };
+
+  // المضيف ينقل الجولة حين يجيب الجميع أو ينتهي الوقت
+  useEffect(() => {
+    if (!isHost || !room || room.status !== "running" || !round || advancingRef.current) return;
+    const contenders = players.filter((p) => !p.eliminated);
+    const allAnswered = contenders.length > 0 && contenders.every((p) => p.answered_round >= round.round_no);
+    const timedOut = timeLeft === 0;
+    if (!allAnswered && !timedOut) return;
+    if (room.mode === "elimination") {
+      const remaining = players.filter((p) => !p.eliminated);
+      if (remaining.length <= 1 && players.length > 1) { advancingRef.current = true; stopGame(); return; }
+    }
+    advancingRef.current = true;
+    const t = setTimeout(() => { pushRound(room.id, round.round_no + 1); }, 2600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line
+  }, [players, timeLeft, round, isHost]);
+
+  // اللاعب يتابع حالة الغرفة (انتهاء اللعبة أو بدؤها من المضيف)
+  useEffect(() => {
+    if (!room) return;
+    if (room.status === "running" && view === "lobby") setView("play");
+    if (room.status === "ended" && view !== "end") setView("end");
+  }, [room && room.status]);
+
+  const fmtTime = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
+  const shell = (inner, sub) => (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 88 }} onClick={onClose}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.sand, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 460, maxHeight: "94vh", overflowY: "auto", fontFamily: "'Readex Pro', sans-serif" }}>
+        <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "14px 16px", position: "sticky", top: 0, zIndex: 2 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <span style={{ color: "#fff", fontSize: 15, fontWeight: 800, display: "flex", alignItems: "center", gap: 8 }}><Gamepad2 size={17} color={TT.gold400} /> اختبر صلتك — جماعي</span>
+              <span style={{ color: "#cfe0dc", fontSize: 11.5 }}>{sub}</span>
+            </div>
+            <button onClick={onClose} style={{ background: "none", border: "none", color: "#e9e2d0", cursor: "pointer" }}><X size={20} /></button>
+          </div>
+          {(view === "play" || view === "end") && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.12)", color: TT.gold400, borderRadius: 999, padding: "4px 11px", fontSize: 12.5, fontWeight: 800 }}>
+                <Sparkles size={13} /> {me ? me.score : 0} نقطة
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.12)", color: timeLeft <= 5 && view === "play" ? "#ffb4a2" : "#fff", borderRadius: 999, padding: "4px 11px", fontSize: 12.5, fontWeight: 800 }}>
+                <Clock size={13} /> {view === "play" ? `${timeLeft}ث` : fmtTime(elapsed)}
+              </span>
+            </div>
+          )}
+        </div>
+        <div style={{ padding: 16 }}>{inner}</div>
+      </div>
+    </div>
+  );
+
+  const playersStrip = (
+    <div style={{ display: "grid", gap: 6, marginTop: 14 }}>
+      {ranked.map((p, i) => (
+        <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, background: p.account_id === uid ? T.sandDark : T.card, border: `1px solid ${p.eliminated ? "#e6cfc9" : T.line}`, borderRadius: 10, padding: "8px 11px", opacity: p.eliminated ? 0.55 : 1 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: T.muted, width: 16 }}>{i + 1}</span>
+          <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: T.ink }}>{p.display_name}{p.account_id === uid ? " (أنت)" : ""}</span>
+          {p.eliminated && <span style={{ fontSize: 10.5, color: T.clay, fontWeight: 700 }}>خرج</span>}
+          {round && !p.eliminated && p.answered_round >= round.round_no && view === "play" && <Check size={13} color="#1b7a3d" />}
+          <span style={{ fontSize: 12, fontWeight: 800, color: T.gold }}>{p.score}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  if (view === "menu") {
+    return shell(
+      <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ fontSize: 12.5, color: T.muted, lineHeight: 1.9 }}>
+          العبوا معًا وكلٌّ على جواله: أنشئ غرفة وأعطِ الباقين رمزها، أو ادخل برمز غرفة موجودة.
+        </div>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 7 }}>طريقة الفوز</div>
+          <div style={{ display: "grid", gap: 7 }}>
+            {[["score", "بالنقاط", "اللعب حتى يوقف المضيف، والفائز صاحب أعلى مجموع."], ["elimination", "بالإقصاء", "من يخطئ يخرج، والفائز آخر من يبقى."]].map(([k, t, d]) => (
+              <button key={k} onClick={() => setMode(k)} style={{ textAlign: "right", background: mode === k ? T.sandDark : T.card, border: `1.5px solid ${mode === k ? T.gold : T.line}`, borderRadius: 12, padding: "11px 13px", cursor: "pointer", fontFamily: "inherit" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: T.ink }}>{t}</div>
+                <div style={{ fontSize: 11, color: T.muted, marginTop: 3 }}>{d}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+        <button onClick={createRoom} disabled={busy} style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, padding: "13px", fontSize: 14, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+          {busy ? "…" : "إنشاء غرفة جديدة"}
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: T.muted, fontSize: 11 }}>
+          <span style={{ flex: 1, height: 1, background: T.line }} /> أو <span style={{ flex: 1, height: 1, background: T.line }} />
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={codeInput} onChange={(e) => setCodeInput(e.target.value.replace(/\D/g, "").slice(0, 4))} inputMode="numeric" placeholder="رمز الغرفة" style={{ ...inputStyle, textAlign: "center", letterSpacing: 4, fontWeight: 800 }} />
+          <button onClick={joinRoom} disabled={busy || codeInput.length < 4} style={{ background: T.ink, color: T.sand, border: "none", borderRadius: 10, padding: "0 18px", fontSize: 13, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>دخول</button>
+        </div>
+        {err && <div style={{ color: T.clay, fontSize: 12, fontWeight: 700, textAlign: "center" }}>{err}</div>}
+      </div>,
+      "لعبة العائلة على عدة أجهزة"
+    );
+  }
+
+  if (view === "lobby") {
+    return shell(
+      <div>
+        <div style={{ textAlign: "center", background: T.card, border: `1.5px solid ${T.gold}`, borderRadius: 14, padding: "16px 12px" }}>
+          <div style={{ fontSize: 11.5, color: T.muted }}>رمز الغرفة — شاركه مع اللاعبين</div>
+          <div style={{ fontSize: 34, fontWeight: 800, color: T.ink, letterSpacing: 8, margin: "6px 0 2px" }}>{room ? room.code : "—"}</div>
+          <div style={{ fontSize: 11, color: T.muted }}>{room && room.mode === "elimination" ? "الفوز بالإقصاء" : "الفوز بالنقاط"}</div>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginTop: 16 }}>اللاعبون ({players.length})</div>
+        {playersStrip}
+        {isHost ? (
+          <button onClick={startGame} disabled={busy || players.length < 1} style={{ width: "100%", marginTop: 16, background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, padding: "13px", fontSize: 14, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+            {busy ? "…" : "بدء اللعبة"}
+          </button>
+        ) : (
+          <div style={{ textAlign: "center", fontSize: 12, color: T.muted, marginTop: 16 }}>في انتظار أن يبدأ المضيف اللعبة…</div>
+        )}
+        {err && <div style={{ color: T.clay, fontSize: 12, fontWeight: 700, textAlign: "center", marginTop: 10 }}>{err}</div>}
+      </div>,
+      "غرفة الانتظار"
+    );
+  }
+
+  if (view === "end") {
+    const winner = room && room.mode === "elimination" ? (players.find((p) => !p.eliminated) || ranked[0]) : ranked[0];
+    return shell(
+      <div style={{ textAlign: "center" }}>
+        <Trophy size={40} color={T.gold} />
+        <div style={{ fontSize: 16, fontWeight: 800, color: T.ink, margin: "10px 0 4px" }}>{winner ? `الفائز: ${winner.display_name}` : "انتهت اللعبة"}</div>
+        <div style={{ fontSize: 12, color: T.muted }}>مدة اللعب: {fmtTime(elapsed)}</div>
+        <div style={{ textAlign: "right" }}>{playersStrip}</div>
+        <button onClick={onClose} style={{ width: "100%", marginTop: 18, background: T.ink, color: T.sand, border: "none", borderRadius: 12, padding: "12px", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>إغلاق</button>
+      </div>,
+      "النتيجة النهائية"
+    );
+  }
+
+  // view === play
+  const p = round ? round.payload : null;
+  const answered = !!chosen || (me && round && me.answered_round >= round.round_no);
+  const optBg = (opt) => (!answered ? T.card : opt.correct ? "#e7f6ec" : chosen === opt ? "#fbe6e2" : T.card);
+  const optBd = (opt) => (!answered ? T.line : opt.correct ? "#1b7a3d" : chosen === opt ? "#c0392b" : T.line);
+
+  return shell(
+    <div>
+      {me && me.eliminated && (
+        <div style={{ background: "#fbe6e2", border: "1px solid #e0b4aa", borderRadius: 12, padding: "10px 12px", fontSize: 12, color: T.clay, fontWeight: 700, textAlign: "center", marginBottom: 12 }}>
+          خرجت من المنافسة — تابع بقية اللاعبين حتى تنتهي الجولة.
+        </div>
+      )}
+      {!p ? (
+        <div style={{ textAlign: "center", color: T.muted, fontSize: 12.5, padding: "30px 0" }}>في انتظار السؤال…</div>
+      ) : p.mode === "names" ? (
+        <>
+          <div style={{ textAlign: "center", fontSize: 13, fontWeight: 700, color: T.ink, marginBottom: 10 }}>مَن هذا؟ اختر اسمه الرباعي:</div>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+            <div style={{ borderRadius: "50%", border: `3px solid ${TT.gold500}`, padding: 3, background: T.card }}>
+              <Avatar name={p.answerFirstName} photoUrl={p.answerPhoto} gender={p.answerGender} size={120} />
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {p.options.map((opt, i) => (
+              <button key={i} onClick={() => choose(opt)} disabled={answered || (me && me.eliminated)} style={{ textAlign: "right", background: optBg(opt), border: `1.5px solid ${optBd(opt)}`, borderRadius: 12, padding: "12px 14px", cursor: answered ? "default" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, color: T.ink }}>
+                {opt.text}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ textAlign: "center", fontSize: 13, fontWeight: 700, color: T.ink }}>أيّ الصور لـ:</div>
+          <div style={{ textAlign: "center", fontSize: 14.5, fontWeight: 800, color: TT.teal800, margin: "4px 0 12px" }}>{p.prompt}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 9 }}>
+            {p.options.map((opt, i) => (
+              <button key={i} onClick={() => choose(opt)} disabled={answered || (me && me.eliminated)} style={{ background: optBg(opt), border: `2px solid ${optBd(opt)}`, borderRadius: 14, padding: 8, cursor: answered ? "default" : "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                <Avatar name={opt.name} photoUrl={opt.photo} gender={opt.gender} size={74} />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {answered && p && (
+        <div style={{ textAlign: "center", fontSize: 12, color: T.muted, marginTop: 12 }}>
+          الإجابة الصحيحة: <b style={{ color: T.ink }}>{p.answerName}</b> · بانتظار بقية اللاعبين…
+        </div>
+      )}
+
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: T.muted, marginTop: 16 }}>الترتيب المباشر</div>
+      {playersStrip}
+
+      {isHost && (
+        <button onClick={stopGame} style={{ width: "100%", marginTop: 14, background: "transparent", color: T.clay, border: `1px solid ${T.line}`, borderRadius: 12, padding: "11px", fontSize: 13, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+          إيقاف اللعبة وإعلان النتيجة
+        </button>
+      )}
+    </div>,
+    room ? `غرفة ${room.code} · الجولة ${round ? round.round_no : "…"}` : ""
+  );
+}
+
 // ===== أدوات النسب والذرية: مساعدات مشتركة =====
 function treeMaps(members) {
   const byId = {}; const childrenMap = {};
@@ -2307,7 +2684,7 @@ function WhoIsThisModal({ members, onClose, onOpenMember }) {
   );
 }
 
-function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
+function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
   const [selectedNode, setSelectedNode] = useState(null);
@@ -2319,6 +2696,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
   const [statsOpen, setStatsOpen] = useState(false);
   const [phoneDirOpen, setPhoneDirOpen] = useState(false);
   const [gameOpen, setGameOpen] = useState(false);
+  const [groupGameOpen, setGroupGameOpen] = useState(false);
   const [fanOpen, setFanOpen] = useState(false);
   const centeredRef = useRef(false);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
@@ -2651,9 +3029,14 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
                 </button>
               ))}
             </div>
-            <button onClick={() => setGameOpen(true)} style={{ width: "100%", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "9px 8px", background: `linear-gradient(160deg, ${T.gold}, #9c7238)`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 10, fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
-              <Gamepad2 size={15} color="#fff" /> لعبة الشجرة: اختبر صلتك!
-            </button>
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <button onClick={() => setGameOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 6px", background: `linear-gradient(160deg, ${T.gold}, #9c7238)`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 10, fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+                <Gamepad2 size={15} color="#fff" /> اختبر صلتك
+              </button>
+              <button onClick={() => setGroupGameOpen(true)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 6px", background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 10, fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+                <Users2 size={15} color={TT.gold400} /> لعب جماعي
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -2826,6 +3209,9 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree }) {
       )}
       {gameOpen && (
         <RelationGameModal members={members} onClose={() => setGameOpen(false)} />
+      )}
+      {groupGameOpen && (
+        <GroupGameModal members={members} myName={(members.find((m) => m.id === meId) || {}).name || "لاعب"} onClose={() => setGroupGameOpen(false)} />
       )}
       {fanOpen && rootId && (
         <FanChartModal centerId={rootId} members={members} onClose={() => setFanOpen(false)} />
@@ -6318,7 +6704,7 @@ function FamilyAppInner({ meId }) {
           ) : (
             <>
               {tab === "news" && <NewsTab news={news} setNews={setNews} canManageNews={canManageNews} events={events} membersCount={members.filter((m) => m.gender !== "female").length} onNavigate={setTab} />}
-              {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
+              {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} meId={meId} />}
               {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} onUploadingChange={setMagazineUploading} onUploadResult={setMagazineUploadMsg} />}
               {tab === "heritage" && <HeritageTab canManage={canManageDocuments} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
