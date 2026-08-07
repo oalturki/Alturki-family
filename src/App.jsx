@@ -1794,7 +1794,30 @@ function makeRoomCode() {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
 
-function buildRoundPayload(members) {
+const GAME_LEVELS = [
+  { key: 1, label: "الجد الأول", hint: "ذرّية جدّك المباشر" },
+  { key: 2, label: "الجد الثاني", hint: "ذرّية جدّ أبيك" },
+  { key: 3, label: "الجد الثالث", hint: "فرع أوسع من العائلة" },
+  { key: 0, label: "كل العائلة", hint: "الشجرة كاملة" },
+];
+
+// نطاق أفراد المستوى: ذرّية الجدّ رقم N للمضيف (0 = الجميع)
+function levelScopeIds(members, myId, level) {
+  if (!level || !myId) return null;
+  const byId = Object.fromEntries(members.map((m) => [m.id, m]));
+  const me = byId[myId];
+  if (!me) return null;
+  const chain = ancestorsToRoot(me, byId); // [أنا، الأب، الجد، ...]
+  const ancestor = chain[level + 1] || chain[chain.length - 1];
+  if (!ancestor) return null;
+  return new Set(branchMemberIds(ancestor.id, members));
+}
+
+function buildRoundPayload(members, scopeIds) {
+  const pool = scopeIds ? members.filter((m) => scopeIds.has(m.id)) : members;
+  const withPhotos = pool.filter((m) => m.gender !== "female" && m.photoUrl && m.faceConsent);
+  // إن ضاق النطاق عن ثلاثة بصور، نوسّعه للعائلة كلها حتى لا تتعطّل اللعبة
+  members = withPhotos.length >= 3 ? pool : members;
   const males = members.filter((m) => m.gender !== "female");
   const photoMembers = males.filter((m) => m.photoUrl && m.faceConsent);
   if (photoMembers.length === 0) return null;
@@ -1916,9 +1939,10 @@ function GameInvitePopup({ invite, onJoin, onDismiss }) {
   );
 }
 
-function GroupGameModal({ members, myName, onClose, initialCode }) {
+function GroupGameModal({ members, myName, myId, onClose, initialCode }) {
   const [view, setView] = useState("menu"); // menu | lobby | play | end
   const [mode, setMode] = useState("score"); // score | elimination
+  const [level, setLevel] = useState(0);     // 0 = كل العائلة
   const [codeInput, setCodeInput] = useState("");
   const [room, setRoom] = useState(null);
   const [players, setPlayers] = useState([]);
@@ -1984,7 +2008,7 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
     setBusy(true); setErr("");
     let created = null;
     for (let i = 0; i < 5 && !created; i++) {
-      const { data } = await supabase.from("game_rooms").insert({ code: makeRoomCode(), mode, round_seconds: ROUND_SECONDS }).select().single();
+      const { data } = await supabase.from("game_rooms").insert({ code: makeRoomCode(), mode, level, round_seconds: ROUND_SECONDS }).select().single();
       created = data;
     }
     if (!created) { setErr("تعذّر إنشاء الغرفة، حاول مرة أخرى."); setBusy(false); return; }
@@ -2021,7 +2045,8 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
   };
 
   const pushRound = async (roomId, no) => {
-    const payload = buildRoundPayload(members);
+    const scope = levelScopeIds(members, myId, room ? room.level : level);
+    const payload = buildRoundPayload(members, scope);
     if (!payload) { setErr("لا توجد صور كافية لبدء اللعبة."); return false; }
     const { data, error } = await supabase.from("game_rounds").insert({ room_id: roomId, round_no: no, payload }).select().single();
     if (error) { console.error("pushRound failed", error); advancingRef.current = false; return false; }
@@ -2043,15 +2068,15 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
   };
 
   // إعادة الغرفة لغرفة الانتظار لجولة جديدة (يمكن تغيير نوع اللعب)
-  const newGame = async (m) => {
+  const newGame = async (m, lv) => {
     if (!room) return;
     setBusy(true);
     if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
     advancingRef.current = false;
     const { data } = await supabase.from("game_rooms")
-      .update({ status: "lobby", mode: m || room.mode, current_round: 0, started_at: null, ended_at: null })
+      .update({ status: "lobby", mode: m || room.mode, level: (lv === undefined ? room.level : lv), current_round: 0, started_at: null, ended_at: null })
       .eq("id", room.id).select().single();
-    if (data) { setRoom(data); setMode(data.mode); }
+    if (data) { setRoom(data); setMode(data.mode); setLevel(data.level || 0); }
     setRound(null); setChosen(null); setElapsed(0); setTimeLeft(ROUND_SECONDS);
     setView("lobby"); setBusy(false);
   };
@@ -2233,6 +2258,18 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
             ))}
           </div>
         </div>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 7 }}>مستوى اللعب</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {GAME_LEVELS.map((l) => (
+              <button key={l.key} onClick={() => setLevel(l.key)} style={{ textAlign: "center", background: level === l.key ? T.sandDark : T.card, border: `1.5px solid ${level === l.key ? T.gold : T.line}`, borderRadius: 12, padding: "10px 8px", cursor: "pointer", fontFamily: "inherit" }}>
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: T.ink }}>{l.label}</div>
+                <div style={{ fontSize: 10, color: T.muted, marginTop: 3 }}>{l.hint}</div>
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 10.5, color: T.muted, marginTop: 6, lineHeight: 1.7 }}>الأسئلة تُختار من نطاق المستوى (بحسب نسب المضيف)، وإن قلّت الصور فيه تتوسّع للعائلة كلها.</div>
+        </div>
         <button onClick={createRoom} disabled={busy} style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, padding: "13px", fontSize: 14, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
           {busy ? "…" : "إنشاء غرفة جديدة"}
         </button>
@@ -2255,7 +2292,10 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
         <div style={{ textAlign: "center", background: T.card, border: `1.5px solid ${T.gold}`, borderRadius: 14, padding: "16px 12px" }}>
           <div style={{ fontSize: 11.5, color: T.muted }}>رمز الغرفة — شاركه مع اللاعبين</div>
           <div style={{ fontSize: 34, fontWeight: 800, color: T.ink, letterSpacing: 8, margin: "6px 0 2px" }}>{room ? room.code : "—"}</div>
-          <div style={{ fontSize: 11, color: T.muted }}>{room && room.mode === "elimination" ? "الفوز بخروج المغلوب" : "الفوز بالنقاط"}</div>
+          <div style={{ fontSize: 11, color: T.muted }}>
+            {room && room.mode === "elimination" ? "الفوز بخروج المغلوب" : "الفوز بالنقاط"}
+            {" · مستوى "}{(GAME_LEVELS.find((l) => l.key === (room ? room.level : 0)) || GAME_LEVELS[3]).label}
+          </div>
         </div>
         <InvitePanel members={members} room={room} myName={myName} players={players} />
         <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginTop: 16 }}>اللاعبون ({players.length})</div>
@@ -2283,10 +2323,19 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
         <div style={{ textAlign: "right" }}>{playersStrip}</div>
         {isHost ? (
           <div style={{ marginTop: 18, display: "grid", gap: 9 }}>
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: T.muted }}>جولة جديدة بنوع اللعب:</div>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: T.muted }}>مستوى الجولة الجديدة:</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {GAME_LEVELS.map((l) => (
+                <button key={l.key} onClick={() => setLevel(l.key)}
+                  style={{ background: level === l.key ? T.sandDark : T.card, color: T.ink, border: `1.5px solid ${level === l.key ? T.gold : T.line}`, borderRadius: 12, padding: "9px 6px", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+                  {l.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: T.muted, marginTop: 4 }}>ابدأ الجولة بنوع اللعب:</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {[["score", "بالنقاط"], ["elimination", "بخروج المغلوب"]].map(([k, lbl]) => (
-                <button key={k} onClick={() => newGame(k)} disabled={busy}
+                <button key={k} onClick={() => newGame(k, level)} disabled={busy}
                   style={{ background: (room && room.mode === k) ? T.ink : T.card, color: (room && room.mode === k) ? T.sand : T.ink, border: `1.5px solid ${(room && room.mode === k) ? T.ink : T.line}`, borderRadius: 12, padding: "12px 8px", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
                   {lbl}
                 </button>
@@ -3477,7 +3526,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
         <RelationGameModal members={members} onClose={() => setGameOpen(false)} />
       )}
       {groupGameOpen && (
-        <GroupGameModal members={members} myName={(members.find((m) => m.id === meId) || {}).name || "لاعب"} initialCode={gameInvite} onClose={() => { setGroupGameOpen(false); onGameInviteUsed && onGameInviteUsed(); }} />
+        <GroupGameModal members={members} myName={(members.find((m) => m.id === meId) || {}).name || "لاعب"} myId={meId} initialCode={gameInvite} onClose={() => { setGroupGameOpen(false); onGameInviteUsed && onGameInviteUsed(); }} />
       )}
       {fanOpen && rootId && (
         <FanChartModal centerId={rootId} members={members} onClose={() => setFanOpen(false)} />
