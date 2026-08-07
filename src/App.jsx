@@ -1984,8 +1984,8 @@ function GroupGameModal({ members, myName, onClose }) {
   const fmtTime = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
   const shell = (inner, sub) => (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 88 }} onClick={onClose}>
-      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.sand, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 460, maxHeight: "94vh", overflowY: "auto", fontFamily: "'Readex Pro', sans-serif" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 88, padding: "calc(env(safe-area-inset-top, 0px) + 14px) 12px 14px", overflowY: "auto" }} onClick={onClose}>
+      <div dir="rtl" onClick={(e) => e.stopPropagation()} style={{ background: T.sand, borderRadius: 18, width: "100%", maxWidth: 460, maxHeight: "88vh", overflowY: "auto", fontFamily: "'Readex Pro', sans-serif", boxShadow: "0 12px 40px rgba(0,0,0,0.3)" }}>
         <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "14px 16px", position: "sticky", top: 0, zIndex: 2 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
@@ -2032,11 +2032,11 @@ function GroupGameModal({ members, myName, onClose }) {
         </div>
         <div>
           <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 7 }}>طريقة الفوز</div>
-          <div style={{ display: "grid", gap: 7 }}>
-            {[["score", "بالنقاط", "اللعب حتى يوقف المضيف، والفائز صاحب أعلى مجموع."], ["elimination", "بالإقصاء", "من يخطئ يخرج، والفائز آخر من يبقى."]].map(([k, t, d]) => (
-              <button key={k} onClick={() => setMode(k)} style={{ textAlign: "right", background: mode === k ? T.sandDark : T.card, border: `1.5px solid ${mode === k ? T.gold : T.line}`, borderRadius: 12, padding: "11px 13px", cursor: "pointer", fontFamily: "inherit" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {[["score", "بالنقاط", "اللعب حتى يوقف المضيف، والفائز صاحب أعلى مجموع."], ["elimination", "بخروج المغلوب", "من يخطئ يخرج، والفائز آخر من يبقى."]].map(([k, t, d]) => (
+              <button key={k} onClick={() => setMode(k)} style={{ textAlign: "center", background: mode === k ? T.sandDark : T.card, border: `1.5px solid ${mode === k ? T.gold : T.line}`, borderRadius: 12, padding: "12px 10px", cursor: "pointer", fontFamily: "inherit" }}>
                 <div style={{ fontSize: 13, fontWeight: 800, color: T.ink }}>{t}</div>
-                <div style={{ fontSize: 11, color: T.muted, marginTop: 3 }}>{d}</div>
+                <div style={{ fontSize: 10.5, color: T.muted, marginTop: 5, lineHeight: 1.7 }}>{d}</div>
               </button>
             ))}
           </div>
@@ -2053,7 +2053,7 @@ function GroupGameModal({ members, myName, onClose }) {
         </div>
         {err && <div style={{ color: T.clay, fontSize: 12, fontWeight: 700, textAlign: "center" }}>{err}</div>}
       </div>,
-      "لعبة العائلة على عدة أجهزة"
+      "لعبة جماعية للعائلة"
     );
   }
 
@@ -2063,7 +2063,7 @@ function GroupGameModal({ members, myName, onClose }) {
         <div style={{ textAlign: "center", background: T.card, border: `1.5px solid ${T.gold}`, borderRadius: 14, padding: "16px 12px" }}>
           <div style={{ fontSize: 11.5, color: T.muted }}>رمز الغرفة — شاركه مع اللاعبين</div>
           <div style={{ fontSize: 34, fontWeight: 800, color: T.ink, letterSpacing: 8, margin: "6px 0 2px" }}>{room ? room.code : "—"}</div>
-          <div style={{ fontSize: 11, color: T.muted }}>{room && room.mode === "elimination" ? "الفوز بالإقصاء" : "الفوز بالنقاط"}</div>
+          <div style={{ fontSize: 11, color: T.muted }}>{room && room.mode === "elimination" ? "الفوز بخروج المغلوب" : "الفوز بالنقاط"}</div>
         </div>
         <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginTop: 16 }}>اللاعبون ({players.length})</div>
         {playersStrip}
