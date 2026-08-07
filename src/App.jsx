@@ -10,7 +10,7 @@ import {
   Camera, ImagePlus, QrCode,
   Trophy, Sparkles, RotateCcw, Gamepad2,
   Download, Sun, ScrollText, ListTree, Eye, Clock,
-  Bell, Send, Inbox, Users2, Menu, Delete, ChevronsLeft
+  Bell, Send, Inbox, Users2, Menu, Delete, ChevronsLeft, Pin
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -292,7 +292,7 @@ async function upsertMemberProfile(memberId, { socialLinks, extendedVisible, pho
 }
 
 async function fetchNews() {
-  const { data, error } = await supabase.from("news").select("*").order("date", { ascending: false });
+  const { data, error } = await supabase.from("news").select("*").order("pinned", { ascending: false, nullsFirst: false }).order("date", { ascending: false });
   if (error) { console.error("fetchNews failed", error); return []; }
   return data;
 }
@@ -304,6 +304,33 @@ async function uploadNewsImage(file) {
   if (error) { console.error("uploadNewsImage failed", error); return null; }
   const { data } = supabase.storage.from("news-images").getPublicUrl(path);
   return data.publicUrl;
+}
+
+// ===== التراث: تاريخ العائلة وأعلامها ووثائقها وأدبياتها =====
+async function fetchHeritage() {
+  const { data, error } = await supabase
+    .from("heritage_entries")
+    .select("id, section, title, body, image_url, era, sort, created_at")
+    .eq("hidden", false)
+    .order("sort", { ascending: true })
+    .order("created_at", { ascending: false });
+  if (error) { console.error("fetchHeritage failed", error); return []; }
+  return data || [];
+}
+async function insertHeritage(payload) {
+  const { data, error } = await supabase.from("heritage_entries").insert(payload).select().single();
+  if (error) { console.error("insertHeritage failed", error); return null; }
+  return data;
+}
+async function updateHeritage(id, patch) {
+  const { data, error } = await supabase.from("heritage_entries").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id).select().single();
+  if (error) { console.error("updateHeritage failed", error); return null; }
+  return data;
+}
+async function deleteHeritage(id) {
+  const { error } = await supabase.from("heritage_entries").delete().eq("id", id);
+  if (error) { console.error("deleteHeritage failed", error); return false; }
+  return true;
 }
 
 async function uploadMemberPhoto(file) {
@@ -810,7 +837,8 @@ function Toast({ message, type = "success", onClose }) {
 
 function ConfirmModal({ onConfirm, onCancel }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onCancel}>
+    // zIndex عالٍ ليعلو نوافذ القراءة والتحرير المفتوحة تحته
+    <div style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.62)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 120, padding: 20 }} onClick={onCancel}>
       <div style={{ background: T.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340, fontFamily: "'Readex Pro', sans-serif" }} onClick={(e) => e.stopPropagation()} dir="rtl">
         <div style={{ fontSize: 12.5, color: T.muted, lineHeight: 1.7, marginBottom: 16, textAlign: "center" }}>
           الحذف سيكون نهائيًا، ولا يمكن استرجاع المحذوف.
@@ -834,6 +862,8 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
   const [imageFile, setImageFile] = useState(null);
   const [existingImageUrl, setExistingImageUrl] = useState("");
   const [locationUrl, setLocationUrl] = useState("");
+  const [pinned, setPinned] = useState(false);
+  const [size, setSize] = useState("normal"); // normal | large
   const [uploadingImg, setUploadingImg] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -849,7 +879,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
   const todayStr = new Date().toISOString().slice(0, 10);
   const nextEvent = (events || []).filter((e) => e.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date))[0];
 
-  const resetForm = () => { setEditingId(null); setType("عام"); setTitle(""); setText(""); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); };
+  const resetForm = () => { setEditingId(null); setType("عام"); setTitle(""); setText(""); setImageFile(null); setExistingImageUrl(""); setLocationUrl(""); setPinned(false); setSize("normal"); };
   const openComposer = () => { resetForm(); setOpen(true); };
 
   const submit = async () => {
@@ -861,7 +891,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
       const uploaded = await uploadNewsImage(compressed);
       if (uploaded) imageUrl = uploaded;
     }
-    const payload = { type, title: title.trim() || null, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null };
+    const payload = { type, title: title.trim() || null, text: text.trim(), image_url: imageUrl, location_url: locationUrl.trim() || null, pinned, size };
     if (editingId) {
       const updated = await updateNews(editingId, payload);
       if (updated) setNews(news.map((n) => (n.id === editingId ? updated : n)));
@@ -883,6 +913,8 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
     setExistingImageUrl(n.image_url || "");
     setImageFile(null);
     setLocationUrl(n.location_url || "");
+    setPinned(!!n.pinned);
+    setSize(n.size === "large" ? "large" : "normal");
     setOpen(true);
   };
 
@@ -943,6 +975,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
             )}
             <div style={{ padding: "14px 16px 15px", borderInlineStart: hero.image_url ? "none" : `4px solid ${meta.color}` }}>
               {!hero.image_url && <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: meta.color, fontSize: 11, fontWeight: 600, marginBottom: 6 }}><HIcon size={13} /> {hero.type}</span>}
+              {hero.pinned && <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: T.gold, fontSize: 10.5, fontWeight: 700, marginBottom: 5 }}><Pin size={11} /> مثبَّت</span>}
               <div style={{ fontSize: 16.5, fontWeight: 700, color: T.ink, lineHeight: 1.6 }}>{newsTitle(hero)}</div>
               <div style={{ fontSize: 13, color: T.textMuted || T.text, lineHeight: 1.7, marginTop: 7, fontWeight: 400, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsExcerpt(hero.text, 140)}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.muted, marginTop: 9 }}><Clock size={12} /> {fmtDate(hero.date)}</div>
@@ -958,7 +991,7 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
             const meta = NEWS_TYPES[n.type] || NEWS_TYPES["عام"];
             const Icon = meta.icon;
             return (
-              <button key={n.id} onClick={() => setReading(n)} style={{ display: "flex", flexDirection: "column", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 16, overflow: "hidden", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
+              <button key={n.id} onClick={() => setReading(n)} style={{ gridColumn: n.size === "large" ? "1 / -1" : "auto", display: "flex", flexDirection: "column", textAlign: "right", background: T.card, border: `1px solid ${n.pinned ? T.gold : T.line}`, borderRadius: 16, overflow: "hidden", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
                 {n.image_url ? (
                   <NewsImage src={n.image_url} overlay={
                     <span style={{ position: "absolute", top: 8, insetInlineStart: 8, display: "inline-flex", alignItems: "center", gap: 3, background: meta.color, color: "#fff", borderRadius: 7, padding: "3px 8px", fontSize: 9.5, fontWeight: 600 }}><Icon size={10} /> {n.type}</span>
@@ -1056,6 +1089,26 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
                 )}
               </div>
               <input type="url" placeholder="رابط الموقع من خرائط جوجل (اختياري)" value={locationUrl} onChange={(e) => setLocationUrl(e.target.value)} style={{ ...inputStyle, marginTop: 10 }} />
+
+              {/* تثبيت الخبر وحجم بطاقته */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+                <button onClick={() => setPinned((v) => !v)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, background: pinned ? T.sandDark : "transparent", color: pinned ? T.ink : T.muted, border: `1px solid ${pinned ? T.gold : T.line}`, borderRadius: 999, padding: "7px 13px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+                  <Pin size={13} color={pinned ? T.gold : T.muted} /> {pinned ? "مثبَّت في الأعلى" : "تثبيت الخبر"}
+                </button>
+                <div style={{ display: "inline-flex", gap: 6 }}>
+                  {[["normal", "عادي"], ["large", "كبير"]].map(([k, lbl]) => (
+                    <button key={k} onClick={() => setSize(k)}
+                      style={{ background: size === k ? T.ink : "transparent", color: size === k ? T.sand : T.muted, border: `1px solid ${size === k ? T.ink : T.line}`, borderRadius: 999, padding: "7px 14px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ fontSize: 10.5, color: T.muted, marginTop: 6, lineHeight: 1.7 }}>
+                المثبَّت يظهر أولًا في الصفحة الرئيسية، و«كبير» يجعل بطاقته بعرض الصفحة كاملًا.
+              </div>
+
               <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
                 <button onClick={submit} disabled={uploadingImg} style={{ ...primaryBtnStyle, marginTop: 0, flex: 1 }}>
                   {uploadingImg ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : editingId ? "حفظ التعديل" : "نشر الخبر"}
@@ -5499,7 +5552,7 @@ function HeaderMenu({ onClose, onGo, onOpenInbox, unreadInbox = 0, onOpenGuide, 
           <button onClick={onClose} aria-label="إغلاق" style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={20} /></button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "6px 14px 20px" }}>
-          <Row icon={UserCircle2} label="ملفي" sublabel="بياناتي، السيرة، الأبناء والبنات" onClick={() => onGo("info")} />
+          <Row icon={UserCircle2} label="ملفي" sublabel="بطاقتي، سلسلتي، ذرّيتي، وبياناتي" onClick={() => onGo("menu")} />
           <Row icon={Inbox} label="رسائلي" sublabel="رسائل العائلة والردود" badge={unreadInbox} onClick={() => { onClose(); onOpenInbox(); }} />
           <Row icon={Settings} label="الإعدادات" sublabel="الخصوصية والإشعارات" onClick={() => onGo("settings")} />
           {isAdmin && <Row icon={Shield} label="لوحة الإشراف" sublabel="الأعضاء، الأخبار، الطلبات، الرسائل" onClick={onOpenAdmin} />}
@@ -5562,20 +5615,33 @@ async function checkPin(pin) {
 function clearPin() { localStorage.removeItem(PIN_KEY); }
 
 function PinPad({ value, onChange, max = 4 }) {
+  const [down, setDown] = useState(null);
   const press = (d) => { if (value.length < max) onChange(value + d); };
   const back = () => onChange(value.slice(0, -1));
-  const keyStyle = {
-    fontFamily: "inherit", fontSize: 22, fontWeight: 700, color: T.ink, background: T.card,
-    border: `1px solid ${T.line}`, borderRadius: 16, height: 58, cursor: "pointer",
-  };
+  // نستجيب للمسة فور نزول الإصبع (pointerdown) لا بعد رفعه، ليكون الإحساس كأزرار الجوال
+  const tap = (key, fn) => ({
+    onPointerDown: (e) => { e.preventDefault(); setDown(key); fn(); },
+    onPointerUp: () => setDown(null),
+    onPointerLeave: () => setDown(null),
+    onPointerCancel: () => setDown(null),
+  });
+  const keyStyle = (key) => ({
+    fontFamily: "inherit", fontSize: 22, fontWeight: 700, color: T.ink,
+    background: down === key ? T.sandDark : T.card,
+    border: `1px solid ${down === key ? T.gold : T.line}`,
+    borderRadius: 16, height: 58, cursor: "pointer",
+    touchAction: "manipulation", WebkitTapHighlightColor: "transparent",
+    userSelect: "none", WebkitUserSelect: "none",
+    transform: down === key ? "scale(0.96)" : "none", transition: "transform .06s, background .06s",
+  });
   return (
     <div dir="ltr" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, maxWidth: 280, margin: "0 auto", width: "100%" }}>
       {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
-        <button key={d} onClick={() => press(d)} style={keyStyle}>{d}</button>
+        <button key={d} {...tap(d, () => press(d))} style={keyStyle(d)}>{d}</button>
       ))}
       <span />
-      <button onClick={() => press("0")} style={keyStyle}>0</button>
-      <button onClick={back} aria-label="حذف" style={{ ...keyStyle, background: "transparent", border: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <button {...tap("0", () => press("0"))} style={keyStyle("0")}>0</button>
+      <button {...tap("back", back)} aria-label="حذف" style={{ ...keyStyle("back"), background: "transparent", border: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <Delete size={22} color={T.muted} />
       </button>
     </div>
@@ -5883,18 +5949,169 @@ function WelcomeTour({ onDone, onOpenGuide }) {
   );
 }
 
+/* ============ تبويب التراث ============ */
+const HERITAGE_SECTIONS = [
+  { key: "history", label: "تاريخ العائلة", icon: ScrollText, hint: "النشأة والمواطن والهجرات" },
+  { key: "figures", label: "الأعلام", icon: Users2, hint: "سِيَر من برز من آل تركي" },
+  { key: "documents", label: "الوثائق والصور", icon: FileText, hint: "صكوك ورسائل وصور قديمة" },
+  { key: "literature", label: "الأدبيات", icon: BookOpen, hint: "شعر العائلة ونثرها" },
+];
+
+function HeritageTab({ canManage }) {
+  const [items, setItems] = useState(null);
+  const [section, setSection] = useState("history");
+  const [reading, setReading] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState({ title: "", body: "", era: "" });
+  const [imageFile, setImageFile] = useState(null);
+  const [existingImage, setExistingImage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null);
+  useEffect(() => { fetchHeritage().then(setItems); }, []);
+
+  const list = (items || []).filter((x) => x.section === section);
+  const meta = HERITAGE_SECTIONS.find((s) => s.key === section);
+
+  const reset = () => { setEditingId(null); setForm({ title: "", body: "", era: "" }); setImageFile(null); setExistingImage(""); };
+  const startEdit = (x) => {
+    setReading(null); setEditingId(x.id);
+    setForm({ title: x.title || "", body: x.body || "", era: x.era || "" });
+    setExistingImage(x.image_url || ""); setImageFile(null); setOpen(true);
+  };
+  const submit = async () => {
+    if (!form.title.trim()) return;
+    setBusy(true);
+    let image_url = existingImage || null;
+    if (imageFile) {
+      const compressed = await compressImage(imageFile);
+      const up = await uploadNewsImage(compressed);
+      if (up) image_url = up;
+    }
+    const payload = { section, title: form.title.trim(), body: form.body.trim() || null, era: form.era.trim() || null, image_url };
+    if (editingId) {
+      const updated = await updateHeritage(editingId, payload);
+      if (updated) setItems((prev) => prev.map((x) => (x.id === editingId ? updated : x)));
+    } else {
+      const created = await insertHeritage(payload);
+      if (created) setItems((prev) => [created, ...(prev || [])]);
+    }
+    reset(); setOpen(false); setBusy(false);
+  };
+  const doDelete = async () => {
+    const id = confirmDel; setConfirmDel(null);
+    if (!id) return;
+    const ok = await deleteHeritage(id);
+    if (ok) setItems((prev) => prev.filter((x) => x.id !== id));
+    setReading(null);
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={{ fontSize: 16.5, fontWeight: 700, color: T.ink }}>تراث العائلة</span>
+          <span style={{ fontSize: 11, color: T.muted, marginTop: 3 }}>{meta ? meta.hint : ""}</span>
+        </div>
+        {canManage && (
+          <button onClick={() => { reset(); setOpen((v) => !v); }} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "7px 12px", fontSize: 12, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>
+            <Plus size={14} color={T.gold} /> إضافة
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 12 }}>
+        {HERITAGE_SECTIONS.map((s) => (
+          <button key={s.key} onClick={() => { setSection(s.key); setOpen(false); }}
+            style={{ whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 5, fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, padding: "7px 12px", borderRadius: 999, cursor: "pointer",
+              background: section === s.key ? T.ink : T.card, color: section === s.key ? T.sand : T.muted, border: `1px solid ${section === s.key ? T.ink : T.line}` }}>
+            <s.icon size={13} color={section === s.key ? T.goldLight : T.gold} /> {s.label}
+          </button>
+        ))}
+      </div>
+
+      {open && canManage && (
+        <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 14, marginBottom: 14, display: "grid", gap: 8 }}>
+          <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="العنوان" style={inputStyle} />
+          <input value={form.era} onChange={(e) => setForm({ ...form, era: e.target.value })} placeholder="الحقبة أو التاريخ (اختياري) — مثل: ١٣٢٠هـ" style={inputStyle} />
+          <textarea value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} rows={6} placeholder="النص…" style={{ ...inputStyle, resize: "vertical", lineHeight: 1.9 }} />
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: T.muted, cursor: "pointer" }}>
+            <ImagePlus size={15} color={T.gold} />
+            {imageFile ? imageFile.name : existingImage ? "تغيير الصورة" : "إضافة صورة (اختياري)"}
+            <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files?.[0] || null)} style={{ display: "none" }} />
+          </label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={submit} disabled={busy} style={{ flex: 1, background: T.ink, color: T.sand, border: "none", borderRadius: 10, padding: "10px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>{busy ? "جارِ الحفظ…" : editingId ? "حفظ التعديل" : "نشر"}</button>
+            <button onClick={() => { reset(); setOpen(false); }} style={{ flex: 1, background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>تراجع</button>
+          </div>
+        </div>
+      )}
+
+      {items === null ? (
+        <EmptyState text="جارِ تحميل التراث…" />
+      ) : list.length === 0 ? (
+        <EmptyState text={canManage ? "لا محتوى في هذا القسم بعد. أضِف أول مادة." : "لا محتوى في هذا القسم بعد."} />
+      ) : (
+        <div style={{ display: "grid", gap: 10 }}>
+          {list.map((x) => (
+            <button key={x.id} onClick={() => setReading(x)}
+              style={{ display: "flex", gap: 11, width: "100%", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 11, cursor: "pointer", fontFamily: "inherit", alignItems: "stretch" }}>
+              {x.image_url ? (
+                <img src={x.image_url} alt="" style={{ width: 72, height: 72, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
+              ) : (
+                <div style={{ width: 72, height: 72, borderRadius: 10, background: T.sandDark, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {meta ? <meta.icon size={22} color={T.gold} /> : null}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: T.ink, lineHeight: 1.6 }}>{x.title}</div>
+                {x.era && <div style={{ fontSize: 10.5, color: T.gold, fontWeight: 700, marginTop: 3 }}>{x.era}</div>}
+                {x.body && (
+                  <div style={{ fontSize: 11.5, color: T.muted, lineHeight: 1.8, marginTop: 4, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{x.body}</div>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {reading && (
+        <div dir="rtl" style={{ position: "fixed", inset: 0, background: T.sand, zIndex: 93, display: "flex", flexDirection: "column", maxWidth: 430, margin: "0 auto" }}>
+          <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <span style={{ color: TT.gold500, fontWeight: 800, fontSize: 14 }}>{meta ? meta.label : "التراث"}</span>
+            <button onClick={() => setReading(null)} aria-label="إغلاق" style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={20} /></button>
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+            {reading.image_url && <img src={reading.image_url} alt="" style={{ width: "100%", borderRadius: 14, marginBottom: 14 }} />}
+            <div style={{ fontSize: 17, fontWeight: 800, color: T.ink, lineHeight: 1.6 }}>{reading.title}</div>
+            {reading.era && <div style={{ fontSize: 11.5, color: T.gold, fontWeight: 700, marginTop: 5 }}>{reading.era}</div>}
+            <div style={{ fontSize: 13.5, color: T.text, lineHeight: 2.1, marginTop: 12, whiteSpace: "pre-wrap" }}>{reading.body}</div>
+            {canManage && (
+              <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+                <button onClick={() => startEdit(reading)} style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}><Pencil size={13} /> تعديل</button>
+                <button onClick={() => setConfirmDel(reading.id)} style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, background: "transparent", color: T.clay, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}><Trash2 size={13} /> حذف</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {confirmDel && <ConfirmModal onConfirm={doDelete} onCancel={() => setConfirmDel(null)} />}
+    </div>
+  );
+}
+
 const BASE_TABS = [
   { key: "news", label: "الرئيسية", icon: Newspaper },
   { key: "tree", label: "الشجرة", icon: GitBranch },
   { key: "magazine", label: "المجلة", icon: BookOpen },
+  { key: "heritage", label: "التراث", icon: ScrollText },
   { key: "events", label: "المناسبات", icon: CalendarDays },
-  { key: "profile", label: "ملفي", icon: UserCircle2 },
 ];
 
 function FamilyAppInner({ meId }) {
   const [tab, setTab] = useState(() => {
     const h = window.location.hash.replace("#", "");
-    return ["news", "tree", "magazine", "events", "profile", "admins"].includes(h) ? h : "news";
+    return ["news", "tree", "magazine", "heritage", "events", "profile", "admins"].includes(h) ? h : "news";
   });
 
   useEffect(() => {
@@ -6103,6 +6320,7 @@ function FamilyAppInner({ meId }) {
               {tab === "news" && <NewsTab news={news} setNews={setNews} canManageNews={canManageNews} events={events} membersCount={members.filter((m) => m.gender !== "female").length} onNavigate={setTab} />}
               {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
               {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} onUploadingChange={setMagazineUploading} onUploadResult={setMagazineUploadMsg} />}
+              {tab === "heritage" && <HeritageTab canManage={canManageDocuments} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
               {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} onOpenInbox={() => setInboxOpen(true)} unreadInbox={unreadInbox} jumpView={jumpView} onOpenGuide={() => setShowGuide(true)} />}
               {tab === "admins" && (canManageAdmins || canManageTree || canManageRegistrations || canManageMessages) && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} canManageAdmins={canManageAdmins} canManageRegistrations={canManageRegistrations} canManageMessages={canManageMessages} />}
