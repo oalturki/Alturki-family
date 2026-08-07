@@ -2650,8 +2650,17 @@ function FanChartModal({ centerId, members, onClose }) {
     return { segs: out, maxDepth: md };
   }, [centerId, byId, childrenMap]);
 
-  const R0 = 44, RW = 54, PAD = 22;
-  const maxR = R0 + maxDepth * RW;
+  const R0 = 44, RW = 54, RW_TRUNK = 26, PAD = 22;
+  // الأجيال التي فيها اسم واحد (الجذع قبل أول تفرّع) تأخذ حلقة أنحف
+  const countByDepth = useMemo(() => {
+    const c = {};
+    segs.forEach((x) => { c[x.depth] = (c[x.depth] || 0) + 1; });
+    return c;
+  }, [segs]);
+  const ringW = (d) => (countByDepth[d] === 1 ? RW_TRUNK : RW);
+  const ringIn = (d) => { let r = R0; for (let i = 1; i < d; i++) r += ringW(i); return r; };
+  const ringMid = (d) => ringIn(d) + ringW(d) / 2;
+  const maxR = ringIn(maxDepth) + ringW(maxDepth);
   const size = Math.max(2 * (maxR + PAD), 240);
   const cx = size / 2, cy = size / 2;
   const polar = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
@@ -2709,19 +2718,19 @@ function FanChartModal({ centerId, members, onClose }) {
           <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block", margin: "0 auto" }}>
             <rect x={0} y={0} width={size} height={size} fill="#ffffff" />
             {segs.map((s) => (
-              <path key={s.id} d={segPath(R0 + (s.depth - 1) * RW, R0 + s.depth * RW, s.a0, s.a1)} fill={s.color} stroke="#ffffff" strokeWidth={0.8} fillRule="evenodd" />
+              <path key={s.id} d={segPath(ringIn(s.depth), ringIn(s.depth) + ringW(s.depth), s.a0, s.a1)} fill={s.color} stroke="#ffffff" strokeWidth={0.8} fillRule="evenodd" />
             ))}
             {/* الاسم مستقيم دائمًا (العربية متصلة الحروف)، ويُكتب في أطول بُعدٍ للخلية:
                 عرضًا مع الحلقة إن كان القوس أطول، وطولًا مع الشعاع إن كانت الخلية ضيّقة */}
             {segs.filter((s) => {
-              const rr = R0 + (s.depth - 0.5) * RW;
-              return Math.max((s.a1 - s.a0) * rr, RW - 8) > 20;
+              const rr = ringMid(s.depth);
+              return Math.max((s.a1 - s.a0) * rr, ringW(s.depth) - 8) > 20;
             }).map((s) => {
               const mid = (s.a0 + s.a1) / 2;
-              const rr = R0 + (s.depth - 0.5) * RW;
+              const rr = ringMid(s.depth);
               const [tx, ty] = polar(rr, mid);
-              const arc = (s.a1 - s.a0) * rr;   // البعد العرضي (مع الحلقة)
-              const radial = RW - 8;            // البعد الطولي (مع الشعاع)
+              const arc = (s.a1 - s.a0) * rr;        // البعد العرضي (مع الحلقة)
+              const radial = ringW(s.depth) - 8;     // البعد الطولي (مع الشعاع)
               const alongArc = arc >= radial;
               let deg = mid * 180 / Math.PI + (alongArc ? 90 : 0);
               deg = ((deg % 360) + 360) % 360;
@@ -2975,7 +2984,6 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [treeView, setTreeView] = useState("interactive"); // interactive | pictorial
   const [picTab, setPicTab] = useState("view"); // view | download
-  const [toolsOpen, setToolsOpen] = useState(true);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState(false);
   const canvasRef = useRef(null);
@@ -3031,9 +3039,6 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
       if (canvas) { canvas.width = 0; canvas.height = 0; }
     };
   }, [treeView, picTab]);
-
-  // الأدوات تُفتح تلقائيًا وتتبدّل بحسب نوع العرض (تفاعلية / مصوّرة)
-  useEffect(() => { setToolsOpen(true); }, [treeView]);
 
   const handleDownloadPdf = async () => {
     try {
@@ -3332,12 +3337,8 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
 
       {/* أدوات الشجرة — قابلة للطي، تفتح للأسفل */}
       <div style={{ marginBottom: 10 }}>
-        <button onClick={() => setToolsOpen((o) => !o)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: T.sandDark, border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontFamily: "inherit" }}>
-          <span style={{ fontSize: 12, fontWeight: 800, color: T.ink }}>أدوات الشجرة</span>
-          <ChevronDown size={16} color={T.gold} style={{ transform: toolsOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
-        </button>
-        {toolsOpen && treeView === "pictorial" && (
-          <div style={{ marginTop: 7, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+        {treeView === "pictorial" && (
+          <div style={{ marginTop: 0, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
             {[["عرض الشجرة", <Eye size={16} color={T.gold} />, () => setPicTab("view"), picTab === "view"],
               ["تحميل PDF", <Download size={16} color={T.gold} />, () => setPicTab("download"), picTab === "download"]].map(([lbl, icn, fn, on], i) => (
               <button key={i} onClick={fn} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 6px", background: on ? T.sandDark : T.card, color: T.ink, border: `1px solid ${on ? T.gold : T.line}`, borderRadius: 10, fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
@@ -3346,8 +3347,8 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
             ))}
           </div>
         )}
-        {toolsOpen && treeView === "interactive" && (
-          <div style={{ marginTop: 7 }}>
+        {treeView === "interactive" && (
+          <div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
               {[
                 ["مَن هذا؟", <Camera size={16} color={T.gold} />, () => setWhoOpen(true)],
