@@ -2737,12 +2737,15 @@ function FanChartModal({ centerId, members, onClose }) {
               if (deg > 90 && deg < 270) deg += 180;  // إبقاء الاسم قائمًا لا مقلوبًا
               const avail = alongArc ? arc : radial;      // الطول المتاح للاسم
               const cross = alongArc ? radial : arc;      // السماكة المتاحة لارتفاع الحرف
-              const fsMax = s.depth === 1 ? 14 : s.depth <= 3 ? 12 : 10.5;
+              const fsMax = s.depth === 1 ? 13 : s.depth === 2 ? 11.5 : s.depth <= 4 ? 10 : 8.5;
               // يصغر الخط كلما ضاقت الخلية أو طال الاسم، حتى لا تتداخل الأسماء
               const fs = Math.max(6, Math.min(fsMax, cross * 0.82, avail / Math.max(2, s.name.length * 0.6)));
               const maxCh = Math.max(3, Math.floor(avail / (fs * 0.62)));
               const nm = s.name.length > maxCh ? s.name.slice(0, maxCh - 1) + "…" : s.name;
-              return <text key={"t" + s.id} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={s.depth <= 2 ? 800 : 700} fill="#12302e" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{nm}</text>;
+              // خط أخفّ ولونٌ أهدأ كلما بَعُدت الحلقة، كما في نصوص الأخبار
+              const fw = s.depth <= 2 ? 700 : s.depth <= 4 ? 500 : 400;
+              const fill = s.depth <= 2 ? "#12302e" : s.depth <= 4 ? "#2b3a36" : "#46534e";
+              return <text key={"t" + s.id} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={fw} fill={fill} style={{ fontFamily: "'Readex Pro', sans-serif" }}>{nm}</text>;
             })}
             <circle cx={cx} cy={cy} r={R0 - 4} fill={TT.teal900} stroke={TT.gold500} strokeWidth={2} />
             <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={800} fill="#ffffff" style={{ fontFamily: "'Aref Ruqaa', serif" }}>{center.name.length > 7 ? center.name.slice(0, 6) + "…" : center.name}</text>
@@ -3324,7 +3327,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
       )}
 
       {/* المبدّل الرئيسي المصغّر: التفاعلية / المصوّرة */}
-      <div style={{ display: "flex", background: T.ink, borderRadius: 11, padding: 4, gap: 4, marginBottom: 10, boxShadow: "0 3px 10px rgba(23,54,52,0.2)" }}>
+      <div style={{ display: "flex", background: T.ink, borderRadius: "11px 11px 0 0", padding: 4, gap: 4, marginBottom: 0, boxShadow: "0 3px 10px rgba(23,54,52,0.2)", position: "relative", zIndex: 1 }}>
         {[["interactive", "الشجرة التفاعلية", <GitBranch size={15} />], ["pictorial", "الشجرة المصوّرة", <FileText size={15} />]].map(([key, lbl, icn]) => {
           const on = treeView === key;
           return (
@@ -3335,8 +3338,8 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
         })}
       </div>
 
-      {/* أدوات الشجرة — قابلة للطي، تفتح للأسفل */}
-      <div style={{ marginBottom: 10 }}>
+      {/* أدوات الشجرة — لوحة ملتصقة بالتبويب المفتوح */}
+      <div style={{ marginBottom: 10, marginTop: -8, background: T.card, border: `1px solid ${T.line}`, borderTop: "none", borderRadius: "0 0 14px 14px", padding: "12px 10px 10px" }}>
         {treeView === "pictorial" && (
           <div style={{ marginTop: 0, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
             {[["عرض الشجرة", <Eye size={16} color={T.gold} />, () => setPicTab("view"), picTab === "view"],
