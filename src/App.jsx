@@ -10,7 +10,7 @@ import {
   Camera, ImagePlus, QrCode,
   Trophy, Sparkles, RotateCcw, Gamepad2,
   Download, Sun, ScrollText, ListTree, Eye, Clock,
-  Bell, Send, Inbox, Users2, Menu, Delete
+  Bell, Send, Inbox, Users2, Menu, Delete, ChevronsLeft
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -449,6 +449,22 @@ async function checkPermission(key) {
   const { data, error } = await supabase.rpc("has_permission", { p_permission: key });
   if (error) { console.error("checkPermission failed", key, error); return false; }
   return !!data;
+}
+
+// ===== دليل المستخدم (نصوصه محفوظة بقاعدة البيانات ليحرّرها الإشراف) =====
+async function fetchGuideEntries() {
+  const { data, error } = await supabase
+    .from("guide_entries")
+    .select("id, section, title, body, action_key, keywords, admin_only, sort")
+    .order("sort", { ascending: true });
+  if (error) { console.error("fetchGuideEntries failed", error); return []; }
+  return data || [];
+}
+
+async function saveGuideEntry(id, patch) {
+  const { error } = await supabase.from("guide_entries").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
+  if (error) { console.error("saveGuideEntry failed", error); return false; }
+  return true;
 }
 
 async function fetchMagazineIndexFile() {
@@ -4613,13 +4629,18 @@ function ContactUsView({ onBack, meId }) {
   );
 }
 
-function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, onOpenInbox, unreadInbox = 0, jumpView }) {
+function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, onOpenInbox, unreadInbox = 0, jumpView, onOpenGuide }) {
   const me = members.find((m) => m.id === meId);
   const [profileView, setProfileView] = useState("menu"); // menu | info | settings
   const [showPinSetup, setShowPinSetup] = useState(false);
   const [pinOn, setPinOn] = useState(() => hasPin());
   // فتح قسم محدّد عند القدوم من القائمة الجانبية في الترويسة
-  useEffect(() => { if (jumpView && jumpView.view) setProfileView(jumpView.view); }, [jumpView]);
+  useEffect(() => {
+    if (!jumpView) return;
+    if (jumpView.view) setProfileView(jumpView.view);
+    if (jumpView.tool) setMyTool(jumpView.tool);
+    if (jumpView.pin) setShowPinSetup(true);
+  }, [jumpView]);
   const [mode, setMode] = useState("view");
   const [form, setForm] = useState(me);
   const [daughterName, setDaughterName] = useState("");
@@ -4956,7 +4977,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, on
         </div>
 
         <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "2px 14px", marginBottom: 14 }}>
-          <MenuRow icon={FileText} label="دليل المستخدم" disabled />
+          <MenuRow icon={FileText} label="دليل المستخدم" sublabel="شرح كل خدمة وكيف تصل إليها" onClick={onOpenGuide} />
           <MenuRow icon={HelpCircle} label="الأسئلة الشائعة" onClick={() => setProfileView("faq")} />
           <MenuRow icon={Shield} label="سياسة الخصوصية" onClick={() => setProfileView("privacy-policy")} />
           <MenuRow icon={MessageCircle} label="تواصل معنا" onClick={() => setProfileView("contact")} />
@@ -5491,7 +5512,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, on
 
 // المناسبات نُقلت من الشريط السفلي إلى الوصول السريع بالرئيسية لتخفيف الازدحام (≤٥ أيقونات)
 /* ============ قائمة الترويسة الجانبية ============ */
-function HeaderMenu({ onClose, onGo, onOpenInbox, unreadInbox = 0 }) {
+function HeaderMenu({ onClose, onGo, onOpenInbox, unreadInbox = 0, onOpenGuide }) {
   const [confirmOut, setConfirmOut] = useState(false);
   const doLogout = async () => {
     await supabase.auth.signOut();
@@ -5531,6 +5552,7 @@ function HeaderMenu({ onClose, onGo, onOpenInbox, unreadInbox = 0 }) {
           <Row icon={UserCircle2} label="ملفي" sublabel="بياناتي، السيرة، الأبناء والبنات" onClick={() => onGo("info")} />
           <Row icon={Inbox} label="رسائلي" sublabel="رسائل العائلة والردود" badge={unreadInbox} onClick={() => { onClose(); onOpenInbox(); }} />
           <Row icon={Settings} label="الإعدادات" sublabel="الخصوصية والإشعارات" onClick={() => onGo("settings")} />
+          <Row icon={FileText} label="دليل المستخدم" sublabel="شرح كل خدمة وكيف تصل إليها" onClick={onOpenGuide} />
           <Row icon={HelpCircle} label="الأسئلة الشائعة" onClick={() => onGo("faq")} />
           <Row icon={Shield} label="سياسة الخصوصية" onClick={() => onGo("privacy-policy")} />
           <Row icon={MessageCircle} label="تواصل معنا" onClick={() => onGo("contact")} />
@@ -5745,6 +5767,171 @@ function PinSetup({ onClose }) {
   );
 }
 
+/* ============ دليل المستخدم ============ */
+const GUIDE_SECTIONS = [
+  { key: "start", label: "البداية والحساب" },
+  { key: "profile", label: "ملفي وبياناتي" },
+  { key: "tree", label: "الشجرة وأدواتها" },
+  { key: "content", label: "الأخبار والمناسبات والمجلة" },
+  { key: "messages", label: "الرسائل والتواصل" },
+  { key: "security", label: "الدخول والأمان" },
+  { key: "admin", label: "الإشراف" },
+];
+
+function GuideScreen({ onClose, onGo, canEdit }) {
+  const [entries, setEntries] = useState(null);
+  const [q, setQ] = useState("");
+  const [openId, setOpenId] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [draft, setDraft] = useState({ title: "", body: "" });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { fetchGuideEntries().then(setEntries); }, []);
+  const norm = (s) => (s || "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/[ًٌٍَُِّْ]/g, "");
+  const list = (entries || []).filter((e) => {
+    if (e.admin_only && !canEdit) return false;
+    if (!q.trim()) return true;
+    const hay = norm(`${e.title} ${e.body} ${e.keywords || ""}`);
+    return norm(q).split(/\s+/).every((w) => hay.includes(w));
+  });
+  const startEdit = (e) => { setEditId(e.id); setDraft({ title: e.title, body: e.body }); };
+  const commit = async () => {
+    setSaving(true);
+    const ok = await saveGuideEntry(editId, { title: draft.title, body: draft.body });
+    if (ok) setEntries((prev) => prev.map((x) => (x.id === editId ? { ...x, ...draft } : x)));
+    setSaving(false); setEditId(null);
+  };
+  return (
+    <div dir="rtl" style={{ position: "fixed", inset: 0, background: T.sand, zIndex: 94, display: "flex", flexDirection: "column", maxWidth: 430, margin: "0 auto", fontFamily: "'Readex Pro', sans-serif" }}>
+      <div style={{ background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, padding: "calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px", position: "sticky", top: 0, zIndex: 2 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <FileText size={18} color={TT.gold500} />
+            <div>
+              <div style={{ color: TT.gold500, fontWeight: 800, fontSize: 15 }}>دليل المستخدم</div>
+              <div style={{ color: "#CFE0DC", fontSize: 10.5 }}>كل خدمة في التطبيق وكيف تصل إليها</div>
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="إغلاق" style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><X size={20} /></button>
+        </div>
+        <div style={{ position: "relative", marginTop: 12 }}>
+          <Search size={14} color={T.muted} style={{ position: "absolute", insetInlineStart: 12, top: "50%", transform: "translateY(-50%)" }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث في الدليل…"
+            style={{ width: "100%", boxSizing: "border-box", padding: "10px 34px 10px 12px", borderRadius: 12, border: "none", background: "rgba(255,255,255,0.94)", fontSize: 12.5, fontFamily: "inherit", color: T.ink }} />
+        </div>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: 14 }}>
+        {entries === null ? (
+          <div style={{ textAlign: "center", color: T.muted, fontSize: 12.5, padding: "40px 0" }}>جارِ تحميل الدليل…</div>
+        ) : list.length === 0 ? (
+          <div style={{ textAlign: "center", color: T.muted, fontSize: 12.5, padding: "40px 0" }}>لا نتائج مطابقة. جرّب كلمة أخرى.</div>
+        ) : (
+          GUIDE_SECTIONS.map((sec) => {
+            const items = list.filter((e) => e.section === sec.key);
+            if (items.length === 0) return null;
+            return (
+              <div key={sec.key} style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: T.gold, marginBottom: 8, paddingInlineStart: 2 }}>{sec.label}</div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {items.map((e) => {
+                    const open = openId === e.id;
+                    const editing = editId === e.id;
+                    return (
+                      <div key={e.id} style={{ background: T.card, border: `1px solid ${open ? T.gold : T.line}`, borderRadius: 13, overflow: "hidden" }}>
+                        <button onClick={() => { setOpenId(open ? null : e.id); setEditId(null); }}
+                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, width: "100%", background: "none", border: "none", padding: "12px 13px", cursor: "pointer", fontFamily: "inherit", textAlign: "right" }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>{e.title}</span>
+                          <ChevronDown size={15} color={T.muted} style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none" }} />
+                        </button>
+                        {open && (
+                          <div style={{ padding: "0 13px 13px" }}>
+                            {editing ? (
+                              <div style={{ display: "grid", gap: 7 }}>
+                                <input value={draft.title} onChange={(ev) => setDraft({ ...draft, title: ev.target.value })} style={inputStyle} />
+                                <textarea value={draft.body} onChange={(ev) => setDraft({ ...draft, body: ev.target.value })} rows={6} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.9 }} />
+                                <div style={{ display: "flex", gap: 7 }}>
+                                  <button onClick={commit} disabled={saving} style={{ flex: 1, background: T.ink, color: T.sand, border: "none", borderRadius: 10, padding: "9px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>{saving ? "…" : "حفظ"}</button>
+                                  <button onClick={() => setEditId(null)} style={{ flex: 1, background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "9px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>تراجع</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div style={{ fontSize: 12.5, color: T.text, lineHeight: 2, whiteSpace: "pre-wrap" }}>{e.body}</div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11 }}>
+                                  {e.action_key && (
+                                    <button onClick={() => onGo(e.action_key)}
+                                      style={{ display: "inline-flex", alignItems: "center", gap: 5, background: T.ink, color: T.sand, border: "none", borderRadius: 10, padding: "8px 13px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+                                      انتقل <ChevronsLeft size={13} />
+                                    </button>
+                                  )}
+                                  {canEdit && (
+                                    <button onClick={() => startEdit(e)}
+                                      style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "transparent", color: T.muted, border: `1px solid ${T.line}`, borderRadius: 10, padding: "8px 12px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+                                      <Pencil size={12} /> تحرير
+                                    </button>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })
+        )}
+        <div style={{ textAlign: "center", color: T.muted, fontSize: 11, padding: "6px 0 20px", lineHeight: 1.9 }}>
+          لم تجد ما تبحث عنه؟ راسلنا من «تواصل معنا» في صفحة ملفي.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============ جولة الترحيب (تظهر مرة واحدة) ============ */
+const TOUR_KEY = "alturki_tour_v1";
+const TOUR_STEPS = [
+  { icon: Users2, title: "أهلًا بك في موقع عائلة آل تركي", body: "هذه جولة سريعة في أربع خطوات تعرّفك على أقسام الموقع. تقدر تتخطاها وترجع لها من دليل المستخدم متى شئت." },
+  { icon: GitBranch, title: "الشجرة", body: "نسب آل تركي كاملًا: ابحث عن أي فرد بالاسم، اعرض سلسلته وذرّيته، أو تصفّح الشجرة المصوّرة." },
+  { icon: Newspaper, title: "الأخبار والمناسبات والمجلة", body: "أخبار العائلة وأعداد مجلة الصلة ومواعيد الاجتماع السنوي — كلها من الشريط السفلي." },
+  { icon: UserCircle2, title: "ملفي", body: "بياناتك وسيرتك وأبناؤك وبناتك، وبطاقتك ورمزها، مع إعدادات الخصوصية والدخول السريع." },
+  { icon: Inbox, title: "رسائلك", body: "الجرس أعلى الشاشة يفتح صندوق الوارد، والقائمة ☰ يمينًا تجمع كل الخدمات في مكان واحد." },
+];
+
+function WelcomeTour({ onDone, onOpenGuide }) {
+  const [i, setI] = useState(0);
+  const step = TOUR_STEPS[i];
+  const Icon = step.icon;
+  const last = i === TOUR_STEPS.length - 1;
+  const finish = () => { try { localStorage.setItem(TOUR_KEY, "1"); } catch (e) {} onDone(); };
+  return (
+    <div dir="rtl" style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.75)", zIndex: 98, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "'Readex Pro', sans-serif" }}>
+      <div style={{ background: T.sand, borderRadius: 20, padding: "26px 20px 18px", width: "100%", maxWidth: 340, textAlign: "center" }}>
+        <div style={{ width: 58, height: 58, borderRadius: 999, background: T.sandDark, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+          <Icon size={26} color={T.gold} />
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: T.ink, marginBottom: 8 }}>{step.title}</div>
+        <div style={{ fontSize: 12.5, color: T.text, lineHeight: 2 }}>{step.body}</div>
+        <div style={{ display: "flex", gap: 6, justifyContent: "center", margin: "18px 0 16px" }}>
+          {TOUR_STEPS.map((_, k) => (
+            <span key={k} style={{ width: k === i ? 18 : 7, height: 7, borderRadius: 999, background: k === i ? T.gold : T.line, transition: "width .2s" }} />
+          ))}
+        </div>
+        <button onClick={() => (last ? finish() : setI(i + 1))}
+          style={{ width: "100%", background: T.ink, color: T.sand, border: "none", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+          {last ? "ابدأ التصفّح" : "التالي"}
+        </button>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
+          <button onClick={finish} style={{ background: "none", border: "none", color: T.muted, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer" }}>تخطي</button>
+          <button onClick={() => { finish(); onOpenGuide(); }} style={{ background: "none", border: "none", color: T.gold, fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>افتح الدليل الكامل</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const BASE_TABS = [
   { key: "news", label: "الرئيسية", icon: Newspaper },
   { key: "tree", label: "الشجرة", icon: GitBranch },
@@ -5782,7 +5969,21 @@ function FamilyAppInner({ meId }) {
   const [inboxOpen, setInboxOpen] = useState(() => { try { return window.location.hash.replace("#", "") === "inbox"; } catch (e) { return false; } });
   const [menuOpen, setMenuOpen] = useState(false);
   const [jumpView, setJumpView] = useState(null);
+  const [showGuide, setShowGuide] = useState(false);
+  const [showTour, setShowTour] = useState(() => { try { return !localStorage.getItem(TOUR_KEY); } catch (e) { return false; } });
   const goProfileView = (view) => { setMenuOpen(false); setTab("profile"); setJumpView({ view, n: Date.now() }); };
+  // ينقل من بنود دليل المستخدم إلى الشاشة المقصودة مباشرة
+  const goGuideAction = (key) => {
+    if (!key) return;
+    setShowGuide(false);
+    setMenuOpen(false);
+    const [kind, val] = key.split(":");
+    if (kind === "tab") setTab(val);
+    else if (kind === "profile") { setTab("profile"); setJumpView({ view: val, n: Date.now() }); }
+    else if (kind === "tool") { setTab("profile"); setJumpView({ view: "menu", tool: val, n: Date.now() }); }
+    else if (kind === "pin") { setTab("profile"); setJumpView({ view: "menu", pin: true, n: Date.now() }); }
+    else if (kind === "inbox") setInboxOpen(true);
+  };
 
   const reloadInbox = async (uid) => {
     const id = uid || authUid;
@@ -5894,8 +6095,14 @@ function FamilyAppInner({ meId }) {
             )}
           </button>
         </div>
+        {showGuide && (
+          <GuideScreen onClose={() => setShowGuide(false)} onGo={goGuideAction} canEdit={canManageMessages} />
+        )}
+        {showTour && !showGuide && (
+          <WelcomeTour onDone={() => setShowTour(false)} onOpenGuide={() => setShowGuide(true)} />
+        )}
         {menuOpen && (
-          <HeaderMenu onClose={() => setMenuOpen(false)} onGo={goProfileView} onOpenInbox={() => setInboxOpen(true)} unreadInbox={unreadInbox} />
+          <HeaderMenu onClose={() => setMenuOpen(false)} onGo={goProfileView} onOpenInbox={() => setInboxOpen(true)} unreadInbox={unreadInbox} onOpenGuide={() => { setMenuOpen(false); setShowGuide(true); }} />
         )}
         {inboxOpen && (
           <InboxOverlay uid={authUid} items={inboxItems} onClose={() => setInboxOpen(false)} reload={() => reloadInbox()} />
@@ -5944,7 +6151,7 @@ function FamilyAppInner({ meId }) {
               {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} />}
               {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} onUploadingChange={setMagazineUploading} onUploadResult={setMagazineUploadMsg} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
-              {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} onOpenInbox={() => setInboxOpen(true)} unreadInbox={unreadInbox} jumpView={jumpView} />}
+              {tab === "profile" && <ProfileTab members={members} setMembers={setMembers} profilesMap={profilesMap} setProfilesMap={setProfilesMap} meId={meId} onOpenInbox={() => setInboxOpen(true)} unreadInbox={unreadInbox} jumpView={jumpView} onOpenGuide={() => setShowGuide(true)} />}
               {tab === "admins" && (canManageAdmins || canManageTree || canManageRegistrations || canManageMessages) && <AdminsTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} canManageAdmins={canManageAdmins} canManageRegistrations={canManageRegistrations} canManageMessages={canManageMessages} />}
             </>
           )}
