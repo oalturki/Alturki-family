@@ -1131,9 +1131,9 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
 }
 
 const TREE_NODE_W = 78;
-const TREE_NODE_H = 58;
+const TREE_NODE_H = 92;   // صورة + اسم + زر الفتح
 const TREE_H_GAP = 14;
-const TREE_V_GAP = 50;
+const TREE_V_GAP = 36;
 
 const TT = {
   tealDark: "#0d2b2b",
@@ -2815,13 +2815,17 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
   const svgWrapRef = useRef(null);
   const [zoom, setZoom] = useState(1);
   const pinchRef = useRef(null);
+  const zoomRef = useRef(1);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   // القرص بالإصبعين يكبّر الشجرة داخل إطارها لا الصفحة كلها
   useEffect(() => {
     const el = svgWrapRef.current;
     if (!el) return;
     const clamp = (z) => Math.min(2.2, Math.max(0.5, z));
+    const zoomAtStart = () => zoomRef.current;
     const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-    const onTouchStart = (e) => { if (e.touches.length === 2) { pinchRef.current = { d: dist(e.touches), z: zoom }; } };
+    const hasGesture = typeof window !== "undefined" && "ongesturestart" in window;
+    const onTouchStart = (e) => { if (e.touches.length === 2) { pinchRef.current = { d: dist(e.touches), z: zoomAtStart() }; } };
     const onTouchMove = (e) => {
       if (e.touches.length !== 2 || !pinchRef.current) return;
       e.preventDefault();
@@ -2830,14 +2834,18 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
     };
     const onTouchEnd = () => { pinchRef.current = null; };
     // سفاري يستخدم أحداث gesture الخاصة به
-    const onGestureStart = (e) => { e.preventDefault(); pinchRef.current = { d: 1, z: zoom }; };
+    const onGestureStart = (e) => { e.preventDefault(); pinchRef.current = { d: 1, z: zoomAtStart() }; };
+    // e.scale نسبة تراكمية من بداية الإيماءة: التوسيع يكبّر والتضييق يصغّر
     const onGestureChange = (e) => { e.preventDefault(); if (pinchRef.current) setZoom(clamp(pinchRef.current.z * e.scale)); };
-    el.addEventListener("touchstart", onTouchStart, { passive: false });
-    el.addEventListener("touchmove", onTouchMove, { passive: false });
-    el.addEventListener("touchend", onTouchEnd);
-    el.addEventListener("gesturestart", onGestureStart, { passive: false });
-    el.addEventListener("gesturechange", onGestureChange, { passive: false });
-    el.addEventListener("gestureend", onTouchEnd);
+    if (hasGesture) {
+      el.addEventListener("gesturestart", onGestureStart, { passive: false });
+      el.addEventListener("gesturechange", onGestureChange, { passive: false });
+      el.addEventListener("gestureend", onTouchEnd);
+    } else {
+      el.addEventListener("touchstart", onTouchStart, { passive: false });
+      el.addEventListener("touchmove", onTouchMove, { passive: false });
+      el.addEventListener("touchend", onTouchEnd);
+    }
     return () => {
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
@@ -2846,7 +2854,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
       el.removeEventListener("gesturechange", onGestureChange);
       el.removeEventListener("gestureend", onTouchEnd);
     };
-  }, [zoom]);
+  }, []);
 
   const nasabAtDepth = (member, depth) => {
     const parts = [];
@@ -2982,8 +2990,9 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
       });
       const cx = (centers[0] + centers[centers.length - 1]) / 2;
       nodes.push({ id, x: cx, y, depth, hasChildren: true });
+      const branchStart = y + (id === rootId ? 102 : 90); // أسفل دائرة السهم مباشرة
       centers.forEach((ccx) => {
-        edges.push({ x1: cx, y1: y + TREE_NODE_H, x2: ccx, y2: y + TREE_NODE_H + TREE_V_GAP });
+        edges.push({ x1: cx, y1: branchStart, x2: ccx, y2: y + TREE_NODE_H + TREE_V_GAP });
       });
       return cx;
     };
