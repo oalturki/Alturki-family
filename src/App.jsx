@@ -1938,7 +1938,11 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
   const isHost = !!(room && uid && room.host_account_id === uid);
   const me = players.find((p) => p.account_id === uid) || null;
   const active = players.filter((p) => !p.eliminated);
-  const ranked = players.slice().sort((a, b) => b.score - a.score || a.wrong_count - b.wrong_count);
+  const ranked = players.slice().sort((a, b) =>
+    b.score - a.score ||
+    b.correct_count - a.correct_count ||
+    a.wrong_count - b.wrong_count ||
+    String(a.joined_at || "").localeCompare(String(b.joined_at || "")));
 
   useEffect(() => {
     if (initialCode) setCodeInput(String(initialCode).slice(0, 4));
@@ -1966,7 +1970,7 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "game_players", filter: `room_id=eq.${roomId}` },
         () => { refreshPlayers(roomId); })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_rounds", filter: `room_id=eq.${roomId}` },
-        (p) => { if (p.new) { setRound(p.new); setChosen(null); roundStartRef.current = Date.now(); firstAnswerRef.current = null; setTimeLeft(ROUND_SECONDS); advancingRef.current = false; } })
+        (p) => { if (p.new) applyRound(p.new); })
       .subscribe();
     channelRef.current = ch;
   };
@@ -2000,17 +2004,29 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
     setRoom(target); await refreshPlayers(target.id); subscribe(target.id);
     if (target.status === "running") {
       const { data: r } = await supabase.from("game_rounds").select("*").eq("room_id", target.id).order("round_no", { ascending: false }).limit(1);
-      if (r && r[0]) { setRound(r[0]); roundStartRef.current = Date.now(); firstAnswerRef.current = null; setTimeLeft(ROUND_SECONDS); }
+      if (r && r[0]) applyRound(r[0]);
       setView("play");
     } else setView("lobby");
     setBusy(false);
   };
 
+  const applyRound = (r) => {
+    if (!r) return;
+    setRound((prev) => (prev && prev.round_no >= r.round_no ? prev : r));
+    setChosen(null);
+    roundStartRef.current = Date.now();
+    firstAnswerRef.current = null;
+    setTimeLeft(ROUND_SECONDS);
+    advancingRef.current = false;
+  };
+
   const pushRound = async (roomId, no) => {
     const payload = buildRoundPayload(members);
     if (!payload) { setErr("لا توجد صور كافية لبدء اللعبة."); return false; }
-    await supabase.from("game_rounds").insert({ room_id: roomId, round_no: no, payload });
+    const { data, error } = await supabase.from("game_rounds").insert({ room_id: roomId, round_no: no, payload }).select().single();
+    if (error) { console.error("pushRound failed", error); advancingRef.current = false; return false; }
     await supabase.from("game_rooms").update({ current_round: no }).eq("id", roomId);
+    applyRound(data);   // لا ننتظر وصول الحدث اللحظي للمضيف نفسه
     return true;
   };
 
@@ -2059,6 +2075,30 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
     setView("end");
   };
 
+  // استطلاع دوري: يضمن تطابق حالة الغرفة والنتائج والجولة عند كل اللاعبين
+  useEffect(() => {
+    if (!room || (view !== "play" && view !== "lobby")) return;
+    const tick = async () => {
+      const [{ data: rm }, { data: ps }] = await Promise.all([
+        supabase.from("game_rooms").select("*").eq("id", room.id).single(),
+        supabase.from("game_players").select("*").eq("room_id", room.id),
+      ]);
+      if (rm) setRoom(rm);
+      if (ps) setPlayers(ps);
+      if (rm && rm.status === "running" && rm.current_round > 0) {
+        setRound((prev) => {
+          if (prev && prev.round_no >= rm.current_round) return prev;
+          supabase.from("game_rounds").select("*").eq("room_id", room.id).eq("round_no", rm.current_round).single()
+            .then(({ data }) => { if (data) applyRound(data); });
+          return prev;
+        });
+      }
+    };
+    const t = setInterval(tick, 1500);
+    return () => clearInterval(t);
+    // eslint-disable-next-line
+  }, [room && room.id, view]);
+
   // مؤقّت الجولة والوقت الكلي
   useEffect(() => {
     if (view !== "play" || !room || room.status !== "running") return;
@@ -2088,9 +2128,12 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
 
   const register = async (correct) => {
     if (!room || !me || !round) return;
+    // النقاط: ١٠ للأسرع وتتناقص نقطة كل ثانية حتى ٤ نقاط — والخطأ صفر
+    const sec = Math.max(0, (Date.now() - (roundStartRef.current || Date.now())) / 1000);
+    const gained = correct ? Math.max(4, 10 - Math.floor(sec)) : 0;
     const patch = {
       answered_round: round.round_no,
-      score: me.score + (correct ? 10 : 0),
+      score: me.score + gained,
       correct_count: me.correct_count + (correct ? 1 : 0),
       wrong_count: me.wrong_count + (correct ? 0 : 1),
       eliminated: room.mode === "elimination" && !correct ? true : me.eliminated,
@@ -2118,7 +2161,7 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
       const remaining = players.filter((p) => !p.eliminated);
       if (remaining.length <= 1 && players.length > 1) { stopGame(); return; }
     }
-    advanceTimerRef.current = setTimeout(() => { pushRound(room.id, round.round_no + 1); }, 2600);
+    advanceTimerRef.current = setTimeout(() => { pushRound(room.id, round.round_no + 1); }, allAnswered ? 1100 : 1800);
     // eslint-disable-next-line
   }, [players, timeLeft, round, isHost]);
 
@@ -2126,7 +2169,7 @@ function GroupGameModal({ members, myName, onClose, initialCode }) {
   useEffect(() => {
     if (!room) return;
     if (room.status === "running" && (view === "lobby" || view === "end")) setView("play");
-    if (room.status === "ended" && view !== "end") setView("end");
+    if (room.status === "ended" && view !== "end") { refreshPlayers(room.id); setView("end"); }
     if (room.status === "lobby" && view === "end") { setRound(null); setChosen(null); setView("lobby"); }
   }, [room && room.status]);
 
