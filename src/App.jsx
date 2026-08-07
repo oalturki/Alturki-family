@@ -10,7 +10,7 @@ import {
   Camera, ImagePlus, QrCode,
   Trophy, Sparkles, RotateCcw, Gamepad2,
   Download, Sun, ScrollText, ListTree, Eye, Clock,
-  Bell, Send, Inbox, Users2, Menu
+  Bell, Send, Inbox, Users2, Menu, Delete
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import AuthGate from "./AuthGate";
@@ -5596,14 +5596,14 @@ function PinPad({ value, onChange, max = 4 }) {
     border: `1px solid ${T.line}`, borderRadius: 16, height: 58, cursor: "pointer",
   };
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, maxWidth: 280, margin: "0 auto", width: "100%" }}>
+    <div dir="ltr" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, maxWidth: 280, margin: "0 auto", width: "100%" }}>
       {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
         <button key={d} onClick={() => press(d)} style={keyStyle}>{d}</button>
       ))}
       <span />
       <button onClick={() => press("0")} style={keyStyle}>0</button>
       <button onClick={back} aria-label="حذف" style={{ ...keyStyle, background: "transparent", border: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <ChevronRight size={22} color={T.muted} />
+        <Delete size={22} color={T.muted} />
       </button>
     </div>
   );
