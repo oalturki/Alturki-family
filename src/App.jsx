@@ -2750,35 +2750,51 @@ function FanChartModal({ centerId, members, onClose }) {
               const rIn = ringIn(s.depth), rW = ringW(s.depth);
               const rr = ringMid(s.depth);
 
-              // خلية الأطراف: عدّة أسماء مصفوفة داخل الخلية نفسها
+              // خلية الأطراف: عدّة أسماء داخل الخلية نفسها
               if (s.group) {
                 const arcAt = (r) => (s.a1 - s.a0) * r;
                 const n = s.names.length;
                 const longest = s.names.reduce((mx, x) => Math.max(mx, x.length), 3);
-                let fs = Math.min(9.5, (rW - 8) / (n * 1.25), arcAt(rr) / (longest * 0.62));
+                const upright = (d) => { d = ((d % 360) + 360) % 360; return (d > 90 && d < 270) ? d + 180 : d; };
+                const label = (key, r, ang, deg, fs, txt, avail) => {
+                  const [tx2, ty2] = polar(r, ang);
+                  const maxCh = Math.max(3, Math.floor(avail / (fs * 0.62)));
+                  const t = txt.length > maxCh ? txt.slice(0, maxCh - 1) + "…" : txt;
+                  return <text key={key} x={tx2} y={ty2} transform={`rotate(${deg} ${tx2} ${ty2})`} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={400} fill="#46534e" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{t}</text>;
+                };
+
+                // الخلية عريضة: أسطر مكدّسة من الداخل للخارج، كل سطر يُقرأ مع الحلقة
+                if (arcAt(rr) >= rW - 8) {
+                  let fs = Math.min(9.5, (rW - 8) / (n * 1.25), arcAt(rr) / (longest * 0.62));
+                  let shown = s.names, extra = 0;
+                  if (fs < 6) {
+                    fs = 6;
+                    const cap = Math.max(1, Math.floor((rW - 8) / (fs * 1.25)));
+                    if (n > cap) { shown = s.names.slice(0, cap - 1); extra = n - shown.length; }
+                  }
+                  const lineH = fs * 1.25;
+                  const rows = shown.concat(extra ? [`+${extra}`] : []);
+                  const startR = rIn + (rW - lineH * rows.length) / 2 + lineH / 2;
+                  return <g key={"g" + s.id}>{rows.map((nm, i) => {
+                    const r = startR + i * lineH;
+                    return label(i, r, mid, upright(mid * 180 / Math.PI + 90), fs, nm, arcAt(r));
+                  })}</g>;
+                }
+
+                // الخلية ضيّقة: الأسماء متجاورة، كلٌّ مكتوب بطول الشعاع (أوضح من التكديس العرضي)
+                let fs = Math.min(9, arcAt(rr) / (n * 1.15), (rW - 8) / (longest * 0.62));
                 let shown = s.names, extra = 0;
-                if (fs < 6) {   // ضاقت الخلية: نعرض ما يسع ونشير لبقيتهم
-                  fs = 6;
-                  const cap = Math.max(1, Math.floor((rW - 8) / (fs * 1.25)));
+                if (fs < 5.5) {
+                  fs = 5.5;
+                  const cap = Math.max(1, Math.floor(arcAt(rr) / (fs * 1.15)));
                   if (n > cap) { shown = s.names.slice(0, cap - 1); extra = n - shown.length; }
                 }
-                const lineH = fs * 1.25;
-                const startR = rIn + (rW - lineH * (shown.length + (extra ? 1 : 0))) / 2 + lineH / 2;
                 const rows = shown.concat(extra ? [`+${extra}`] : []);
-                return (
-                  <g key={"g" + s.id}>
-                    {rows.map((nm, i) => {
-                      const r = startR + i * lineH;
-                      const [tx, ty] = polar(r, mid);
-                      let deg = mid * 180 / Math.PI + 90;
-                      deg = ((deg % 360) + 360) % 360;
-                      if (deg > 90 && deg < 270) deg += 180;
-                      const maxCh = Math.max(3, Math.floor(arcAt(r) / (fs * 0.62)));
-                      const t = nm.length > maxCh ? nm.slice(0, maxCh - 1) + "…" : nm;
-                      return <text key={i} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={400} fill="#46534e" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{t}</text>;
-                    })}
-                  </g>
-                );
+                const step = (s.a1 - s.a0) / rows.length;
+                return <g key={"g" + s.id}>{rows.map((nm, i) => {
+                  const ang = s.a0 + step * (i + 0.5);
+                  return label(i, rr, ang, upright(ang * 180 / Math.PI), fs, nm, rW - 8);
+                })}</g>;
               }
 
               const [tx, ty] = polar(rr, mid);
