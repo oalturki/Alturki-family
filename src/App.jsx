@@ -1493,7 +1493,12 @@ function PhoneDirectoryModal({ members, onClose }) {
   const nq = normalizeArabicLetters(q).trim();
   const all = list || [];
   // البحث أبجديّاً من الاسم الأول: يطابق بدايةَ النسب (الاسم ثم أبيه…)
-  const shown = nq ? all.filter((x) => normalizeArabicLetters(x.full).startsWith(nq)) : all;
+  const qDigits = q.replace(/\D/g, "");
+  const shown = !nq ? all : all.filter((x) =>
+    qDigits.length >= 3
+      ? String(x.phone || "").replace(/\D/g, "").includes(qDigits)
+      : normalizeArabicLetters(x.full).includes(nq)
+  );
   const lp = (p) => localPhone(p);
   const [saving, setSaving] = useState(false);
   const download = async () => {
@@ -1522,7 +1527,7 @@ function PhoneDirectoryModal({ members, onClose }) {
         <div style={{ padding: 16 }}>
           <div style={{ position: "relative", marginBottom: 10 }}>
             <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بالاسم" style={{ ...inputStyle, padding: "9px 36px 9px 12px" }} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بالاسم أو رقم الجوال" style={{ ...inputStyle, padding: "9px 36px 9px 12px" }} />
           </div>
           {list === null ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "40px 0", color: TT.teal800 }}>
@@ -1782,7 +1787,8 @@ function RelationGameModal({ members, onClose }) {
 }
 
 /* ===== اللعبة الجماعية: كل لاعب على جواله ===== */
-const ROUND_SECONDS = 15;
+const ROUND_SECONDS = 10;      // الحد الأقصى لكل جولة
+const ANSWER_WINDOW = 5;       // مهلة بقية اللاعبين بعد أول إجابة
 
 function makeRoomCode() {
   return String(Math.floor(1000 + Math.random() * 9000));
@@ -1832,6 +1838,8 @@ function GroupGameModal({ members, myName, onClose }) {
   const [busy, setBusy] = useState(false);
   const channelRef = useRef(null);
   const advancingRef = useRef(false);
+  const roundStartRef = useRef(0);
+  const firstAnswerRef = useRef(null);
 
   const isHost = !!(room && uid && room.host_account_id === uid);
   const me = players.find((p) => p.account_id === uid) || null;
@@ -1853,7 +1861,7 @@ function GroupGameModal({ members, myName, onClose }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "game_players", filter: `room_id=eq.${roomId}` },
         () => { refreshPlayers(roomId); })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_rounds", filter: `room_id=eq.${roomId}` },
-        (p) => { if (p.new) { setRound(p.new); setChosen(null); setTimeLeft(ROUND_SECONDS); advancingRef.current = false; } })
+        (p) => { if (p.new) { setRound(p.new); setChosen(null); roundStartRef.current = Date.now(); firstAnswerRef.current = null; setTimeLeft(ROUND_SECONDS); advancingRef.current = false; } })
       .subscribe();
     channelRef.current = ch;
   };
@@ -1887,7 +1895,7 @@ function GroupGameModal({ members, myName, onClose }) {
     setRoom(target); await refreshPlayers(target.id); subscribe(target.id);
     if (target.status === "running") {
       const { data: r } = await supabase.from("game_rounds").select("*").eq("room_id", target.id).order("round_no", { ascending: false }).limit(1);
-      if (r && r[0]) setRound(r[0]);
+      if (r && r[0]) { setRound(r[0]); roundStartRef.current = Date.now(); firstAnswerRef.current = null; setTimeLeft(ROUND_SECONDS); }
       setView("play");
     } else setView("lobby");
     setBusy(false);
@@ -1924,9 +1932,12 @@ function GroupGameModal({ members, myName, onClose }) {
   useEffect(() => {
     if (view !== "play" || !room || room.status !== "running") return;
     const t = setInterval(() => {
-      setTimeLeft((s) => (s > 0 ? s - 1 : 0));
       setElapsed((s) => s + 1);
-    }, 1000);
+      const sinceStart = (Date.now() - (roundStartRef.current || Date.now())) / 1000;
+      const capByRound = ROUND_SECONDS - sinceStart;
+      const capByFirst = firstAnswerRef.current ? ANSWER_WINDOW - (Date.now() - firstAnswerRef.current) / 1000 : Infinity;
+      setTimeLeft(Math.max(0, Math.ceil(Math.min(capByRound, capByFirst))));
+    }, 250);
     return () => clearInterval(t);
   }, [view, room && room.status]);
 
@@ -1937,6 +1948,12 @@ function GroupGameModal({ members, myName, onClose }) {
     register(false);
     // eslint-disable-next-line
   }, [timeLeft]);
+
+  useEffect(() => {
+    if (!round || firstAnswerRef.current) return;
+    const someone = players.some((p) => !p.eliminated && p.answered_round >= round.round_no);
+    if (someone) firstAnswerRef.current = Date.now();
+  }, [players, round]);
 
   const register = async (correct) => {
     if (!room || !me || !round) return;
@@ -2796,6 +2813,40 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
   }, [rootId]);
 
   const svgWrapRef = useRef(null);
+  const [zoom, setZoom] = useState(1);
+  const pinchRef = useRef(null);
+  // القرص بالإصبعين يكبّر الشجرة داخل إطارها لا الصفحة كلها
+  useEffect(() => {
+    const el = svgWrapRef.current;
+    if (!el) return;
+    const clamp = (z) => Math.min(2.2, Math.max(0.5, z));
+    const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const onTouchStart = (e) => { if (e.touches.length === 2) { pinchRef.current = { d: dist(e.touches), z: zoom }; } };
+    const onTouchMove = (e) => {
+      if (e.touches.length !== 2 || !pinchRef.current) return;
+      e.preventDefault();
+      const ratio = dist(e.touches) / (pinchRef.current.d || 1);
+      setZoom(clamp(pinchRef.current.z * ratio));
+    };
+    const onTouchEnd = () => { pinchRef.current = null; };
+    // سفاري يستخدم أحداث gesture الخاصة به
+    const onGestureStart = (e) => { e.preventDefault(); pinchRef.current = { d: 1, z: zoom }; };
+    const onGestureChange = (e) => { e.preventDefault(); if (pinchRef.current) setZoom(clamp(pinchRef.current.z * e.scale)); };
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd);
+    el.addEventListener("gesturestart", onGestureStart, { passive: false });
+    el.addEventListener("gesturechange", onGestureChange, { passive: false });
+    el.addEventListener("gestureend", onTouchEnd);
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("gesturestart", onGestureStart);
+      el.removeEventListener("gesturechange", onGestureChange);
+      el.removeEventListener("gestureend", onTouchEnd);
+    };
+  }, [zoom]);
 
   const nasabAtDepth = (member, depth) => {
     const parts = [];
@@ -2843,7 +2894,12 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
   const searchResults = useMemo(() => {
     const nq = norm(query);
     if (!nq) return [];
-    const matched = members.filter((m) => m.gender !== "female" && norm(m.nasab).startsWith(nq));
+    const digits = query.replace(/\D/g, "");
+    const matched = members.filter((m) => {
+      if (m.gender === "female") return false;
+      if (digits.length >= 3) return (m.phone || "").replace(/\D/g, "").includes(digits);
+      return norm(m.nasab).startsWith(nq) || norm(m.nasab).includes(" " + nq);
+    });
     let display = matched.map((m) => ({ member: m, label: nasabAtDepth(m, 4) }));
     const counts = {};
     display.forEach((d) => { counts[d.label] = (counts[d.label] || 0) + 1; });
@@ -2985,7 +3041,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
       {treeView === "interactive" && (
       <div style={{ position: "relative", marginBottom: 10 }}>
         <Search size={15} style={{ position: "absolute", right: 12, top: 11, color: T.muted }} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث بالاسم" style={{ ...inputStyle, padding: "9px 38px 9px 36px" }} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث بالاسم أو رقم الجوال" style={{ ...inputStyle, padding: "9px 38px 9px 36px" }} />
         {query && (
           <button onClick={() => setQuery("")} title="مسح البحث" aria-label="مسح البحث" style={{ position: "absolute", left: 8, top: 7, background: "transparent", border: "none", cursor: "pointer", color: T.muted, padding: 4, display: "flex", alignItems: "center" }}>
             <X size={15} />
@@ -3122,8 +3178,14 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
             </button>
           </div>
         )}
-        <div ref={svgWrapRef} style={{ overflow: "auto", border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, padding: "16px 16px 130px", maxHeight: "62vh" }}>
-          <div style={{ position: "relative", width: Math.max(layout.width, 260), height: layout.height + 30, margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, marginBottom: 8 }}>
+          {[["−", () => setZoom((z) => Math.max(0.5, z - 0.15))], ["إعادة", () => setZoom(1)], ["+", () => setZoom((z) => Math.min(2.2, z + 0.15))]].map(([lbl, fn], i) => (
+            <button key={i} onClick={fn} style={{ minWidth: lbl === "إعادة" ? 60 : 34, height: 30, background: T.card, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 8, fontSize: lbl === "إعادة" ? 11.5 : 15, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>{lbl}</button>
+          ))}
+          <span style={{ fontSize: 11, color: T.muted, marginInlineStart: 4 }}>{Math.round(zoom * 100)}%</span>
+        </div>
+        <div ref={svgWrapRef} style={{ overflow: "auto", border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, padding: "16px 16px 130px", maxHeight: "62vh", touchAction: "pan-x pan-y", overscrollBehavior: "contain" }}>
+          <div style={{ position: "relative", width: Math.max(layout.width, 260), height: layout.height + 30, margin: "0 auto", zoom }}>
             <svg width={Math.max(layout.width, 260)} height={layout.height + 30} style={{ position: "absolute", top: 0, right: 0, pointerEvents: "none" }}>
               {layout.edges.map((e, i) => (
                 <path key={i} d={`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1 + e.y2) / 2}, ${e.x2} ${(e.y1 + e.y2) / 2}, ${e.x2} ${e.y2}`} stroke={TT.line} strokeWidth={1.6} fill="none" />
