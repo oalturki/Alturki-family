@@ -2711,17 +2711,29 @@ function FanChartModal({ centerId, members, onClose }) {
             {segs.map((s) => (
               <path key={s.id} d={segPath(R0 + (s.depth - 1) * RW, R0 + s.depth * RW, s.a0, s.a1)} fill={s.color} stroke="#ffffff" strokeWidth={0.8} fillRule="evenodd" />
             ))}
+            {/* الأسماء تسير منحنيةً مع الحلقة نفسها (textPath) بدل خط مستقيم مائل */}
+            <defs>
+              {segs.filter((s) => (s.a1 - s.a0) * (R0 + (s.depth - 0.5) * RW) > 20).map((s) => {
+                const rr = R0 + (s.depth - 0.5) * RW;
+                const mid = (s.a0 + s.a1) / 2;
+                const flip = Math.sin(mid) > 0; // النصف السفلي: نعكس اتجاه القوس ليبقى الاسم قائمًا
+                const [ax0, ay0] = polar(rr, flip ? s.a1 : s.a0);
+                const [ax1, ay1] = polar(rr, flip ? s.a0 : s.a1);
+                const large = (s.a1 - s.a0) > Math.PI ? 1 : 0;
+                return <path key={"p" + s.id} id={`fanarc-${s.id}`} fill="none" d={`M ${ax0} ${ay0} A ${rr} ${rr} 0 ${large} ${flip ? 0 : 1} ${ax1} ${ay1}`} />;
+              })}
+            </defs>
             {segs.filter((s) => (s.a1 - s.a0) * (R0 + (s.depth - 0.5) * RW) > 20).map((s) => {
-              const mid = (s.a0 + s.a1) / 2;
               const rr = R0 + (s.depth - 0.5) * RW;
-              const [tx, ty] = polar(rr, mid);
-              let deg = mid * 180 / Math.PI;
-              if (deg > 90 && deg < 270) deg += 180;
               const arc = (s.a1 - s.a0) * rr;
-              const maxCh = Math.max(3, Math.floor(arc / 8));
-              const nm = s.name.length > maxCh ? s.name.slice(0, maxCh - 1) + "…" : s.name;
               const fs = s.depth === 1 ? 13 : s.depth <= 3 ? 11 : 9.5;
-              return <text key={"t" + s.id} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={s.depth <= 2 ? 800 : 700} fill="#12302e" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{nm}</text>;
+              const maxCh = Math.max(3, Math.floor(arc / (fs * 0.62)));
+              const nm = s.name.length > maxCh ? s.name.slice(0, maxCh - 1) + "…" : s.name;
+              return (
+                <text key={"t" + s.id} fontSize={fs} fontWeight={s.depth <= 2 ? 800 : 700} fill="#12302e" dominantBaseline="middle" style={{ fontFamily: "'Readex Pro', sans-serif" }}>
+                  <textPath href={`#fanarc-${s.id}`} xlinkHref={`#fanarc-${s.id}`} startOffset="50%" textAnchor="middle">{nm}</textPath>
+                </text>
+              );
             })}
             <circle cx={cx} cy={cy} r={R0 - 4} fill={TT.teal900} stroke={TT.gold500} strokeWidth={2} />
             <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={800} fill="#ffffff" style={{ fontFamily: "'Aref Ruqaa', serif" }}>{center.name.length > 7 ? center.name.slice(0, 6) + "…" : center.name}</text>
