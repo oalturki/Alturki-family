@@ -2726,8 +2726,11 @@ function FanChartModal({ centerId, members, onClose }) {
               let deg = mid * 180 / Math.PI + (alongArc ? 90 : 0);
               deg = ((deg % 360) + 360) % 360;
               if (deg > 90 && deg < 270) deg += 180;  // إبقاء الاسم قائمًا لا مقلوبًا
-              const fs = s.depth === 1 ? 13 : s.depth <= 3 ? 11 : 9.5;
-              const avail = alongArc ? arc : radial;
+              const avail = alongArc ? arc : radial;      // الطول المتاح للاسم
+              const cross = alongArc ? radial : arc;      // السماكة المتاحة لارتفاع الحرف
+              const fsMax = s.depth === 1 ? 14 : s.depth <= 3 ? 12 : 10.5;
+              // يصغر الخط كلما ضاقت الخلية أو طال الاسم، حتى لا تتداخل الأسماء
+              const fs = Math.max(6, Math.min(fsMax, cross * 0.82, avail / Math.max(2, s.name.length * 0.6)));
               const maxCh = Math.max(3, Math.floor(avail / (fs * 0.62)));
               const nm = s.name.length > maxCh ? s.name.slice(0, maxCh - 1) + "…" : s.name;
               return <text key={"t" + s.id} x={tx} y={ty} transform={`rotate(${deg} ${tx} ${ty})`} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={s.depth <= 2 ? 800 : 700} fill="#12302e" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{nm}</text>;
@@ -2972,7 +2975,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [treeView, setTreeView] = useState("interactive"); // interactive | pictorial
   const [picTab, setPicTab] = useState("view"); // view | download
-  const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(true);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState(false);
   const canvasRef = useRef(null);
@@ -3028,6 +3031,9 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
       if (canvas) { canvas.width = 0; canvas.height = 0; }
     };
   }, [treeView, picTab]);
+
+  // الأدوات تُفتح تلقائيًا وتتبدّل بحسب نوع العرض (تفاعلية / مصوّرة)
+  useEffect(() => { setToolsOpen(true); }, [treeView]);
 
   const handleDownloadPdf = async () => {
     try {
@@ -3330,7 +3336,17 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
           <span style={{ fontSize: 12, fontWeight: 800, color: T.ink }}>أدوات الشجرة</span>
           <ChevronDown size={16} color={T.gold} style={{ transform: toolsOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
         </button>
-        {toolsOpen && (
+        {toolsOpen && treeView === "pictorial" && (
+          <div style={{ marginTop: 7, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            {[["عرض الشجرة", <Eye size={16} color={T.gold} />, () => setPicTab("view"), picTab === "view"],
+              ["تحميل PDF", <Download size={16} color={T.gold} />, () => setPicTab("download"), picTab === "download"]].map(([lbl, icn, fn, on], i) => (
+              <button key={i} onClick={fn} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 6px", background: on ? T.sandDark : T.card, color: T.ink, border: `1px solid ${on ? T.gold : T.line}`, borderRadius: 10, fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+                {icn} {lbl}
+              </button>
+            ))}
+          </div>
+        )}
+        {toolsOpen && treeView === "interactive" && (
           <div style={{ marginTop: 7 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
               {[
@@ -3361,16 +3377,6 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
 
       {treeView === "pictorial" ? (
         <div style={{ border: `1.5px solid ${TT.gold500}`, borderRadius: 14, background: TT.sand100, overflow: "hidden", marginBottom: 8 }}>
-          <div style={{ display: "flex", gap: 4, padding: 6, background: T.sandDark }}>
-            {[["view", "عرض", <Eye size={15} />], ["download", "تحميل", <Download size={15} />]].map(([key, lbl, icn]) => {
-              const on = picTab === key;
-              return (
-                <button key={key} onClick={() => setPicTab(key)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 6px", background: on ? TT.teal800 : "transparent", color: on ? "#fff" : T.ink, border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: on ? 800 : 700, fontFamily: "inherit", cursor: "pointer" }}>
-                  {React.cloneElement(icn, { color: on ? TT.gold400 : T.gold })} {lbl}
-                </button>
-              );
-            })}
-          </div>
           {picTab === "view" ? (
             <div style={{ overflow: "auto", maxHeight: "64vh", padding: 8, background: "#fff", display: "flex", justifyContent: "center" }}>
               {pdfLoading && (
