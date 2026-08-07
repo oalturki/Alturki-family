@@ -901,79 +901,29 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
 
   return (
     <div>
-      <button
-        onClick={() => onNavigate?.("tree")}
-        style={{
-          position: "relative",
-          overflow: "hidden",
-          display: "block",
-          width: "100%",
-          textAlign: "right",
-          background: `linear-gradient(155deg, ${T.inkSoft}, ${T.ink})`,
-          border: `1.5px solid ${T.gold}`,
-          borderRadius: 16,
-          padding: "18px 16px",
-          cursor: "pointer",
-          fontFamily: "inherit",
-          marginBottom: 10,
-        }}
-      >
-        <div style={{ position: "absolute", left: -14, top: "50%", transform: "translateY(-50%)", opacity: 0.16 }}>
-          <Rosette size={92} color={T.goldLight} />
-        </div>
-        <div style={{ position: "relative" }}>
-          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 21, fontWeight: 700, color: T.goldLight }}>شجرة العائلة</div>
-          <div style={{ fontSize: 11.5, color: "#CFE0DC", marginTop: 5 }}>نسب آل تركي كاملًا، ابحث وتصفّح</div>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 12, background: "rgba(217,184,118,0.16)", border: `1px solid ${T.gold}`, borderRadius: 999, padding: "5px 12px" }}>
-            <GitBranch size={13} color={T.goldLight} />
-            <span style={{ fontSize: 11.5, fontWeight: 700, color: T.goldLight }}>{membersCount ? `${membersCount} فردًا` : "استكشف الأنساب"}</span>
-          </div>
-        </div>
-      </button>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-        <button
-          onClick={() => onNavigate?.("magazine")}
-          style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 12px", cursor: "pointer", fontFamily: "inherit" }}
-        >
-          <div style={{ width: 34, height: 34, borderRadius: "50%", background: T.sandDark, border: `1.5px solid ${T.gold}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <BookOpen size={16} color={T.gold} />
-          </div>
-          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>مجلة الصلة</div>
-          <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: T.gold, background: T.sandDark, border: `1px solid ${T.gold}`, borderRadius: 999, padding: "2px 9px", marginTop: 6 }}>
-            {issueCount != null ? `${issueCount} عددًا` : "تصفّح الأعداد"}
-          </span>
-        </button>
+      {/* شريط هادئ: المناسبة القادمة فقط، وبقية الأقسام في شريط التبويبات أسفل الصفحة */}
+      {nextEvent && (
         <button
           onClick={() => onNavigate?.("events")}
-          style={{ textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 12px", cursor: "pointer", fontFamily: "inherit" }}
+          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "right", background: "transparent", border: "none", borderBottom: `1px solid ${T.line}`, padding: "2px 2px 12px", marginBottom: 16, cursor: "pointer", fontFamily: "inherit" }}
         >
-          <div style={{ width: 34, height: 34, borderRadius: "50%", background: T.sandDark, border: `1.5px solid ${T.gold}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <CalendarDays size={16} color={T.gold} />
-          </div>
-          <div style={{ fontFamily: "'Aref Ruqaa', serif", fontSize: 15.5, fontWeight: 700, color: T.ink, marginTop: 10 }}>المناسبات</div>
-          <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: nextEvent ? T.gold : T.muted, background: T.sandDark, border: `1px solid ${nextEvent ? T.gold : T.line}`, borderRadius: 999, padding: "2px 9px", marginTop: 6 }}>
-            {nextEvent ? nextEvent.date : "لا شي قريب"}
+          <CalendarDays size={14} color={T.gold} />
+          <span style={{ fontSize: 11.5, color: T.muted, flex: 1 }}>
+            المناسبة القادمة · <span style={{ color: T.ink, fontWeight: 700 }}>{nextEvent.title || "مناسبة العائلة"}</span> · {nextEvent.date}
           </span>
+          <ChevronLeft size={14} color={T.muted} />
         </button>
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "center", gap: 5, margin: "4px 0 16px", opacity: 0.55 }}>
-        {[0, 1, 2, 3, 4].map((i) => <Rosette key={i} size={13} color={T.gold} />)}
-      </div>
+      )}
 
       {/* ترويسة قسم الأخبار */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <span style={{ fontSize: 19, fontWeight: 700, color: T.ink }}>أخبار العائلة</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-            <span style={{ width: 22, height: 2, background: T.gold, borderRadius: 2 }} />
-            <span style={{ fontSize: 11, color: T.muted, fontWeight: 500 }}>آخر ما يهمّ آل تركي</span>
-          </div>
+          <span style={{ fontSize: 16.5, fontWeight: 700, color: T.ink }}>أخبار العائلة</span>
+          <span style={{ fontSize: 11, color: T.muted, fontWeight: 500, marginTop: 3 }}>آخر ما يهمّ آل تركي</span>
         </div>
         {canManageNews && (
-          <button onClick={openComposer} style={{ display: "flex", alignItems: "center", gap: 6, background: TT.teal800, color: "#fff", border: "none", borderRadius: 12, padding: "8px 14px", fontSize: 12.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>
-            <Plus size={15} color={T.goldLight} /> خبر
+          <button onClick={openComposer} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, padding: "7px 12px", fontSize: 12, fontWeight: 600, fontFamily: "inherit", cursor: "pointer" }}>
+            <Plus size={14} color={T.gold} /> خبر
           </button>
         )}
       </div>
@@ -985,15 +935,15 @@ function NewsTab({ news, setNews, canManageNews, events, membersCount, onNavigat
         const meta = NEWS_TYPES[hero.type] || NEWS_TYPES["عام"];
         const HIcon = meta.icon;
         return (
-          <button onClick={() => setReading(hero)} style={{ display: "block", width: "100%", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 18, overflow: "hidden", cursor: "pointer", fontFamily: "inherit", marginBottom: 16, boxShadow: "0 4px 16px rgba(13,43,43,0.06)", padding: 0 }}>
+          <button onClick={() => setReading(hero)} style={{ display: "block", width: "100%", textAlign: "right", background: T.card, border: `1px solid ${T.line}`, borderRadius: 16, overflow: "hidden", cursor: "pointer", fontFamily: "inherit", marginBottom: 18, boxShadow: "0 1px 5px rgba(13,43,43,0.04)", padding: 0 }}>
             {hero.image_url && (
-              <NewsImage src={hero.image_url} overlay={
+              <NewsImage src={hero.image_url} ratio="5 / 3" overlay={
                 <span style={{ position: "absolute", top: 12, insetInlineStart: 12, display: "inline-flex", alignItems: "center", gap: 5, background: meta.color, color: "#fff", borderRadius: 8, padding: "4px 11px", fontSize: 11, fontWeight: 600 }}><HIcon size={12} /> {hero.type}</span>
               } />
             )}
             <div style={{ padding: "14px 16px 15px", borderInlineStart: hero.image_url ? "none" : `4px solid ${meta.color}` }}>
               {!hero.image_url && <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: meta.color, fontSize: 11, fontWeight: 600, marginBottom: 6 }}><HIcon size={13} /> {hero.type}</span>}
-              <div style={{ fontSize: 18, fontWeight: 700, color: T.ink, lineHeight: 1.55 }}>{newsTitle(hero)}</div>
+              <div style={{ fontSize: 16.5, fontWeight: 700, color: T.ink, lineHeight: 1.6 }}>{newsTitle(hero)}</div>
               <div style={{ fontSize: 13, color: T.textMuted || T.text, lineHeight: 1.7, marginTop: 7, fontWeight: 400, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{newsExcerpt(hero.text, 140)}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.muted, marginTop: 9 }}><Clock size={12} /> {fmtDate(hero.date)}</div>
             </div>
@@ -5512,7 +5462,7 @@ function ProfileTab({ members, setMembers, profilesMap, setProfilesMap, meId, on
 
 // المناسبات نُقلت من الشريط السفلي إلى الوصول السريع بالرئيسية لتخفيف الازدحام (≤٥ أيقونات)
 /* ============ قائمة الترويسة الجانبية ============ */
-function HeaderMenu({ onClose, onGo, onOpenInbox, unreadInbox = 0, onOpenGuide }) {
+function HeaderMenu({ onClose, onGo, onOpenInbox, unreadInbox = 0, onOpenGuide, isAdmin, onOpenAdmin }) {
   const [confirmOut, setConfirmOut] = useState(false);
   const doLogout = async () => {
     await supabase.auth.signOut();
@@ -5552,6 +5502,7 @@ function HeaderMenu({ onClose, onGo, onOpenInbox, unreadInbox = 0, onOpenGuide }
           <Row icon={UserCircle2} label="ملفي" sublabel="بياناتي، السيرة، الأبناء والبنات" onClick={() => onGo("info")} />
           <Row icon={Inbox} label="رسائلي" sublabel="رسائل العائلة والردود" badge={unreadInbox} onClick={() => { onClose(); onOpenInbox(); }} />
           <Row icon={Settings} label="الإعدادات" sublabel="الخصوصية والإشعارات" onClick={() => onGo("settings")} />
+          {isAdmin && <Row icon={Shield} label="لوحة الإشراف" sublabel="الأعضاء، الأخبار، الطلبات، الرسائل" onClick={onOpenAdmin} />}
           <Row icon={FileText} label="دليل المستخدم" sublabel="شرح كل خدمة وكيف تصل إليها" onClick={onOpenGuide} />
           <Row icon={HelpCircle} label="الأسئلة الشائعة" onClick={() => onGo("faq")} />
           <Row icon={Shield} label="سياسة الخصوصية" onClick={() => onGo("privacy-policy")} />
@@ -5936,9 +5887,9 @@ const BASE_TABS = [
   { key: "news", label: "الرئيسية", icon: Newspaper },
   { key: "tree", label: "الشجرة", icon: GitBranch },
   { key: "magazine", label: "المجلة", icon: BookOpen },
+  { key: "events", label: "المناسبات", icon: CalendarDays },
   { key: "profile", label: "ملفي", icon: UserCircle2 },
 ];
-const ADMINS_TAB = { key: "admins", label: "الإشراف", icon: Shield };
 
 function FamilyAppInner({ meId }) {
   const [tab, setTab] = useState(() => {
@@ -6041,7 +5992,9 @@ function FamilyAppInner({ meId }) {
 
   const me = members.find((m) => m.id === meId);
   const unreadInbox = inboxItems.filter((i) => !i.read_at).length;
-  const TABS = (canManageAdmins || canManageTree || canManageRegistrations || canManageMessages) ? [...BASE_TABS, ADMINS_TAB] : BASE_TABS;
+  const isAdmin = canManageAdmins || canManageTree || canManageRegistrations || canManageMessages;
+  // الإشراف انتقل إلى القائمة الجانبية ☰ حتى لا يزدحم الشريط السفلي بستة تبويبات
+  const TABS = BASE_TABS;
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Readex Pro', sans-serif", background: T.sand, minHeight: "100vh" }}>
@@ -6102,7 +6055,7 @@ function FamilyAppInner({ meId }) {
           <WelcomeTour onDone={() => setShowTour(false)} onOpenGuide={() => setShowGuide(true)} />
         )}
         {menuOpen && (
-          <HeaderMenu onClose={() => setMenuOpen(false)} onGo={goProfileView} onOpenInbox={() => setInboxOpen(true)} unreadInbox={unreadInbox} onOpenGuide={() => { setMenuOpen(false); setShowGuide(true); }} />
+          <HeaderMenu onClose={() => setMenuOpen(false)} onGo={goProfileView} onOpenInbox={() => setInboxOpen(true)} unreadInbox={unreadInbox} onOpenGuide={() => { setMenuOpen(false); setShowGuide(true); }} isAdmin={isAdmin} onOpenAdmin={() => { setMenuOpen(false); setTab("admins"); }} />
         )}
         {inboxOpen && (
           <InboxOverlay uid={authUid} items={inboxItems} onClose={() => setInboxOpen(false)} reload={() => reloadInbox()} />
