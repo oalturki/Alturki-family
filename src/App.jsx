@@ -2620,6 +2620,25 @@ function ensureJsPdf() {
 }
 const FAN_TRUNK = "#2e5b57";
 
+// تعبئة أسماء الأطراف في أسطر: نجمع أكثر من اسم في السطر الواحد بدل الاكتفاء بعدّاد
+function packNames(names, maxCh, maxLines) {
+  const lines = [];
+  let i = 0;
+  while (i < names.length && lines.length < maxLines) {
+    let line = names[i]; i++;
+    while (i < names.length && (line + " · " + names[i]).length <= maxCh) { line += " · " + names[i]; i++; }
+    if (line.length > maxCh) line = line.slice(0, Math.max(2, maxCh - 1)) + "…";
+    lines.push(line);
+  }
+  const extra = names.length - i;
+  if (extra > 0 && lines.length) {
+    const tag = ` +${extra}`;
+    const last = lines[lines.length - 1];
+    lines[lines.length - 1] = (last.length + tag.length <= maxCh) ? last + tag : last.slice(0, Math.max(2, maxCh - tag.length)) + tag;
+  }
+  return lines;
+}
+
 function FanChartModal({ centerId, members, onClose }) {
   const { byId, childrenMap } = useMemo(() => treeMaps(members), [members]);
   const center = byId[centerId];
@@ -2765,15 +2784,11 @@ function FanChartModal({ centerId, members, onClose }) {
 
                 // الخلية عريضة: أسطر مكدّسة من الداخل للخارج، كل سطر يُقرأ مع الحلقة
                 if (arcAt(rr) >= rW - 8) {
-                  let fs = Math.min(9.5, (rW - 8) / (n * 1.25), arcAt(rr) / (longest * 0.62));
-                  let shown = s.names, extra = 0;
-                  if (fs < 6) {
-                    fs = 6;
-                    const cap = Math.max(1, Math.floor((rW - 8) / (fs * 1.25)));
-                    if (n > cap) { shown = s.names.slice(0, cap - 1); extra = n - shown.length; }
-                  }
+                  const fs = Math.max(6, Math.min(9.5, (rW - 8) / (n * 1.25), arcAt(rr) / (longest * 0.62)));
                   const lineH = fs * 1.25;
-                  const rows = shown.concat(extra ? [`+${extra}`] : []);
+                  const maxLines = Math.max(1, Math.floor((rW - 8) / lineH));
+                  const maxCh = Math.max(4, Math.floor(arcAt(rr) / (fs * 0.62)));
+                  const rows = packNames(s.names, maxCh, maxLines);
                   const startR = rIn + (rW - lineH * rows.length) / 2 + lineH / 2;
                   return <g key={"g" + s.id}>{rows.map((nm, i) => {
                     const r = startR + i * lineH;
@@ -2782,14 +2797,10 @@ function FanChartModal({ centerId, members, onClose }) {
                 }
 
                 // الخلية ضيّقة: الأسماء متجاورة، كلٌّ مكتوب بطول الشعاع (أوضح من التكديس العرضي)
-                let fs = Math.min(9, arcAt(rr) / (n * 1.15), (rW - 8) / (longest * 0.62));
-                let shown = s.names, extra = 0;
-                if (fs < 5.5) {
-                  fs = 5.5;
-                  const cap = Math.max(1, Math.floor(arcAt(rr) / (fs * 1.15)));
-                  if (n > cap) { shown = s.names.slice(0, cap - 1); extra = n - shown.length; }
-                }
-                const rows = shown.concat(extra ? [`+${extra}`] : []);
+                const fs = Math.max(5.5, Math.min(9, arcAt(rr) / (n * 1.15), (rW - 8) / (longest * 0.62)));
+                const cols = Math.max(1, Math.floor(arcAt(rr) / (fs * 1.15)));
+                const maxChN = Math.max(4, Math.floor((rW - 8) / (fs * 0.62)));
+                const rows = packNames(s.names, maxChN, cols);
                 const step = (s.a1 - s.a0) / rows.length;
                 return <g key={"g" + s.id}>{rows.map((nm, i) => {
                   const ang = s.a0 + step * (i + 0.5);
