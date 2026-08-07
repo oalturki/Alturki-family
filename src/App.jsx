@@ -1823,7 +1823,100 @@ function buildRoundPayload(members) {
   };
 }
 
-function GroupGameModal({ members, myName, onClose }) {
+async function sendGameInvite({ roomId, code, toAccountId, toMemberId, fromName }) {
+  const { error } = await supabase.from("game_invites").insert({
+    room_id: roomId, code, to_account_id: toAccountId, to_member_id: toMemberId || null, from_name: fromName || null,
+  });
+  if (error) { console.error("sendGameInvite failed", error); return false; }
+  return true;
+}
+function gameRoomLink(code) {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return `${origin}/#game=${code}`;
+}
+
+// لوحة دعوة أفراد العائلة للغرفة: بحث بالاسم، ثم واتساب أو رسالة داخل الموقع
+function InvitePanel({ members, room, myName, players }) {
+  const [q, setQ] = useState("");
+  const [sentTo, setSentTo] = useState({});
+  const norm = (x) => normalizeArabicLetters(x || "").split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
+  const joined = new Set((players || []).map((p) => p.account_id));
+  const results = q.trim().length < 2 ? [] : members
+    .filter((m) => norm(m.nasab || m.name).includes(norm(q)))
+    .filter((m) => (m.userAccountId && !joined.has(m.userAccountId)) || (m.phone && m.phoneVisible))
+    .slice(0, 8);
+  const invite = async (m) => {
+    const ok = await sendGameInvite({ roomId: room.id, code: room.code, toAccountId: m.userAccountId, toMemberId: m.id, fromName: myName });
+    setSentTo((prev) => ({ ...prev, [m.id]: ok ? "sent" : "fail" }));
+  };
+  const waLink = (m) => {
+    const digits = (m.phone || "").replace(/[^0-9]/g, "");
+    const text = `السلام عليكم ${m.name}\nندعوك للعب «اختبر صلتك» مع العائلة.\nرمز الغرفة: ${room.code}\n${gameRoomLink(room.code)}`;
+    return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+  };
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 7 }}>دعوة أفراد بأسمائهم</div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث عن اسم من العائلة…" style={inputStyle} />
+      {q.trim().length >= 2 && (
+        results.length === 0 ? (
+          <div style={{ fontSize: 11.5, color: T.muted, textAlign: "center", padding: "10px 0" }}>لا نتائج — أو أنه منضمّ للغرفة أصلًا.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 7, marginTop: 8 }}>
+            {results.map((m) => (
+              <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, background: T.card, border: `1px solid ${T.line}`, borderRadius: 11, padding: "9px 11px" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>{m.name}</div>
+                  <div style={{ fontSize: 10, color: T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.nasab}</div>
+                </div>
+                {sentTo[m.id] === "sent" ? (
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "#1b7a3d" }}>أُرسلت ✓</span>
+                ) : (
+                  <>
+                    {m.userAccountId && (
+                      <button onClick={() => invite(m)} title="دعوة داخل الموقع"
+                        style={{ display: "inline-flex", alignItems: "center", gap: 4, background: T.ink, color: T.sand, border: "none", borderRadius: 9, padding: "6px 10px", fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+                        <Send size={12} /> دعوة
+                      </button>
+                    )}
+                    {m.phone && m.phoneVisible && (
+                      <a href={waLink(m)} target="_blank" rel="noopener noreferrer" title="دعوة عبر واتساب"
+                        style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#25863f", color: "#fff", borderRadius: 9, padding: "6px 10px", fontSize: 10.5, fontWeight: 700, textDecoration: "none" }}>
+                        <MessageCircle size={12} /> واتساب
+                      </a>
+                    )}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+// نافذة الدعوة التي تصل للاعب داخل الموقع
+function GameInvitePopup({ invite, onJoin, onDismiss }) {
+  return (
+    <div dir="rtl" style={{ position: "fixed", inset: 0, background: "rgba(23,54,52,0.6)", zIndex: 99, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "'Readex Pro', sans-serif" }}>
+      <div style={{ background: T.sand, borderRadius: 18, padding: "24px 20px 18px", width: "100%", maxWidth: 330, textAlign: "center" }}>
+        <div style={{ width: 56, height: 56, borderRadius: 999, background: T.sandDark, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+          <Gamepad2 size={26} color={T.gold} />
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: T.ink, marginBottom: 6 }}>دعوة للعب</div>
+        <div style={{ fontSize: 12.5, color: T.text, lineHeight: 1.9 }}>
+          {invite.from_name ? <b>{invite.from_name}</b> : "أحد أفراد العائلة"} يدعوك إلى «اختبر صلتك».
+        </div>
+        <div style={{ fontSize: 12, color: T.muted, marginTop: 6 }}>رمز الغرفة: <b style={{ color: T.gold, letterSpacing: 3 }}>{invite.code}</b></div>
+        <button onClick={onJoin} style={{ width: "100%", marginTop: 16, background: `linear-gradient(160deg, ${TT.teal800}, ${TT.teal900})`, color: "#fff", border: `1px solid ${TT.gold500}`, borderRadius: 12, padding: "12px", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>انضمام الآن</button>
+        <button onClick={onDismiss} style={{ width: "100%", marginTop: 8, background: "transparent", color: T.muted, border: `1px solid ${T.line}`, borderRadius: 12, padding: "10px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>ليس الآن</button>
+      </div>
+    </div>
+  );
+}
+
+function GroupGameModal({ members, myName, onClose, initialCode }) {
   const [view, setView] = useState("menu"); // menu | lobby | play | end
   const [mode, setMode] = useState("score"); // score | elimination
   const [codeInput, setCodeInput] = useState("");
@@ -1840,6 +1933,7 @@ function GroupGameModal({ members, myName, onClose }) {
   const advancingRef = useRef(false);
   const roundStartRef = useRef(0);
   const firstAnswerRef = useRef(null);
+  const advanceTimerRef = useRef(null);
 
   const isHost = !!(room && uid && room.host_account_id === uid);
   const me = players.find((p) => p.account_id === uid) || null;
@@ -1847,8 +1941,19 @@ function GroupGameModal({ members, myName, onClose }) {
   const ranked = players.slice().sort((a, b) => b.score - a.score || a.wrong_count - b.wrong_count);
 
   useEffect(() => {
+    if (initialCode) setCodeInput(String(initialCode).slice(0, 4));
     supabase.auth.getUser().then(({ data }) => setUid(data?.user?.id || null));
-    return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
+    // تجميد الصفحة خلف اللعبة حتى لا تتحرّك عند السحب من حافة الشاشة
+    const prevOverflow = document.body.style.overflow;
+    const prevTouch = document.body.style.touchAction;
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.touchAction = prevTouch;
+      if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+      if (channelRef.current) supabase.removeChannel(channelRef.current);
+    };
   }, []);
 
   // اشتراك لحظي بغرفة اللعب
@@ -1921,8 +2026,34 @@ function GroupGameModal({ members, myName, onClose }) {
     setBusy(false);
   };
 
+  // إعادة الغرفة لغرفة الانتظار لجولة جديدة (يمكن تغيير نوع اللعب)
+  const newGame = async (m) => {
+    if (!room) return;
+    setBusy(true);
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+    advancingRef.current = false;
+    const { data } = await supabase.from("game_rooms")
+      .update({ status: "lobby", mode: m || room.mode, current_round: 0, started_at: null, ended_at: null })
+      .eq("id", room.id).select().single();
+    if (data) { setRoom(data); setMode(data.mode); }
+    setRound(null); setChosen(null); setElapsed(0); setTimeLeft(ROUND_SECONDS);
+    setView("lobby"); setBusy(false);
+  };
+
+  // كل لاعب يصفّر نتيجته بنفسه عند بدء جولة جديدة (صلاحيات القاعدة تسمح بتعديل صفّه فقط)
+  useEffect(() => {
+    if (!room || room.status !== "lobby" || !me) return;
+    if (me.score === 0 && !me.eliminated && me.answered_round === 0) return;
+    supabase.from("game_players")
+      .update({ score: 0, correct_count: 0, wrong_count: 0, eliminated: false, answered_round: 0 })
+      .eq("id", me.id)
+      .then(() => refreshPlayers(room.id));
+    // eslint-disable-next-line
+  }, [room && room.status, me && me.id]);
+
   const stopGame = async () => {
     if (!room) return;
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
     const { data } = await supabase.from("game_rooms").update({ status: "ended", ended_at: new Date().toISOString() }).eq("id", room.id).select().single();
     if (data) setRoom(data);
     setView("end");
@@ -1935,7 +2066,7 @@ function GroupGameModal({ members, myName, onClose }) {
       setElapsed((s) => s + 1);
       const sinceStart = (Date.now() - (roundStartRef.current || Date.now())) / 1000;
       const capByRound = ROUND_SECONDS - sinceStart;
-      const capByFirst = firstAnswerRef.current ? ANSWER_WINDOW - (Date.now() - firstAnswerRef.current) / 1000 : Infinity;
+      const capByFirst = (room.mode !== "elimination" && firstAnswerRef.current) ? ANSWER_WINDOW - (Date.now() - firstAnswerRef.current) / 1000 : Infinity;
       setTimeLeft(Math.max(0, Math.ceil(Math.min(capByRound, capByFirst))));
     }, 250);
     return () => clearInterval(t);
@@ -1975,27 +2106,28 @@ function GroupGameModal({ members, myName, onClose }) {
   };
 
   // المضيف ينقل الجولة حين يجيب الجميع أو ينتهي الوقت
+  // ملاحظة: لا نُرجع دالة تنظيف هنا — كانت تُلغي المؤقّت مع كل نبضة فلا تُطرح الجولة التالية أبدًا
   useEffect(() => {
     if (!isHost || !room || room.status !== "running" || !round || advancingRef.current) return;
     const contenders = players.filter((p) => !p.eliminated);
     const allAnswered = contenders.length > 0 && contenders.every((p) => p.answered_round >= round.round_no);
     const timedOut = timeLeft === 0;
     if (!allAnswered && !timedOut) return;
+    advancingRef.current = true;
     if (room.mode === "elimination") {
       const remaining = players.filter((p) => !p.eliminated);
-      if (remaining.length <= 1 && players.length > 1) { advancingRef.current = true; stopGame(); return; }
+      if (remaining.length <= 1 && players.length > 1) { stopGame(); return; }
     }
-    advancingRef.current = true;
-    const t = setTimeout(() => { pushRound(room.id, round.round_no + 1); }, 2600);
-    return () => clearTimeout(t);
+    advanceTimerRef.current = setTimeout(() => { pushRound(room.id, round.round_no + 1); }, 2600);
     // eslint-disable-next-line
   }, [players, timeLeft, round, isHost]);
 
   // اللاعب يتابع حالة الغرفة (انتهاء اللعبة أو بدؤها من المضيف)
   useEffect(() => {
     if (!room) return;
-    if (room.status === "running" && view === "lobby") setView("play");
+    if (room.status === "running" && (view === "lobby" || view === "end")) setView("play");
     if (room.status === "ended" && view !== "end") setView("end");
+    if (room.status === "lobby" && view === "end") { setRound(null); setChosen(null); setView("lobby"); }
   }, [room && room.status]);
 
   const fmtTime = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -2082,6 +2214,7 @@ function GroupGameModal({ members, myName, onClose }) {
           <div style={{ fontSize: 34, fontWeight: 800, color: T.ink, letterSpacing: 8, margin: "6px 0 2px" }}>{room ? room.code : "—"}</div>
           <div style={{ fontSize: 11, color: T.muted }}>{room && room.mode === "elimination" ? "الفوز بخروج المغلوب" : "الفوز بالنقاط"}</div>
         </div>
+        <InvitePanel members={members} room={room} myName={myName} players={players} />
         <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginTop: 16 }}>اللاعبون ({players.length})</div>
         {playersStrip}
         {isHost ? (
@@ -2105,7 +2238,25 @@ function GroupGameModal({ members, myName, onClose }) {
         <div style={{ fontSize: 16, fontWeight: 800, color: T.ink, margin: "10px 0 4px" }}>{winner ? `الفائز: ${winner.display_name}` : "انتهت اللعبة"}</div>
         <div style={{ fontSize: 12, color: T.muted }}>مدة اللعب: {fmtTime(elapsed)}</div>
         <div style={{ textAlign: "right" }}>{playersStrip}</div>
-        <button onClick={onClose} style={{ width: "100%", marginTop: 18, background: T.ink, color: T.sand, border: "none", borderRadius: 12, padding: "12px", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>إغلاق</button>
+        {isHost ? (
+          <div style={{ marginTop: 18, display: "grid", gap: 9 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: T.muted }}>جولة جديدة بنوع اللعب:</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {[["score", "بالنقاط"], ["elimination", "بخروج المغلوب"]].map(([k, lbl]) => (
+                <button key={k} onClick={() => newGame(k)} disabled={busy}
+                  style={{ background: (room && room.mode === k) ? T.ink : T.card, color: (room && room.mode === k) ? T.sand : T.ink, border: `1.5px solid ${(room && room.mode === k) ? T.ink : T.line}`, borderRadius: 12, padding: "12px 8px", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", cursor: "pointer" }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+            <button onClick={onClose} style={{ background: "transparent", color: T.muted, border: `1px solid ${T.line}`, borderRadius: 12, padding: "11px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>خروج من الغرفة</button>
+          </div>
+        ) : (
+          <div style={{ marginTop: 18, display: "grid", gap: 9 }}>
+            <div style={{ fontSize: 12, color: T.muted }}>ابقَ هنا — إن بدأ المضيف جولة جديدة ستدخلها تلقائيًا.</div>
+            <button onClick={onClose} style={{ background: "transparent", color: T.muted, border: `1px solid ${T.line}`, borderRadius: 12, padding: "11px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>خروج من الغرفة</button>
+          </div>
+        )}
       </div>,
       "النتيجة النهائية"
     );
@@ -2701,7 +2852,7 @@ function WhoIsThisModal({ members, onClose, onOpenMember }) {
   );
 }
 
-function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
+function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameInvite, onGameInviteUsed }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
   const [selectedNode, setSelectedNode] = useState(null);
@@ -2714,6 +2865,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
   const [phoneDirOpen, setPhoneDirOpen] = useState(false);
   const [gameOpen, setGameOpen] = useState(false);
   const [groupGameOpen, setGroupGameOpen] = useState(false);
+  useEffect(() => { if (gameInvite) setGroupGameOpen(true); }, [gameInvite]);
   const [fanOpen, setFanOpen] = useState(false);
   const centeredRef = useRef(false);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
@@ -3282,7 +3434,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId }) {
         <RelationGameModal members={members} onClose={() => setGameOpen(false)} />
       )}
       {groupGameOpen && (
-        <GroupGameModal members={members} myName={(members.find((m) => m.id === meId) || {}).name || "لاعب"} onClose={() => setGroupGameOpen(false)} />
+        <GroupGameModal members={members} myName={(members.find((m) => m.id === meId) || {}).name || "لاعب"} initialCode={gameInvite} onClose={() => { setGroupGameOpen(false); onGameInviteUsed && onGameInviteUsed(); }} />
       )}
       {fanOpen && rootId && (
         <FanChartModal centerId={rootId} members={members} onClose={() => setFanOpen(false)} />
@@ -6596,6 +6748,40 @@ function FamilyAppInner({ meId }) {
   const [jumpView, setJumpView] = useState(null);
   const [showGuide, setShowGuide] = useState(false);
   const [showTour, setShowTour] = useState(() => { try { return !localStorage.getItem(TOUR_KEY); } catch (e) { return false; } });
+  const [gameInvite, setGameInvite] = useState(null);     // رمز غرفة نلتحق بها
+  const [invitePopup, setInvitePopup] = useState(null);   // دعوة واردة تُعرض للاعب
+  // رابط دعوة الغرفة: alturki.family/#game=1234
+  useEffect(() => {
+    const fromHash = () => {
+      const h = window.location.hash.replace("#", "");
+      if (!h.startsWith("game=")) return;
+      const code = h.slice(5).replace(/\D/g, "").slice(0, 4);
+      if (!code) return;
+      setGameInvite(code);
+      setTab("tree");
+      window.location.hash = "tree";
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, []);
+  // الدعوات الواردة داخل الموقع
+  useEffect(() => {
+    if (!authUid) return;
+    supabase.from("game_invites").select("*").eq("to_account_id", authUid).eq("status", "sent")
+      .order("created_at", { ascending: false }).limit(1)
+      .then(({ data }) => { if (data && data[0]) setInvitePopup(data[0]); });
+    const ch = supabase.channel(`invites-${authUid}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_invites", filter: `to_account_id=eq.${authUid}` },
+        (p) => { if (p.new) setInvitePopup(p.new); })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [authUid]);
+  const answerInvite = async (inv, join) => {
+    setInvitePopup(null);
+    await supabase.from("game_invites").update({ status: join ? "joined" : "declined" }).eq("id", inv.id);
+    if (join) { setGameInvite(inv.code); setTab("tree"); }
+  };
   const goProfileView = (view) => { setMenuOpen(false); setTab("profile"); setJumpView({ view, n: Date.now() }); };
   // ينقل من بنود دليل المستخدم إلى الشاشة المقصودة مباشرة
   const goGuideAction = (key) => {
@@ -6722,6 +6908,9 @@ function FamilyAppInner({ meId }) {
             )}
           </button>
         </div>
+        {invitePopup && (
+          <GameInvitePopup invite={invitePopup} onJoin={() => answerInvite(invitePopup, true)} onDismiss={() => answerInvite(invitePopup, false)} />
+        )}
         {showGuide && (
           <GuideScreen onClose={() => setShowGuide(false)} onGo={goGuideAction} canEdit={canManageMessages} />
         )}
@@ -6775,7 +6964,7 @@ function FamilyAppInner({ meId }) {
           ) : (
             <>
               {tab === "news" && <NewsTab news={news} setNews={setNews} canManageNews={canManageNews} events={events} membersCount={members.filter((m) => m.gender !== "female").length} onNavigate={setTab} />}
-              {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} meId={meId} />}
+              {tab === "tree" && <TreeTab members={members} setMembers={setMembers} profilesMap={profilesMap} canManageTree={canManageTree} meId={meId} gameInvite={gameInvite} onGameInviteUsed={() => setGameInvite(null)} />}
               {tab === "magazine" && <MagazineTab canManageDocuments={canManageDocuments} onUploadingChange={setMagazineUploading} onUploadResult={setMagazineUploadMsg} />}
               {tab === "heritage" && <HeritageTab canManage={canManageDocuments} />}
               {tab === "events" && <EventsTab events={events} setEvents={setEvents} meId={meId} canManageEvents={canManageEvents} />}
