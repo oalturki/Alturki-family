@@ -2898,13 +2898,11 @@ function FanChartModal({ centerId, members, onClose }) {
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
 const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#F3A3B8", "#7FC4C4", "#D9C27E", "#A8C686", "#C49BD4"];
 
-// تخطيط بالبقع: لكل ابن «بقعة» حرّة حول أبيه بقدر ذرّيته — في أي جهة، لا في قوس منتظم.
-// إن ضاق ما حول الأب دُفعت البقعة إلى فراغ أبعد، ويلتفّ غصنها حول عنقود الأخ لا فوقه.
+// تقسيم المساحة من أعلى لأسفل: تُحسب كتلة كل فرع، ثم تُقسَّم مساحة التاج بين الفروع
+// بقدر كتلها، ثم يُقسَّم حيّز كل أب بين أبنائه — فلا فراغ ولا غصنٌ يعبر حيّز غيره
 function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
   let hidden = 0;
-  const nodeR = (d) => (d === 0 ? 23 : d === 1 ? 20 : d === 2 ? 18 : d === 3 ? 16 : 14);
-  let sd = seed * 9301 + 49297;
-  const rnd = () => { sd = (sd * 9301 + 49297) % 233280; return sd / 233280; };
+  const nodeR = (d) => (d === 0 ? 22 : d === 1 ? 19 : d === 2 ? 17 : d === 3 ? 15 : 13.5);
 
   const trunk = [];
   let cur = rootId;
@@ -2915,106 +2913,80 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
   }
   const crownRootId = trunk[trunk.length - 1];
 
+  const sizeCache = {};
   const sizeOf = (id, d) => {
+    const key = id + "|" + d;
+    if (sizeCache[key] != null) return sizeCache[key];
     let n = 1;
     if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((k) => { n += sizeOf(k.id, d + 1); });
+    sizeCache[key] = n;
     return n;
   };
-  // نصف قطر البقعة: مساحةٌ تكفي ذرّية الفرد كلها
-  const blobR = (id, d) => {
-    const n = sizeOf(id, d);
-    return Math.max(nodeR(d) + 6, Math.sqrt(n) * 26);
-  };
 
-  const nodes = [], links = [], blobs = [];   // blobs: دوائر محجوزة تمنع التداخل
-  const freeSpot = (cx, cy, want, prefer) => {
-    // نبحث عن أقرب موضع فارغ حول (cx,cy) بادئين بالاتجاه المفضّل ثم نتوسّع
-    for (let ring = 0; ring < 40; ring++) {
-      const dist = want + 30 + ring * (want * 0.35 + 18);
-      const steps = 10 + ring * 4;
-      let best = null;
-      for (let t = 0; t < steps; t++) {
-        const a = prefer + (t % 2 === 0 ? 1 : -1) * Math.ceil(t / 2) * (2 * Math.PI / steps);
-        const x = cx + Math.cos(a) * dist, y = cy + Math.sin(a) * dist;
-        if (y > -110) continue;                       // يبقى فوق الجذع
-        const clash = blobs.some((b) => Math.hypot(b.x - x, b.y - y) < b.r + want + 8);
-        if (clash) continue;
-        const score = Math.abs(a - prefer) + dist * 0.004;
-        if (!best || score < best.score) best = { x, y, score };
-      }
-      if (best) return best;
-    }
-    return { x: cx + want * 2, y: cy - want * 2 };
-  };
+  const nodes = [], links = [];
+  const CELL = 46;   // المساحة التي يشغلها فردٌ واحد تقريبًا
 
-  const place = (id, depth, color, parentIdx, cx, cy, prefer) => {
+  // يوزّع فردًا وذرّيته داخل مستطيل [x, y, w, h]؛ الأب على حافة الحيّز جهة أبيه
+  const layout = (id, depth, color, parentIdx, x, y, w, h, fromBelow) => {
     const m = byId[id] || {};
-    const idx = nodes.length;
-    nodes.push({ id, name: m.name || "", depth, color, alive: m.isAlive !== false, r: nodeR(depth), x: cx, y: cy });
-    blobs.push({ x: cx, y: cy, r: nodeR(depth) + 4 });
-    if (parentIdx >= -1) links.push({ from: parentIdx, to: idx, trunk: parentIdx === -1 });
+    const r = nodeR(depth);
+    const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
+    if (depth >= maxGen) hidden += sonsOf(id, childrenMap, byId).length;
 
-    if (depth >= maxGen) { hidden += sonsOf(id, childrenMap, byId).length; return idx; }
-    const kids = sonsOf(id, childrenMap, byId);
+    const px = x + w / 2;
+    const py = fromBelow ? y + h - r - 4 : y + r + 4;    // ملتصق بجهة أبيه
+    const idx = nodes.length;
+    nodes.push({ id, name: m.name || "", depth, color, alive: m.isAlive !== false, r, x: px, y: py });
+    if (parentIdx >= -1) links.push({ from: parentIdx, to: idx, trunk: parentIdx === -1 });
     if (!kids.length) return idx;
 
-    // الأبناء يوزَّعون حول الأب في أي جهة: نبدأ من اتجاه الأب ثم نلفّ حوله
-    const order = kids.map((k, i) => ({ k, i, w: blobR(k.id, depth + 1) })).sort((a, b) => b.w - a.w);
-    order.forEach((o, j) => {
-      const dir = prefer + (j % 2 === 0 ? 1 : -1) * (0.55 + 0.42 * Math.floor(j / 2)) + (rnd() - 0.5) * 0.25;
-      const spot = freeSpot(cx, cy, o.w, dir);
-      blobs.push({ x: spot.x, y: spot.y, r: o.w });     // حجز البقعة كاملة
-      const childPrefer = Math.atan2(spot.y - cy, spot.x - cx);
-      place(o.k.id, depth + 1, color, idx, spot.x, spot.y, childPrefer);
+    // ما تبقى من الحيّز بعد الأب يُقسَّم على الأبناء بنسبة كتلهم
+    const restY = fromBelow ? y : y + 2 * r + 10;
+    const restH = Math.max(CELL, h - (2 * r + 10));
+    const weights = kids.map((k) => sizeOf(k.id, depth + 1));
+    const sum = weights.reduce((a, b) => a + b, 0) || 1;
+    let cx = x;
+    kids.forEach((k, i) => {
+      const kw = (w * weights[i]) / sum;
+      layout(k.id, depth + 1, color, idx, cx, restY, kw, restH, fromBelow);
+      cx += kw;
     });
     return idx;
   };
 
   const crownKids = sonsOf(crownRootId, childrenMap, byId);
-  const weights = crownKids.map((k) => blobR(k.id, 0));
-  const totalW = weights.reduce((a, b) => a + b, 0) || 1;
-  let accA = -Math.PI * 0.95;
+  const w = crownKids.map((k) => sizeOf(k.id, 0));
+  const totalUnits = w.reduce((a, b) => a + b, 0) || 1;
+  // أبعاد التاج: عرضٌ وارتفاع يسعان كتلة العائلة كلها
+  const depthUsed = Math.min(maxGen, 8) + 1;
+  const crownW = Math.max(900, Math.sqrt(totalUnits) * CELL * 1.9);
+  const crownH = Math.max(520, depthUsed * 128);
+  let cx0 = -crownW / 2;
   crownKids.forEach((k, i) => {
-    const share = (Math.PI * 0.9) * (weights[i] / totalW);
-    const dir = accA + share / 2;
-    const spot = freeSpot(0, -170, weights[i], dir);
-    blobs.push({ x: spot.x, y: spot.y, r: weights[i] });
-    place(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, spot.x, spot.y, dir);
-    accA += share;
+    const bw = (crownW * w[i]) / totalUnits;
+    layout(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, cx0, -crownH - 150, bw, crownH, true);
+    cx0 += bw;
   });
 
-  // شدّ لطيف: تقصير الوصلات وفكّ أي تلامس بقي، دون كسر البقع
-  for (let it = 0; it < 90; it++) {
-    const k = 1 - it / 90;
-    links.forEach((l) => {
-      if (l.from < 0) return;
-      const a = nodes[l.from], b = nodes[l.to];
-      const want = a.r + b.r + 34;
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const d = Math.hypot(dx, dy) || 0.01;
-      if (d <= want) return;
-      const f = ((d - want) / d) * 0.05 * k;
-      b.x -= dx * f; b.y -= dy * f;
-    });
+  // فكّ أي تلامس بقي، مع بقاء كل فرد قريبًا من موضعه المحجوز
+  const home = nodes.map((n) => ({ x: n.x, y: n.y }));
+  for (let it = 0; it < 60; it++) {
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
-        const n = nodes[i], m2 = nodes[j];
-        let dx = m2.x - n.x, dy = m2.y - n.y;
+        const a = nodes[i], b = nodes[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
         let d = Math.hypot(dx, dy);
-        const min = n.r + m2.r + 7;
+        const min = a.r + b.r + 6;
         if (d >= min) continue;
-        if (d < 0.01) { dx = rnd() - 0.5; dy = rnd() - 0.5; d = 0.5; }
+        if (d < 0.01) { dx = 0.6; dy = 0.4; d = 0.72; }
         const p = (min - d) / 2;
-        n.x -= (dx / d) * p; n.y -= (dy / d) * p;
-        m2.x += (dx / d) * p; m2.y += (dy / d) * p;
+        a.x -= (dx / d) * p; a.y -= (dy / d) * p;
+        b.x += (dx / d) * p; b.y += (dy / d) * p;
       }
     }
-    nodes.forEach((n) => { if (n.y > -100) n.y = -100; });
+    nodes.forEach((n, i) => { n.x += (home[i].x - n.x) * 0.06; n.y += (home[i].y - n.y) * 0.06; });
   }
 
-  const xs0 = nodes.map((n) => n.x);
-  const midX = (Math.min(...xs0) + Math.max(...xs0)) / 2;
-  nodes.forEach((n) => { n.x -= midX; });
   const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
   const minX = Math.min(-170, ...xs) - 80, maxX = Math.max(170, ...xs) + 80;
   const minY = Math.min(-170, ...ys) - 90;
