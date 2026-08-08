@@ -2898,71 +2898,13 @@ function FanChartModal({ centerId, members, onClose }) {
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
 const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#E89BB0", "#7FC4C4", "#D4B483", "#A8C686", "#C49BD4"];
 
-// تخطيط بالاحتواء (Circle Packing): كل فرع كتلةٌ دائرية تحوي أباه وذرّيته،
-// والكتل تُرصّ داخل بعضها فتملأ الفراغ أولًا بأول بلا تقاطع، ويخرج المجموع تاجًا مستديرًا
-function packCircles(items, gap) {
-  const list = items.slice().sort((a, b) => b.r - a.r);
-  const placed = [];
-  const fits = (x, y, r) => placed.every((p) => Math.hypot(p.x - x, p.y - y) >= p.r + r + gap - 0.01);
-  list.forEach((c, i) => {
-    if (i === 0) { placed.push({ ...c, x: 0, y: 0 }); return; }
-    let best = null;
-    // مرشّحات: مماسّة لدائرتين موضوعتين، فتُرصّ متلاصقة بلا فراغ
-    for (let a = 0; a < placed.length && !best; a++) {
-      for (let b = a + 1; b < placed.length; b++) {
-        const A = placed[a], B = placed[b];
-        const d = Math.hypot(B.x - A.x, B.y - A.y);
-        const r1 = A.r + c.r + gap, r2 = B.r + c.r + gap;
-        if (d > r1 + r2 || d < Math.abs(r1 - r2) || d === 0) continue;
-        const ax = (d * d - r2 * r2 + r1 * r1) / (2 * d);
-        const h2 = r1 * r1 - ax * ax;
-        if (h2 < 0) continue;
-        const h = Math.sqrt(h2);
-        const mx = A.x + (ax * (B.x - A.x)) / d, my = A.y + (ax * (B.y - A.y)) / d;
-        const ox = (h * (B.y - A.y)) / d, oy = (-h * (B.x - A.x)) / d;
-        [[mx + ox, my + oy], [mx - ox, my - oy]].forEach(([x, y]) => {
-          if (!fits(x, y, c.r)) return;
-          const score = Math.hypot(x, y);            // الأقرب للمركز أولًا = ملء الفراغ
-          if (!best || score < best.score) best = { x, y, score };
-        });
-      }
-    }
-    if (!best) {   // احتياط: لولب حول المركز
-      for (let rad = c.r; rad < 6000 && !best; rad += c.r * 0.6) {
-        const steps = Math.max(8, Math.floor((2 * Math.PI * rad) / (c.r * 0.8)));
-        for (let t = 0; t < steps; t++) {
-          const ang = (t / steps) * 2 * Math.PI;
-          const x = Math.cos(ang) * rad, y = Math.sin(ang) * rad;
-          if (fits(x, y, c.r)) { best = { x, y }; break; }
-        }
-      }
-    }
-    placed.push({ ...c, x: best ? best.x : 0, y: best ? best.y : 0 });
-  });
-  const R = placed.reduce((mx, p) => Math.max(mx, Math.hypot(p.x, p.y) + p.r), 0);
-  return { placed, R };
-}
-
+// تخطيط شجريّ متراصّ (Reingold–Tilford المبسّط): الأطراف تُرصف متجاورة،
+// والأب يتوسّط أبناءه — فلا تراكب ولا تقاطع بحكم البناء، والفرع الواحد يُعرض وحده
 function buildPosterLayout(rootId, byId, childrenMap, maxGen) {
   let hidden = 0;
-  const nodeR = (d) => (d === 0 ? 22 : d === 1 ? 19 : d === 2 ? 17 : d === 3 ? 15 : 14);
-
-  // كتلة كل فرد: هو ومن تحته، مرصوصون داخل دائرة واحدة
-  const cluster = (id, depth) => {
-    const m = byId[id] || {};
-    const self = { r: nodeR(depth), leaf: true, id, name: m.name || "", depth, alive: m.isAlive !== false };
-    const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
-    if (depth >= maxGen) hidden += Math.max(0, sonsOf(id, childrenMap, byId).length);
-    if (kids.length === 0) return { r: self.r, items: [{ ...self, x: 0, y: 0 }] };
-    const subs = kids.map((k) => cluster(k.id, depth + 1));
-    const { placed, R } = packCircles([{ ...self, sub: null }, ...subs.map((c) => ({ r: c.r, sub: c }))], 6);
-    const items = [];
-    placed.forEach((p) => {
-      if (p.sub) p.sub.items.forEach((it) => items.push({ ...it, x: it.x + p.x, y: it.y + p.y }));
-      else items.push({ id: p.id, name: p.name, depth: p.depth, alive: p.alive, r: p.r, x: p.x, y: p.y });
-    });
-    return { r: R + 3, items };
-  };
+  const nodeR = (d) => (d === 0 ? 24 : d === 1 ? 21 : d === 2 ? 18 : d === 3 ? 16 : 14);
+  const ROW = 104;      // ارتفاع الجيل
+  const GAPX = 12;      // فاصل بين الأطراف
 
   const trunk = [];
   let cur = rootId;
@@ -2972,29 +2914,47 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen) {
     if (kids.length === 1) { cur = kids[0].id; } else break;
   }
   const crownRootId = trunk[trunk.length - 1];
-  const branches = sonsOf(crownRootId, childrenMap, byId).map((k, i) => ({ k, i, c: cluster(k.id, 0) }));
 
-  // رصّ الفروع الرئيسية بعضها بجوار بعض ليكوّن تاج الشجرة
-  const { placed, R } = packCircles(branches.map((b) => ({ r: b.c.r, b })), 12);
-  const nodes = [], regions = [];
-  placed.forEach((p) => {
-    const color = POSTER_COLORS[p.b.i % POSTER_COLORS.length];
-    regions.push({ x: p.x, y: p.y * 0.82, r: p.r, color });
-    p.b.c.items.forEach((it) => nodes.push({ ...it, x: it.x + p.x, y: it.y * 0.82 + p.y * 0.82, color }));
+  const nodes = [], links = [];
+  let cursorX = 0;
+
+  const walk = (id, depth, color, parentIdx) => {
+    const m = byId[id] || {};
+    const r = nodeR(depth);
+    const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
+    if (depth >= maxGen) hidden += sonsOf(id, childrenMap, byId).length;
+    const idx = nodes.length;
+    nodes.push({ id, name: m.name || "", x: 0, y: -(depth + 1) * ROW, r, depth, color, alive: m.isAlive !== false });
+    if (parentIdx >= -1) links.push({ from: parentIdx, to: idx, trunk: parentIdx === -1 });
+
+    if (kids.length === 0) {
+      cursorX += 2 * r + GAPX;
+      nodes[idx].x = cursorX;
+      return idx;
+    }
+    const kidIdx = kids.map((k, i) => walk(k.id, depth + 1, color || POSTER_COLORS[i % POSTER_COLORS.length], idx));
+    const first = nodes[kidIdx[0]].x, last = nodes[kidIdx[kidIdx.length - 1]].x;
+    nodes[idx].x = (first + last) / 2;
+    return idx;
+  };
+
+  const crownKids = sonsOf(crownRootId, childrenMap, byId);
+  crownKids.forEach((k, i) => {
+    walk(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1);
+    cursorX += 46;   // فاصل بين الفروع الرئيسية
   });
 
-  // رفع التاج فوق الجذع
-  const maxY = nodes.reduce((mx, n) => Math.max(mx, n.y + n.r), 0);
-  const lift = maxY + 120;
-  nodes.forEach((n) => { n.y -= lift; });
-  regions.forEach((g) => { g.y -= lift; });
+  // توسيط اللوحة على الجذع
+  const xs0 = nodes.map((n) => n.x);
+  const mid = xs0.length ? (Math.min(...xs0) + Math.max(...xs0)) / 2 : 0;
+  nodes.forEach((n) => { n.x -= mid; });
 
   const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
-  const minX = Math.min(-160, ...xs) - 80, maxX = Math.max(160, ...xs) + 80;
-  const minY = Math.min(-160, ...ys) - 80;
+  const minX = Math.min(-170, ...xs) - 80, maxX = Math.max(170, ...xs) + 80;
+  const minY = Math.min(-170, ...ys) - 90;
   const trunkH = 120 + trunk.length * 76;
   return {
-    nodes, regions, links: [], trunk: trunk.map((id) => (byId[id] || {}).name || ""),
+    nodes, links, regions: [], trunk: trunk.map((id) => (byId[id] || {}).name || ""),
     minX, maxX, minY, trunkH, hidden, total: nodes.length + trunk.length,
   };
 }
@@ -3058,9 +3018,25 @@ function PosterTreeModal({ members, meId, onClose }) {
         <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 7 }}>الفرع المعروض</div>
         <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
           <button onClick={() => { setRootId(rootMember.id); setQ(""); }} style={{ background: rootId === (rootMember || {}).id ? T.ink : T.card, color: rootId === (rootMember || {}).id ? T.sand : T.ink, border: `1px solid ${T.line}`, borderRadius: 999, padding: "6px 13px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>كل العائلة</button>
+          {(members.filter((m) => !m.fatherId).length > 0) && null}
           {meId && byId[meId] && (
             <button onClick={() => { setRootId(meId); setQ(""); }} style={{ background: rootId === meId ? T.ink : T.card, color: rootId === meId ? T.sand : T.ink, border: `1px solid ${T.line}`, borderRadius: 999, padding: "6px 13px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>فرعي أنا</button>
           )}
+        </div>
+        {/* الفروع الرئيسية: كلٌّ يُعرض وحده لتخرج ورقة مقروءة */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+          {(() => {
+            const rootM = members.find((m) => !m.fatherId);
+            if (!rootM) return null;
+            let c = rootM, kids = sonsOf(c.id, childrenMap, byId);
+            while (kids.length === 1) { c = kids[0]; kids = sonsOf(c.id, childrenMap, byId); }
+            return kids.map((k) => (
+              <button key={k.id} onClick={() => { setRootId(k.id); setQ(""); }}
+                style={{ background: rootId === k.id ? T.gold : T.card, color: rootId === k.id ? "#fff" : T.ink, border: `1px solid ${rootId === k.id ? T.gold : T.line}`, borderRadius: 999, padding: "6px 13px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+                فرع {k.name}
+              </button>
+            ));
+          })()}
         </div>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="أو ابحث عن جدٍّ لتبدأ الشجرة منه…" style={inputStyle} />
         {matches.length > 0 && (
