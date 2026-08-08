@@ -2898,13 +2898,11 @@ function FanChartModal({ centerId, members, onClose }) {
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
 const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#E89BB0", "#7FC4C4", "#D4B483", "#A8C686", "#C49BD4"];
 
-// تخطيط شجريّ متراصّ (Reingold–Tilford المبسّط): الأطراف تُرصف متجاورة،
-// والأب يتوسّط أبناءه — فلا تراكب ولا تقاطع بحكم البناء، والفرع الواحد يُعرض وحده
-function buildPosterLayout(rootId, byId, childrenMap, maxGen) {
+// تخطيط بالقوى: الأب يجذب أبناءه فتقصر الوصلات ويلتفّون حوله،
+// وكل الدوائر تتنافر فلا تتراكب، وضغطٌ عام نحو المركز يملأ الفراغ
+function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
   let hidden = 0;
-  const nodeR = (d) => (d === 0 ? 24 : d === 1 ? 21 : d === 2 ? 18 : d === 3 ? 16 : 14);
-  const ROW = 104;      // ارتفاع الجيل
-  const GAPX = 12;      // فاصل بين الأطراف
+  const nodeR = (d) => (d === 0 ? 23 : d === 1 ? 20 : d === 2 ? 18 : d === 3 ? 16 : 14);
 
   const trunk = [];
   let cur = rootId;
@@ -2915,42 +2913,90 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen) {
   }
   const crownRootId = trunk[trunk.length - 1];
 
-  const nodes = [], links = [];
-  let cursorX = 0;
+  // عشوائية ثابتة لكل إعادة توزيع
+  let sd = seed * 9301 + 49297;
+  const rnd = () => { sd = (sd * 9301 + 49297) % 233280; return sd / 233280; };
 
-  const walk = (id, depth, color, parentIdx) => {
+  const nodes = [], links = [];
+  const build = (id, depth, color, parentIdx, px, py) => {
     const m = byId[id] || {};
-    const r = nodeR(depth);
     const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
     if (depth >= maxGen) hidden += sonsOf(id, childrenMap, byId).length;
     const idx = nodes.length;
-    nodes.push({ id, name: m.name || "", x: 0, y: -(depth + 1) * ROW, r, depth, color, alive: m.isAlive !== false });
+    const ang = -Math.PI / 2 + (rnd() - 0.5) * 2.2;
+    const dist = 70 + depth * 12;
+    nodes.push({
+      id, name: m.name || "", depth, color, alive: m.isAlive !== false, r: nodeR(depth),
+      x: px + Math.cos(ang) * dist, y: py + Math.sin(ang) * dist,
+    });
     if (parentIdx >= -1) links.push({ from: parentIdx, to: idx, trunk: parentIdx === -1 });
-
-    if (kids.length === 0) {
-      cursorX += 2 * r + GAPX;
-      nodes[idx].x = cursorX;
-      return idx;
-    }
-    const kidIdx = kids.map((k, i) => walk(k.id, depth + 1, color || POSTER_COLORS[i % POSTER_COLORS.length], idx));
-    const first = nodes[kidIdx[0]].x, last = nodes[kidIdx[kidIdx.length - 1]].x;
-    nodes[idx].x = (first + last) / 2;
+    kids.forEach((k, i) => build(k.id, depth + 1, color || POSTER_COLORS[i % POSTER_COLORS.length], idx, nodes[idx].x, nodes[idx].y));
     return idx;
   };
 
   const crownKids = sonsOf(crownRootId, childrenMap, byId);
+  const spreadW = Math.max(300, crownKids.length * 220);
   crownKids.forEach((k, i) => {
-    walk(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1);
-    cursorX += 46;   // فاصل بين الفروع الرئيسية
+    const x0 = -spreadW / 2 + (spreadW * (i + 0.5)) / crownKids.length;
+    build(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, x0, -260);
   });
 
-  // توسيط اللوحة على الجذع
-  const xs0 = nodes.map((n) => n.x);
-  const mid = xs0.length ? (Math.min(...xs0) + Math.max(...xs0)) / 2 : 0;
-  nodes.forEach((n) => { n.x -= mid; });
+  // ===== محاكاة القوى =====
+  const N = nodes.length;
+  const childrenIdx = nodes.map(() => []);
+  links.forEach((l) => { if (l.from >= 0) childrenIdx[l.from].push(l.to); });
+  const ITER = N > 600 ? 260 : 420;
+  const CELL = 60;
+  for (let it = 0; it < ITER; it++) {
+    const k = 1 - it / ITER;                     // تبريد تدريجي
+    // تجاذب الأب وأبنائه: طول الوصلة المرغوب
+    links.forEach((l) => {
+      if (l.from < 0) return;
+      const a = nodes[l.from], b = nodes[l.to];
+      const want = a.r + b.r + 26;
+      let dx = b.x - a.x, dy = b.y - a.y;
+      let d = Math.hypot(dx, dy) || 0.01;
+      const f = ((d - want) / d) * 0.14 * k;
+      a.x += dx * f; a.y += dy * f;
+      b.x -= dx * f; b.y -= dy * f;
+    });
+    // ضغط نحو مركز الفرع (يملأ الفراغ ويجمع الكتلة)
+    nodes.forEach((n) => { n.x *= 1 - 0.006 * k; n.y = n.y * (1 - 0.006 * k) - 0.35 * k; });
+    // تنافر: لا تتراكب دائرتان
+    const grid = new Map();
+    nodes.forEach((n, i) => {
+      const key = Math.floor(n.x / CELL) + "," + Math.floor(n.y / CELL);
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(i);
+    });
+    nodes.forEach((n, i) => {
+      const gx = Math.floor(n.x / CELL), gy = Math.floor(n.y / CELL);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        const list = grid.get((gx + dx) + "," + (gy + dy));
+        if (!list) continue;
+        for (const j of list) {
+          if (j <= i) continue;
+          const m = nodes[j];
+          let ddx = m.x - n.x, ddy = m.y - n.y;
+          let d = Math.hypot(ddx, ddy);
+          const min = n.r + m.r + 7;
+          if (d >= min) continue;
+          if (d < 0.01) { ddx = rnd() - 0.5; ddy = rnd() - 0.5; d = 0.5; }
+          const push = (min - d) / 2, ux = ddx / d, uy = ddy / d;
+          n.x -= ux * push; n.y -= uy * push;
+          m.x += ux * push; m.y += uy * push;
+        }
+      }
+    });
+    // تبقى الهالة فوق الجذع
+    nodes.forEach((n) => { if (n.y > -90) n.y = -90; });
+  }
 
   const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
-  const minX = Math.min(-170, ...xs) - 80, maxX = Math.max(170, ...xs) + 80;
+  const midX = (Math.min(...xs) + Math.max(...xs)) / 2;
+  nodes.forEach((n) => { n.x -= midX; });
+  const xs2 = nodes.map((n) => n.x);
+  const minX = Math.min(-170, ...xs2) - 80, maxX = Math.max(170, ...xs2) + 80;
   const minY = Math.min(-170, ...ys) - 90;
   const trunkH = 120 + trunk.length * 76;
   return {
@@ -2966,13 +3012,14 @@ function PosterTreeModal({ members, meId, onClose }) {
   const [maxGen, setMaxGen] = useState(4);
   const [q, setQ] = useState("");
   const [saving, setSaving] = useState(false);
+  const [seed, setSeed] = useState(1);
   const svgRef = useRef(null);
   useEffect(() => { if (!rootId && rootMember) setRootId(rootMember.id); }, [rootMember]);
 
   const normA = (x) => normalizeArabicLetters(x || "").split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
   const matches = q.trim().length < 2 ? [] : members.filter((m) => m.gender !== "female" && normA(m.nasab || m.name).includes(normA(q))).slice(0, 6);
 
-  const L = useMemo(() => (rootId ? buildPosterLayout(rootId, byId, childrenMap, maxGen) : null), [rootId, byId, childrenMap, maxGen]);
+  const L = useMemo(() => (rootId ? buildPosterLayout(rootId, byId, childrenMap, maxGen, seed) : null), [rootId, byId, childrenMap, maxGen, seed]);
   const root = rootId ? byId[rootId] : null;
 
   if (!L || !root) return null;
@@ -3046,6 +3093,9 @@ function PosterTreeModal({ members, meId, onClose }) {
             ))}
           </div>
         )}
+        <button onClick={() => setSeed((v) => v + 1)} style={{ width: "100%", marginTop: 10, background: "transparent", color: T.ink, border: `1px dashed ${T.gold}`, borderRadius: 10, padding: "9px", fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+          إعادة التوزيع (ترتيب آخر)
+        </button>
         <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, margin: "12px 0 7px" }}>عدد الأجيال المعروضة</div>
         <div style={{ display: "flex", gap: 6 }}>
           {[[3, "٣ أجيال"], [4, "٤ أجيال"], [6, "٦ أجيال"], [99, "الكل"]].map(([g, lbl]) => (
