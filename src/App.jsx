@@ -2961,7 +2961,7 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
     const kids = kidsOf(p.id, d);
     if (kids.length === 0) return;
     const rs = kids.map((k) => radiusFor((byId[k.id] || {}).name, d + 1));
-    const own = kids.map((r) => 2 * r + PAD);
+    const own = rs.map((r) => 2 * r + PAD);
     const ds = kids.map((k) => demand(k.id, d + 1));
     const sumOwn = own.reduce((x, y) => x + y, 0);
 
@@ -3021,7 +3021,7 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   const parentOf = {};
   links.forEach((l) => { parentOf[l.to] = l.from; });
   const relax = (iters) => {
-    const cell = 2 * Math.max(...nodes.map((n) => n.r)) + COLLIDE_PAD;
+    const cell = Math.max(60, 2 * Math.max(...nodes.map((n) => n.r || 0)) + COLLIDE_PAD);
     for (let it = 0; it < iters; it++) {
       const grid = new Map();
       nodes.forEach((n, i) => {
