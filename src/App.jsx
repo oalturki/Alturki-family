@@ -2898,8 +2898,8 @@ function FanChartModal({ centerId, members, onClose }) {
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
 const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#F3A3B8", "#7FC4C4", "#D9C27E", "#A8C686", "#C49BD4"];
 
-// تقسيم المساحة من أعلى لأسفل: تُحسب كتلة كل فرع، ثم تُقسَّم مساحة التاج بين الفروع
-// بقدر كتلها، ثم يُقسَّم حيّز كل أب بين أبنائه — فلا فراغ ولا غصنٌ يعبر حيّز غيره
+// نطاق التاج أولًا (قرصٌ فوق الجذع بمساحة تكفي العدد)، ثم يُقسَّم قطاعاتٍ مرنة
+// بين الفروع بقدر كتلها، وقطاع كل أب يُقسَّم بين أبنائه — فيمتلئ التاج مستديرًا
 function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
   let hidden = 0;
   const nodeR = (d) => (d === 0 ? 22 : d === 1 ? 19 : d === 2 ? 17 : d === 3 ? 15 : 13.5);
@@ -2923,54 +2923,53 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
     return n;
   };
 
-  const nodes = [], links = [];
-  const CELL = 46;   // المساحة التي يشغلها فردٌ واحد تقريبًا
+  const crownKids = sonsOf(crownRootId, childrenMap, byId);
+  const w0 = crownKids.map((k) => sizeOf(k.id, 0));
+  const totalUnits = w0.reduce((a, b) => a + b, 0) || 1;
 
-  // يوزّع فردًا وذرّيته داخل مستطيل [x, y, w, h]؛ الأب على حافة الحيّز جهة أبيه
-  const layout = (id, depth, color, parentIdx, x, y, w, h, fromBelow) => {
+  // ===== نطاق التاج: قرصٌ مساحته تكفي كل الأفراد =====
+  const CELL = 44;                                   // مساحة الفرد الواحد تقريبًا
+  const R_MAX = Math.max(360, Math.sqrt((totalUnits * CELL * CELL) / Math.PI) * 1.35);
+  const R_MIN = Math.max(120, R_MAX * 0.16);         // بداية التاج فوق الجذع
+  const A0 = -Math.PI * 0.985, A1 = -Math.PI * 0.015;
+
+  const nodes = [], links = [];
+  // يوزّع فردًا وذرّيته داخل قطاعٍ مرن [a0..a1] بين نصفي القطر [r0..r1]
+  const layout = (id, depth, color, parentIdx, a0, a1, r0, r1) => {
     const m = byId[id] || {};
     const r = nodeR(depth);
     const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
     if (depth >= maxGen) hidden += sonsOf(id, childrenMap, byId).length;
 
-    const px = x + w / 2;
-    const py = fromBelow ? y + h - r - 4 : y + r + 4;    // ملتصق بجهة أبيه
+    const mid = (a0 + a1) / 2;
+    const rr = r0 + r + 6;                            // الأب عند بداية قطاعه (جهة الجذع)
     const idx = nodes.length;
-    nodes.push({ id, name: m.name || "", depth, color, alive: m.isAlive !== false, r, x: px, y: py });
+    nodes.push({ id, name: m.name || "", depth, color, alive: m.isAlive !== false, r, x: Math.cos(mid) * rr, y: Math.sin(mid) * rr });
     if (parentIdx >= -1) links.push({ from: parentIdx, to: idx, trunk: parentIdx === -1 });
     if (!kids.length) return idx;
 
-    // ما تبقى من الحيّز بعد الأب يُقسَّم على الأبناء بنسبة كتلهم
-    const restY = fromBelow ? y : y + 2 * r + 10;
-    const restH = Math.max(CELL, h - (2 * r + 10));
+    const cr0 = Math.min(r1 - 8, rr + r + 22);        // ما بعد الأب لأبنائه
     const weights = kids.map((k) => sizeOf(k.id, depth + 1));
     const sum = weights.reduce((a, b) => a + b, 0) || 1;
-    let cx = x;
+    let acc = a0;
     kids.forEach((k, i) => {
-      const kw = (w * weights[i]) / sum;
-      layout(k.id, depth + 1, color, idx, cx, restY, kw, restH, fromBelow);
-      cx += kw;
+      const share = (a1 - a0) * (weights[i] / sum);
+      layout(k.id, depth + 1, color, idx, acc, acc + share, cr0, r1);
+      acc += share;
     });
     return idx;
   };
 
-  const crownKids = sonsOf(crownRootId, childrenMap, byId);
-  const w = crownKids.map((k) => sizeOf(k.id, 0));
-  const totalUnits = w.reduce((a, b) => a + b, 0) || 1;
-  // أبعاد التاج: عرضٌ وارتفاع يسعان كتلة العائلة كلها
-  const depthUsed = Math.min(maxGen, 8) + 1;
-  const crownW = Math.max(900, Math.sqrt(totalUnits) * CELL * 1.9);
-  const crownH = Math.max(520, depthUsed * 128);
-  let cx0 = -crownW / 2;
+  let accA = A0;
   crownKids.forEach((k, i) => {
-    const bw = (crownW * w[i]) / totalUnits;
-    layout(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, cx0, -crownH - 150, bw, crownH, true);
-    cx0 += bw;
+    const share = (A1 - A0) * (w0[i] / totalUnits);
+    layout(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, accA, accA + share, R_MIN, R_MAX);
+    accA += share;
   });
 
-  // فكّ أي تلامس بقي، مع بقاء كل فرد قريبًا من موضعه المحجوز
+  // فكّ التلامس مع شدٍّ لكلٍّ نحو موضعه المحجوز
   const home = nodes.map((n) => ({ x: n.x, y: n.y }));
-  for (let it = 0; it < 60; it++) {
+  for (let it = 0; it < 70; it++) {
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const a = nodes[i], b = nodes[j];
@@ -2984,7 +2983,11 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
         b.x += (dx / d) * p; b.y += (dy / d) * p;
       }
     }
-    nodes.forEach((n, i) => { n.x += (home[i].x - n.x) * 0.06; n.y += (home[i].y - n.y) * 0.06; });
+    nodes.forEach((n, i) => {
+      n.x += (home[i].x - n.x) * 0.07;
+      n.y += (home[i].y - n.y) * 0.07;
+      if (n.y > -100) n.y = -100;
+    });
   }
 
   const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
