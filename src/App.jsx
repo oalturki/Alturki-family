@@ -2898,8 +2898,9 @@ function FanChartModal({ centerId, members, onClose }) {
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
 const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#F3A3B8", "#7FC4C4", "#D9C27E", "#A8C686", "#C49BD4"];
 
-// كل دائرة يُحسب نصف قطرها من طول اسمها فلا يُقطع اسم أبدًا.
-// التاج قطاعات مرنة فوق رأس الفرع، وسلسلة النسب دوائر متسلسلة أسفله بلا جذع مرسوم
+// تخطيط رأسيّ مرتّب كالشجرة التفاعلية: رأس الفرع أسفل التاج، والذرّية تصعد جيلًا فوق جيل.
+// كل شجرة فرعية تحجز نطاقًا أفقيًا مستقلًا لا يتجاوزه، فلا تراكب ولا تقاطع في أيّ صفّ.
+// وتحت رأس الفرع سلسلة نسبه إلى تركي دوائرَ متتابعة، بلا جذع مرسوم.
 function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   let hidden = 0;
   const FS = (d) => (d === 0 ? 12.5 : d === 1 ? 11 : d === 2 ? 10 : 9.5);
@@ -2907,91 +2908,91 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   const radiusFor = (name, d) => {
     const fs = FS(d);
     const w = (name || "").length * fs * 0.52;
-    return Math.max(d === 0 ? 30 : 20, w / 2 + 7);
+    return Math.max(d === 0 ? 30 : 19, w / 2 + 7);
   };
+  const GAP_X = 16;        // فاصل أفقي بين الأشقاء
+  const ROW = 80;          // ارتفاع الجيل داخل التاج
+  const ROW_HEAD = 98;     // من رأس الفرع إلى أبنائه
+  const ROW_LIN = 92;      // بين حلقات سلسلة النسب أسفل الرأس
 
   const chain = [];
   let c = byId[headId];
   while (c) { chain.push(c); c = c.fatherId ? byId[c.fatherId] : null; }
   const ancestors = chain.slice(1);
 
-  const sizeCache = {};
-  const sizeOf = (id, d) => {
-    const key = id + "|" + d;
-    if (sizeCache[key] != null) return sizeCache[key];
-    let n = 1;
-    if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((k) => { n += sizeOf(k.id, d + 1); });
-    sizeCache[key] = n;
-    return n;
-  };
+  const kidsOf = (id, d) => (d >= maxGen ? [] : sonsOf(id, childrenMap, byId));
 
-  // اتساع الحلقات: يُحسب من مجموع أقطار أفراد كل جيل فلا تراكب ولا تباعد زائد
-  const perDepth = {};
-  const scan = (id, d) => {
+  // عرض الشجرة الفرعية = الأكبر بين قطر العقدة ومجموع عروض أبنائها
+  const wCache = {};
+  const widthOf = (id, d) => {
+    const key = id + "|" + d;
+    if (wCache[key] != null) return wCache[key];
     const m = byId[id] || {};
-    const r = radiusFor(m.name, d);
-    perDepth[d] = (perDepth[d] || 0) + 2 * r + 14;
-    if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((k) => scan(k.id, d + 1));
-    else hidden += sonsOf(id, childrenMap, byId).length;
+    const own = 2 * radiusFor(m.name, d) + GAP_X;
+    const kids = kidsOf(id, d);
+    if (kids.length === 0) { wCache[key] = own; return own; }
+    const sum = kids.reduce((a, k) => a + widthOf(k.id, d + 1), 0);
+    const v = Math.max(own, sum);
+    wCache[key] = v;
+    return v;
   };
-  scan(headId, 0);
-  const maxD = Math.max(...Object.keys(perDepth).map(Number));
-  const A0 = -Math.PI * 0.99, A1 = -Math.PI * 0.01, ARC = A1 - A0;
-  const RING = 96;
-  let R1 = 130;
-  Object.keys(perDepth).forEach((d) => {
-    const dd = Number(d);
-    if (dd === 0) return;
-    R1 = Math.max(R1, perDepth[d] / ARC - (dd - 1) * RING);
-  });
+  widthOf(headId, 0);
+  const countHidden = (id, d) => {
+    const kids = sonsOf(id, childrenMap, byId);
+    if (d >= maxGen) { hidden += kids.length; return; }
+    kids.forEach((k) => countHidden(k.id, d + 1));
+  };
+  countHidden(headId, 0);
+
+  const yOf = (d) => (d === 0 ? 0 : -(ROW_HEAD + (d - 1) * ROW));
 
   const nodes = [], links = [];
-  const layout = (id, depth, color, parentIdx, a0, a1) => {
+  const place = (id, d, x0, x1, color, parentIdx) => {
     const m = byId[id] || {};
-    const r = radiusFor(m.name, depth);
-    const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
-    const mid = (a0 + a1) / 2;
-    const rad = R1 + (depth - 1) * RING;
+    const cx = (x0 + x1) / 2;
     const idx = nodes.length;
-    nodes.push({ id, name: m.name || "", depth, color, alive: m.isAlive !== false, r, fs: FS(depth), x: Math.cos(mid) * rad, y: Math.sin(mid) * rad });
+    nodes.push({
+      id, name: m.name || "", depth: d, color,
+      alive: m.isAlive !== false, r: radiusFor(m.name, d), fs: FS(d),
+      x: cx, y: yOf(d), isHead: d === 0,
+    });
     if (parentIdx >= 0) links.push({ from: parentIdx, to: idx });
-    if (!kids.length) return idx;
-    const w = kids.map((k) => sizeOf(k.id, depth + 1));
-    const sum = w.reduce((a, b) => a + b, 0) || 1;
-    let acc = a0;
+    const kids = kidsOf(id, d);
+    if (kids.length === 0) return idx;
+    const ws = kids.map((k) => widthOf(k.id, d + 1));
+    const total = ws.reduce((a, b) => a + b, 0);
+    let acc = cx - total / 2;
     kids.forEach((k, i) => {
-      const share = (a1 - a0) * (w[i] / sum);
-      layout(k.id, depth + 1, color, idx, acc, acc + share);
-      acc += share;
+      const kc = (d === 0) ? POSTER_COLORS[i % POSTER_COLORS.length] : color;
+      place(k.id, d + 1, acc, acc + ws[i], kc, idx);
+      acc += ws[i];
     });
     return idx;
   };
+  const headW = widthOf(headId, 0);
+  place(headId, 0, -headW / 2, headW / 2, null, -1);
 
-  const headM = byId[headId] || {};
-  const headIdx = nodes.length;
-  nodes.push({ id: headId, name: headM.name || "", depth: 0, color: null, alive: headM.isAlive !== false, r: radiusFor(headM.name, 0), fs: FS(0), x: 0, y: 0, isHead: true });
-  const kids0 = sonsOf(headId, childrenMap, byId);
-  const w0 = kids0.map((k) => sizeOf(k.id, 1));
-  const sum0 = w0.reduce((a, b) => a + b, 0) || 1;
-  let acc = A0;
-  kids0.forEach((k, i) => {
-    const share = ARC * (w0[i] / sum0);
-    layout(k.id, 1, POSTER_COLORS[i % POSTER_COLORS.length], headIdx, acc, acc + share);
-    acc += share;
+  // تدرّج اللون بحسب الجيل (الفرع الواحد بلون واحد يفتحّ كلما ارتفع)
+  nodes.forEach((n) => {
+    if (n.isHead || !n.color) return;
+    n.fill = mixToWhite(n.color, Math.min(0.6, (n.depth - 1) * 0.13));
   });
 
-  // سلسلة النسب أسفل رأس الفرع: دوائر أكبر بخط سميك يمرّ خلفها
+  // سلسلة النسب أسفل رأس الفرع
   const lineNodes = ancestors.map((a, i) => ({
-    id: a.id, name: a.name, y: (i + 1) * 104, r: Math.max(26, radiusFor(a.name, 1)), alive: a.isAlive !== false,
+    id: a.id, name: a.name, y: (i + 1) * ROW_LIN,
+    r: Math.max(25, radiusFor(a.name, 1)), alive: a.isAlive !== false,
   }));
 
-  const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
+  const xs = nodes.map((n) => n.x - n.r).concat(nodes.map((n) => n.x + n.r));
+  const topY = Math.min(...nodes.map((n) => n.y - n.r));
+  const botY = lineNodes.length ? lineNodes[lineNodes.length - 1].y + lineNodes[lineNodes.length - 1].r : 40;
   return {
     nodes, links, lineNodes,
     lineage: chain.map((m) => m.name).join(" بن "),
-    minX: Math.min(-150, ...xs) - 70, maxX: Math.max(150, ...xs) + 70,
-    minY: Math.min(...ys) - 80,
-    maxY: (ancestors.length + 1) * 104 + 50,
+    minX: Math.min(-140, ...xs) - 40, maxX: Math.max(140, ...xs) + 40,
+    minY: topY - 30,
+    maxY: botY + 40,
     hidden, total: nodes.length + lineNodes.length,
   };
 }
@@ -3132,7 +3133,7 @@ function PosterTreeModal({ members, meId, onClose }) {
             {/* الأفراد */}
             {L.nodes.map((n) => (
               <g key={n.id}>
-                <circle cx={n.x} cy={n.y} r={n.r} fill={n.isHead ? "#F0D590" : (n.color || "#8FBF8F")} stroke={n.alive ? "#5E3F27" : "#A24936"} strokeWidth={n.isHead ? 2.2 : 1.2} strokeDasharray={n.alive ? "" : "3 2"} />
+                <circle cx={n.x} cy={n.y} r={n.r} fill={n.isHead ? "#F0D590" : (n.fill || n.color || "#8FBF8F")} stroke={n.alive ? "#5E3F27" : "#A24936"} strokeWidth={n.isHead ? 2.2 : 1.2} strokeDasharray={n.alive ? "" : "3 2"} />
                 <text x={n.x} y={n.y} textAnchor="middle" dominantBaseline="middle" fontSize={n.fs} fontWeight={n.isHead ? 800 : 600} fill="#22312C" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{n.name}</text>
               </g>
             ))}
