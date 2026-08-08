@@ -2910,9 +2910,10 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   };
   const PAD = 11;                                        // فراغ بين الأشقاء على قوسهم
   const STEP = (d) => (d === 1 ? 108 : Math.max(50, 92 - d * 7)); // طول الغصن، يقصر بالارتفاع
-  const GAP_A = 0.42;                                    // فتحة أسفل التاج ينزل منها الجذع
-  const A0 = Math.PI / 2 + GAP_A / 2;
-  const ARC = 2 * Math.PI - GAP_A;
+  const SPAN = Math.PI * 0.92;                           // اتساع التاج (علويّ فقط، لا دائرة كاملة)
+  const A0 = -Math.PI / 2 - SPAN / 2;                    // يبدأ يسارًا وينتهي يمينًا فوق الرأس
+  const ARC = SPAN;
+  const COLLIDE_PAD = 15;                                // هامش الأمان بين أي دائرتين
 
   const chain = [];
   let c = byId[headId];
@@ -2987,9 +2988,59 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   });
   spread(0, headId, 0, A0, A0 + ARC, headR, null);
 
-  // سلسلة النسب تنزل من أسفل التاج مباشرة، لا من بعيد
-  const bottom = Math.max(...nodes.map((n) => n.y + n.r));
-  const stemStart = bottom + 74;
+  // منع التصادم: دفعٌ متبادل بين كل دائرتين تتقاطعان، مع إبقاء الابن خارج أبيه دائمًا
+  const parentOf = {};
+  links.forEach((l) => { parentOf[l.to] = l.from; });
+  const relax = (iters) => {
+    const cell = 2 * Math.max(...nodes.map((n) => n.r)) + COLLIDE_PAD;
+    for (let it = 0; it < iters; it++) {
+      const grid = new Map();
+      nodes.forEach((n, i) => {
+        const key = Math.floor(n.x / cell) + ":" + Math.floor(n.y / cell);
+        if (!grid.has(key)) grid.set(key, []);
+        grid.get(key).push(i);
+      });
+      let moved = 0;
+      nodes.forEach((n, i) => {
+        const gx = Math.floor(n.x / cell), gy = Math.floor(n.y / cell);
+        for (let ax = -1; ax <= 1; ax++) for (let ay = -1; ay <= 1; ay++) {
+          const arr = grid.get((gx + ax) + ":" + (gy + ay));
+          if (!arr) continue;
+          arr.forEach((j) => {
+            if (j <= i) return;
+            const m = nodes[j];
+            let dx = m.x - n.x, dy = m.y - n.y;
+            let dist = Math.hypot(dx, dy);
+            const min = n.r + m.r + COLLIDE_PAD;
+            if (dist >= min) return;
+            if (dist < 0.01) { dx = Math.cos(i * 2.4); dy = Math.sin(i * 2.4); dist = 1; }
+            const push = (min - dist) / 2, ux = dx / dist, uy = dy / dist;
+            if (!n.isHead) { n.x -= ux * push; n.y -= uy * push; }
+            if (!m.isHead) { m.x += ux * push; m.y += uy * push; }
+            moved++;
+          });
+        }
+      });
+      // الابن لا يقترب من أبيه أقل من الحدّ، ولا ينزل تحت خطّ الرأس فيزاحم الجذع
+      nodes.forEach((n, i) => {
+        if (n.isHead) return;
+        const p = nodes[parentOf[i]];
+        if (p) {
+          const dx = n.x - p.x, dy = n.y - p.y;
+          const d = Math.hypot(dx, dy) || 1;
+          const need = n.r + p.r + 14;
+          if (d < need) { n.x = p.x + (dx / d) * need; n.y = p.y + (dy / d) * need; }
+        }
+        const floor = -(n.r + 6);
+        if (n.y > floor) n.y = floor;
+      });
+      if (!moved) break;
+    }
+  };
+  relax(90);
+
+  // سلسلة النسب تنزل من تحت الرأس مباشرة كجذعٍ واحد
+  const stemStart = headR + 64;
   const lineNodes = ancestors.map((a, i) => ({
     id: a.id, name: a.name, y: stemStart + i * 82,
     r: Math.max(24, radiusFor(a.name, 1)), alive: a.isAlive !== false,
