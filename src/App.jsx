@@ -2898,8 +2898,8 @@ function FanChartModal({ centerId, members, onClose }) {
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
 const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#F3A3B8", "#7FC4C4", "#D9C27E", "#A8C686", "#C49BD4"];
 
-// نطاق التاج أولًا (قرصٌ فوق الجذع بمساحة تكفي العدد)، ثم يُقسَّم قطاعاتٍ مرنة
-// بين الفروع بقدر كتلها، وقطاع كل أب يُقسَّم بين أبنائه — فيمتلئ التاج مستديرًا
+// وزن الأطراف (Leaf Weighting): يُقسَّم قوس التاج بعدد الأوراق الطرفية لا بعدد الأفراد،
+// ثم يُوسَّط كل أب بين طرفَي أبنائه — فيقلّ الضغط ويستقيم الغصن
 function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
   let hidden = 0;
   const nodeR = (d) => (d === 0 ? 22 : d === 1 ? 19 : d === 2 ? 17 : d === 3 ? 15 : 13.5);
@@ -2913,63 +2913,65 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
   }
   const crownRootId = trunk[trunk.length - 1];
 
-  const sizeCache = {};
-  const sizeOf = (id, d) => {
+  // عدد الأوراق الطرفية لكل فرد (لا مجموع أفراده)
+  const leafCache = {};
+  const leavesOf = (id, d) => {
     const key = id + "|" + d;
-    if (sizeCache[key] != null) return sizeCache[key];
-    let n = 1;
-    if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((k) => { n += sizeOf(k.id, d + 1); });
-    sizeCache[key] = n;
-    return n;
+    if (leafCache[key] != null) return leafCache[key];
+    const kids = d >= maxGen ? [] : sonsOf(id, childrenMap, byId);
+    const v = kids.length === 0 ? 1 : kids.reduce((s2, k) => s2 + leavesOf(k.id, d + 1), 0);
+    leafCache[key] = v;
+    return v;
   };
 
   const crownKids = sonsOf(crownRootId, childrenMap, byId);
-  const w0 = crownKids.map((k) => sizeOf(k.id, 0));
-  const totalUnits = w0.reduce((a, b) => a + b, 0) || 1;
+  const totalLeaves = crownKids.reduce((a, k) => a + leavesOf(k.id, 0), 0) || 1;
+  let maxDepth = 0;
 
-  // ===== نطاق التاج: قرصٌ مساحته تكفي كل الأفراد =====
-  const CELL = 44;                                   // مساحة الفرد الواحد تقريبًا
-  const R_MAX = Math.max(360, Math.sqrt((totalUnits * CELL * CELL) / Math.PI) * 1.35);
-  const R_MIN = Math.max(120, R_MAX * 0.16);         // بداية التاج فوق الجذع
+  // ===== نطاق التاج: قوسٌ وأنصاف أقطار تتّسع مع عدد الأوراق =====
   const A0 = -Math.PI * 0.985, A1 = -Math.PI * 0.015;
-
+  const ARC = A1 - A0;
+  const STEP = 78;                                   // المسافة بين جيل وجيل
+  const R_MIN = 96;
+  // اتساع القوس عند أبعد حلقة يجب أن يسع كل الأوراق
   const nodes = [], links = [];
-  // يوزّع فردًا وذرّيته داخل قطاعٍ مرن [a0..a1] بين نصفي القطر [r0..r1]
-  const layout = (id, depth, color, parentIdx, a0, a1, r0, r1) => {
+
+  // أولًا: زوايا الأوراق، ثم توسيط الآباء بينها
+  const theta = {};
+  let leafCursor = 0;
+  const assignTheta = (id, d) => {
+    const kids = d >= maxGen ? [] : sonsOf(id, childrenMap, byId);
+    if (d >= maxGen) hidden += sonsOf(id, childrenMap, byId).length;
+    maxDepth = Math.max(maxDepth, d);
+    if (kids.length === 0) {
+      theta[id] = A0 + ((leafCursor + 0.5) * ARC) / totalLeaves;
+      leafCursor++;
+      return;
+    }
+    kids.forEach((k) => assignTheta(k.id, d + 1));
+    theta[id] = (theta[kids[0].id] + theta[kids[kids.length - 1].id]) / 2;   // توسيط الأب
+  };
+  crownKids.forEach((k) => assignTheta(k.id, 0));
+
+  // ثانيًا: الإحداثيات — نصف القطر بحسب الجيل، والزاوية من الخطوة السابقة
+  const RING = Math.max(STEP, (totalLeaves * 44) / Math.max(1, ARC * (maxDepth + 2)));
+  const put = (id, d, color, parentIdx) => {
     const m = byId[id] || {};
-    const r = nodeR(depth);
-    const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
-    if (depth >= maxGen) hidden += sonsOf(id, childrenMap, byId).length;
-
-    const mid = (a0 + a1) / 2;
-    const rr = r0 + r + 6;                            // الأب عند بداية قطاعه (جهة الجذع)
+    const r = nodeR(d);
+    const rad = R_MIN + d * RING;
+    const a = theta[id];
     const idx = nodes.length;
-    nodes.push({ id, name: m.name || "", depth, color, alive: m.isAlive !== false, r, x: Math.cos(mid) * rr, y: Math.sin(mid) * rr });
+    nodes.push({ id, name: m.name || "", depth: d, color, alive: m.isAlive !== false, r, x: Math.cos(a) * rad, y: Math.sin(a) * rad });
     if (parentIdx >= -1) links.push({ from: parentIdx, to: idx, trunk: parentIdx === -1 });
-    if (!kids.length) return idx;
-
-    const cr0 = Math.min(r1 - 8, rr + r + 22);        // ما بعد الأب لأبنائه
-    const weights = kids.map((k) => sizeOf(k.id, depth + 1));
-    const sum = weights.reduce((a, b) => a + b, 0) || 1;
-    let acc = a0;
-    kids.forEach((k, i) => {
-      const share = (a1 - a0) * (weights[i] / sum);
-      layout(k.id, depth + 1, color, idx, acc, acc + share, cr0, r1);
-      acc += share;
-    });
+    if (d >= maxGen) return idx;
+    sonsOf(id, childrenMap, byId).forEach((k) => put(k.id, d + 1, color, idx));
     return idx;
   };
+  crownKids.forEach((k, i) => put(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1));
 
-  let accA = A0;
-  crownKids.forEach((k, i) => {
-    const share = (A1 - A0) * (w0[i] / totalUnits);
-    layout(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, accA, accA + share, R_MIN, R_MAX);
-    accA += share;
-  });
-
-  // فكّ التلامس مع شدٍّ لكلٍّ نحو موضعه المحجوز
+  // ثالثًا: فكّ تلامسٍ لطيف مع شدٍّ لكلٍّ نحو موضعه المحسوب
   const home = nodes.map((n) => ({ x: n.x, y: n.y }));
-  for (let it = 0; it < 70; it++) {
+  for (let it = 0; it < 80; it++) {
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const a = nodes[i], b = nodes[j];
@@ -2984,9 +2986,9 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
       }
     }
     nodes.forEach((n, i) => {
-      n.x += (home[i].x - n.x) * 0.07;
-      n.y += (home[i].y - n.y) * 0.07;
-      if (n.y > -100) n.y = -100;
+      n.x += (home[i].x - n.x) * 0.05;
+      n.y += (home[i].y - n.y) * 0.05;
+      if (n.y > -90) n.y = -90;
     });
   }
 
