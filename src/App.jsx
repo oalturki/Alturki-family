@@ -2898,27 +2898,70 @@ function FanChartModal({ centerId, members, onClose }) {
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
 const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#E89BB0", "#7FC4C4", "#D4B483", "#A8C686", "#C49BD4"];
 
-// تخطيط مكانيّ: لكل فرع رئيسي حيّزٌ عرضيّ خاص به، وداخله تُرصَف الأجيال صفوفًا
-// صاعدة والأطراف عناقيدَ فوق آبائها — فتتلاصق الكتل بلا تداخل وتخرج هيئة شجرة
-function buildPosterLayout(rootId, byId, childrenMap, maxGen) {
-  const nodes = [], links = [];
-  let hidden = 0;
-
-  const nodeR = (d) => (d === 0 ? 23 : d === 1 ? 20 : d === 2 ? 17 : d === 3 ? 15 : 13);
-  const ROW = 96;          // ارتفاع الجيل الواحد
-  const GAPX = 9;          // فاصل أفقي بين الدوائر
-
-  // عرض الشجرة الفرعية: الأطراف تُرصّ في عناقيد فتأخذ عرضًا أقلّ
-  const widthOf = (id, depth) => {
-    const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
-    const selfW = 2 * nodeR(depth) + GAPX;
-    if (kids.length === 0) return selfW;
-    if (kids.every((k) => sonsOf(k.id, childrenMap, byId).length === 0)) {
-      const kw = 2 * nodeR(depth + 1) + GAPX;
-      const cols = Math.max(1, Math.ceil(Math.sqrt(kids.length * 1.6)));
-      return Math.max(selfW, cols * kw);
+// تخطيط بالاحتواء (Circle Packing): كل فرع كتلةٌ دائرية تحوي أباه وذرّيته،
+// والكتل تُرصّ داخل بعضها فتملأ الفراغ أولًا بأول بلا تقاطع، ويخرج المجموع تاجًا مستديرًا
+function packCircles(items, gap) {
+  const list = items.slice().sort((a, b) => b.r - a.r);
+  const placed = [];
+  const fits = (x, y, r) => placed.every((p) => Math.hypot(p.x - x, p.y - y) >= p.r + r + gap - 0.01);
+  list.forEach((c, i) => {
+    if (i === 0) { placed.push({ ...c, x: 0, y: 0 }); return; }
+    let best = null;
+    // مرشّحات: مماسّة لدائرتين موضوعتين، فتُرصّ متلاصقة بلا فراغ
+    for (let a = 0; a < placed.length && !best; a++) {
+      for (let b = a + 1; b < placed.length; b++) {
+        const A = placed[a], B = placed[b];
+        const d = Math.hypot(B.x - A.x, B.y - A.y);
+        const r1 = A.r + c.r + gap, r2 = B.r + c.r + gap;
+        if (d > r1 + r2 || d < Math.abs(r1 - r2) || d === 0) continue;
+        const ax = (d * d - r2 * r2 + r1 * r1) / (2 * d);
+        const h2 = r1 * r1 - ax * ax;
+        if (h2 < 0) continue;
+        const h = Math.sqrt(h2);
+        const mx = A.x + (ax * (B.x - A.x)) / d, my = A.y + (ax * (B.y - A.y)) / d;
+        const ox = (h * (B.y - A.y)) / d, oy = (-h * (B.x - A.x)) / d;
+        [[mx + ox, my + oy], [mx - ox, my - oy]].forEach(([x, y]) => {
+          if (!fits(x, y, c.r)) return;
+          const score = Math.hypot(x, y);            // الأقرب للمركز أولًا = ملء الفراغ
+          if (!best || score < best.score) best = { x, y, score };
+        });
+      }
     }
-    return Math.max(selfW, kids.reduce((sum, k) => sum + widthOf(k.id, depth + 1), 0));
+    if (!best) {   // احتياط: لولب حول المركز
+      for (let rad = c.r; rad < 6000 && !best; rad += c.r * 0.6) {
+        const steps = Math.max(8, Math.floor((2 * Math.PI * rad) / (c.r * 0.8)));
+        for (let t = 0; t < steps; t++) {
+          const ang = (t / steps) * 2 * Math.PI;
+          const x = Math.cos(ang) * rad, y = Math.sin(ang) * rad;
+          if (fits(x, y, c.r)) { best = { x, y }; break; }
+        }
+      }
+    }
+    placed.push({ ...c, x: best ? best.x : 0, y: best ? best.y : 0 });
+  });
+  const R = placed.reduce((mx, p) => Math.max(mx, Math.hypot(p.x, p.y) + p.r), 0);
+  return { placed, R };
+}
+
+function buildPosterLayout(rootId, byId, childrenMap, maxGen) {
+  let hidden = 0;
+  const nodeR = (d) => (d === 0 ? 22 : d === 1 ? 19 : d === 2 ? 17 : d === 3 ? 15 : 14);
+
+  // كتلة كل فرد: هو ومن تحته، مرصوصون داخل دائرة واحدة
+  const cluster = (id, depth) => {
+    const m = byId[id] || {};
+    const self = { r: nodeR(depth), leaf: true, id, name: m.name || "", depth, alive: m.isAlive !== false };
+    const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
+    if (depth >= maxGen) hidden += Math.max(0, sonsOf(id, childrenMap, byId).length);
+    if (kids.length === 0) return { r: self.r, items: [{ ...self, x: 0, y: 0 }] };
+    const subs = kids.map((k) => cluster(k.id, depth + 1));
+    const { placed, R } = packCircles([{ ...self, sub: null }, ...subs.map((c) => ({ r: c.r, sub: c }))], 6);
+    const items = [];
+    placed.forEach((p) => {
+      if (p.sub) p.sub.items.forEach((it) => items.push({ ...it, x: it.x + p.x, y: it.y + p.y }));
+      else items.push({ id: p.id, name: p.name, depth: p.depth, alive: p.alive, r: p.r, x: p.x, y: p.y });
+    });
+    return { r: R + 3, items };
   };
 
   const trunk = [];
@@ -2929,68 +2972,29 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen) {
     if (kids.length === 1) { cur = kids[0].id; } else break;
   }
   const crownRootId = trunk[trunk.length - 1];
+  const branches = sonsOf(crownRootId, childrenMap, byId).map((k, i) => ({ k, i, c: cluster(k.id, 0) }));
 
-  // يرسم فرعًا داخل حيّزه [x0..x1] ابتداءً من الارتفاع y
-  const place = (id, x0, x1, depth, y, color, parentIdx) => {
-    const m = byId[id] || {};
-    const cx = (x0 + x1) / 2;
-    const idx = nodes.length;
-    nodes.push({ id, name: m.name || "", x: cx, y, r: nodeR(depth), depth, color, alive: m.isAlive !== false });
-    if (parentIdx >= -1) links.push({ from: parentIdx, to: idx, trunk: parentIdx === -1 });
-
-    if (depth + 1 > maxGen) { hidden += Math.max(0, (sonsOf(id, childrenMap, byId) || []).length); return idx; }
-    const kids = sonsOf(id, childrenMap, byId);
-    if (kids.length === 0) return idx;
-
-    // كل الأبناء أطراف: عنقود مرصوص فوق الأب (صفوف قصيرة متراصّة)
-    if (kids.every((k) => sonsOf(k.id, childrenMap, byId).length === 0)) {
-      const kr = nodeR(depth + 1), stepX = 2 * kr + GAPX, stepY = 2 * kr + 7;
-      const cols = Math.max(1, Math.min(kids.length, Math.floor((x1 - x0) / stepX) || 1));
-      kids.forEach((k, i) => {
-        const row = Math.floor(i / cols), col = i % cols;
-        const inRow = Math.min(cols, kids.length - row * cols);
-        const startX = cx - ((inRow - 1) * stepX) / 2;
-        const ki = nodes.length;
-        nodes.push({ id: k.id, name: k.name || "", x: startX + col * stepX, y: y - ROW * 0.62 - row * stepY, r: kr, depth: depth + 1, color, alive: k.isAlive !== false });
-        links.push({ from: idx, to: ki });
-      });
-      return idx;
-    }
-
-    const widths = kids.map((k) => widthOf(k.id, depth + 1));
-    const totalW = widths.reduce((a, b) => a + b, 0) || 1;
-    const span = Math.max(totalW, x1 - x0);
-    let cx0 = cx - span / 2;
-    kids.forEach((k, i) => {
-      const w = (widths[i] / totalW) * span;
-      place(k.id, cx0, cx0 + w, depth + 1, y - ROW, color || POSTER_COLORS[i % POSTER_COLORS.length], idx);
-      cx0 += w;
-    });
-    return idx;
-  };
-
-  const crownKids = sonsOf(crownRootId, childrenMap, byId);
-  const cw = crownKids.map((k) => widthOf(k.id, 0));
-  const totalW = cw.reduce((a, b) => a + b, 0) || 1;
-  let x = -totalW / 2;
-  crownKids.forEach((k, i) => {
-    place(k.id, x, x + cw[i], 0, -140, POSTER_COLORS[i % POSTER_COLORS.length], -1);
-    x += cw[i];
+  // رصّ الفروع الرئيسية بعضها بجوار بعض ليكوّن تاج الشجرة
+  const { placed, R } = packCircles(branches.map((b) => ({ r: b.c.r, b })), 12);
+  const nodes = [], regions = [];
+  placed.forEach((p) => {
+    const color = POSTER_COLORS[p.b.i % POSTER_COLORS.length];
+    regions.push({ x: p.x, y: p.y * 0.82, r: p.r, color });
+    p.b.c.items.forEach((it) => nodes.push({ ...it, x: it.x + p.x, y: it.y * 0.82 + p.y * 0.82, color }));
   });
 
-  // انحناء التاج: الفروع الطرفية تنزل قليلًا فيستدير المجموع كتاج الشجرة
-  const halfW = Math.max(1, totalW / 2);
-  nodes.forEach((n) => {
-    const t = Math.min(1, Math.abs(n.x) / halfW);
-    n.y += t * t * 190;
-  });
+  // رفع التاج فوق الجذع
+  const maxY = nodes.reduce((mx, n) => Math.max(mx, n.y + n.r), 0);
+  const lift = maxY + 120;
+  nodes.forEach((n) => { n.y -= lift; });
+  regions.forEach((g) => { g.y -= lift; });
 
   const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
-  const minX = Math.min(-160, ...xs) - 70, maxX = Math.max(160, ...xs) + 70;
-  const minY = Math.min(-160, ...ys) - 70;
+  const minX = Math.min(-160, ...xs) - 80, maxX = Math.max(160, ...xs) + 80;
+  const minY = Math.min(-160, ...ys) - 80;
   const trunkH = 120 + trunk.length * 76;
   return {
-    nodes, links, trunk: trunk.map((id) => (byId[id] || {}).name || ""),
+    nodes, regions, links: [], trunk: trunk.map((id) => (byId[id] || {}).name || ""),
     minX, maxX, minY, trunkH, hidden, total: nodes.length + trunk.length,
   };
 }
@@ -3106,6 +3110,12 @@ function PosterTreeModal({ members, meId, onClose }) {
             })}
 
             {/* الأغصان */}
+            {(L.regions || []).map((g, i) => (
+              <g key={"rg" + i}>
+                <circle cx={g.x} cy={g.y} r={g.r + 6} fill={g.color} opacity={0.18} />
+                <path d={`M 0 0 C 0 ${g.y / 2}, ${g.x} ${g.y / 2}, ${g.x} ${g.y}`} stroke="#7A552F" strokeWidth={Math.max(4, Math.min(14, g.r / 12))} fill="none" strokeLinecap="round" opacity={0.9} />
+              </g>
+            ))}
             {L.links.map((l, i) => {
               const f = l.from < 0 ? { x: 0, y: 0 } : L.nodes[l.from];
               const t = L.nodes[l.to];
