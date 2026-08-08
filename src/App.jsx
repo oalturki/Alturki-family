@@ -3006,39 +3006,25 @@ function PosterTreeModal({ members, meId, onClose }) {
   const { byId, childrenMap } = useMemo(() => treeMaps(members), [members]);
   const rootMember = useMemo(() => members.find((m) => !m.fatherId), [members]);
   // رؤوس الفروع: من له ذرّية ممتدة فقط — والفروع المنقطعة لا تُعرض في القائمة
-  // رؤوس الفروع: أبناء الفروع الرئيسية، ومعهم أبناء أي جدٍّ كبير في العمق
-  // (كأبناء عبدالكريم بن محمد بن ناصر). والفروع المنقطعة — بلا ذرّية — تُستبعد
+  // رؤوس الفروع: أحفاد الفروع الرئيسية (طبقة أعمق من أبنائها) — والمنقطعون مستبعدون
   const branchHeads = useMemo(() => {
     if (!rootMember) return [];
-    let c = rootMember, kids = sonsOf(c.id, childrenMap, byId), pathNames = [c.name];
-    while (kids.length === 1) { c = kids[0]; pathNames.unshift(c.name); kids = sonsOf(c.id, childrenMap, byId); }
-    const out = [];
+    let c = rootMember, kids = sonsOf(c.id, childrenMap, byId);
+    while (kids.length === 1) { c = kids[0]; kids = sonsOf(c.id, childrenMap, byId); }
     const nasabOf = (m) => {
       const parts = [];
       let x = m;
       while (x) { parts.push(x.name); x = x.fatherId ? byId[x.fatherId] : null; }
       return parts.join(" بن ");
     };
+    const out = [];
     kids.forEach((main) => {
-      const group = `فرع ${main.name}`;
-      // أبناء الفرع الرئيسي
-      sonsOf(main.id, childrenMap, byId).forEach((k) => {
-        if (sonsOf(k.id, childrenMap, byId).length === 0) return;   // فرع منقطع
-        out.push({ m: k, group, label: nasabOf(k) });
+      sonsOf(main.id, childrenMap, byId).forEach((son) => {
+        sonsOf(son.id, childrenMap, byId).forEach((g) => {
+          if (sonsOf(g.id, childrenMap, byId).length === 0) return;   // فرع منقطع
+          out.push({ m: g, group: `فرع ${main.name}`, label: `${g.name} بن ${son.name} بن ${main.name}`, full: nasabOf(g) });
+        });
       });
-      // ومن كان له خمسة أبناء فأكثر في العمق، يُفتح أبناؤه فروعًا أيضًا
-      const deep = (m, d) => {
-        if (d > 6) return;
-        const ks = sonsOf(m.id, childrenMap, byId);
-        if (d >= 2 && ks.length >= 5) {
-          ks.forEach((k) => {
-            if (sonsOf(k.id, childrenMap, byId).length === 0) return;
-            if (!out.some((o) => o.m.id === k.id)) out.push({ m: k, group: `فروع ${m.name}`, label: nasabOf(k) });
-          });
-        }
-        ks.forEach((k) => deep(k, d + 1));
-      };
-      deep(main, 1);
     });
     return out;
   }, [rootMember, childrenMap, byId]);
