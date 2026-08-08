@@ -2909,7 +2909,7 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
     return Math.max(d === 0 ? 30 : d === 1 ? 22 : 18, w / 2 + 6);
   };
   const PAD = 11;                                        // فراغ بين الأشقاء على قوسهم
-  const STEP = (d) => (d === 1 ? 108 : Math.max(50, 92 - d * 7)); // طول الغصن، يقصر بالارتفاع
+  const STEP = (d) => (d === 1 ? 96 : Math.max(46, 84 - d * 7)); // طول الغصن، يقصر بالارتفاع
   const SPAN = Math.PI * 0.92;                           // اتساع التاج (علويّ فقط، لا دائرة كاملة)
   const A0 = -Math.PI / 2 - SPAN / 2;                    // يبدأ يسارًا وينتهي يمينًا فوق الرأس
   const ARC = SPAN;
@@ -2953,10 +2953,10 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
 
   const nodes = [], links = [];
   const parentIdxOf = {};
-  // مروحة محلّية حول كل أب: أبناؤه يلتفّون حوله في اتجاه نموّه، على صفٍّ أو أكثر إن كثروا.
-  // فلا يُدفع أحدٌ إلى الحافة، ولا يُمَطّ غصنٌ ليصل ابنه.
-  const HS = (d) => (d === 1 ? 1.02 : d === 2 ? 0.9 : 0.78);   // نصف اتساع المروحة
-  const placeChildren = (pIdx, d) => {
+  // لكل فرعٍ قطاعٌ زاويّ خاصّ به من مركز الرأس لا يتعدّاه — به وحده تُمنع تقاطعات الأغصان.
+  // والبُعد يُقاس من الأب لا من المركز، وبسقفٍ لا يتجاوزه؛ فإن ضاق القطاع عن الأبناء
+  // انتظموا في صفّين أو ثلاثة داخل قطاعهم، بدل أن يُدفعوا إلى الخارج.
+  const spread = (pIdx, d, a0, a1) => {
     const p = nodes[pIdx];
     const kids = kidsOf(p.id, d);
     if (kids.length === 0) return;
@@ -2964,16 +2964,16 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
     const own = rs.map((r) => 2 * r + PAD);
     const ds = kids.map((k) => demand(k.id, d + 1));
     const sumOwn = own.reduce((x, y) => x + y, 0);
-
-    const gp = nodes[parentIdxOf[pIdx]];
-    const dir = p.isHead ? -Math.PI / 2 : Math.atan2(p.y - gp.y, p.x - gp.x);
-    const hs = p.isHead ? ARC / 2 : HS(d);
+    const sumD = ds.reduce((x, y) => x + y, 0) || 1;
+    const wedge = Math.max(0.08, a1 - a0);
     const step = STEP(d + 1);
-    // بُعد الصفّ: بقدر ما يتّسع للأبناء، وبسقفٍ لا يتجاوزه فلا تطول الأغصان
-    const L = Math.max(step, Math.min(sumOwn / (2 * hs), step * 1.9));
-    const rows = Math.max(1, Math.ceil(sumOwn / (2 * hs * L)));
+    const parentR = Math.hypot(p.x, p.y);
 
-    // توزيع الأبناء على الصفوف بالترتيب، بحيث يتقارب حمل كل صفّ
+    // بُعد الصفّ الأول: قريبٌ من الأب، وبسقفٍ يمنع استطالة الغصن
+    const R1 = Math.min(Math.max(parentR + step, sumOwn / wedge), parentR + step * 2.1);
+    const rows = Math.max(1, Math.ceil(sumOwn / (wedge * R1)));
+
+    // توزيع الأبناء على الصفوف بالترتيب مع تقارب حمل كل صفّ
     const perRow = sumOwn / rows;
     const buckets = Array.from({ length: rows }, () => []);
     let ri = 0, load = 0;
@@ -2983,15 +2983,21 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
       load += own[i];
     });
 
+    // القطاعات تُقسَّم بالترتيب على كل الأبناء (لا داخل الصفّ) فتبقى حدود الفروع محفوظة
+    const slices = [];
+    let acc = a0;
+    kids.forEach((k, i) => {
+      const share = wedge * (ds[i] / sumD);
+      slices[i] = [acc, acc + share];
+      acc += share;
+    });
+
     buckets.forEach((idxs, r) => {
-      if (!idxs.length) return;
-      const Lr = L * (1 + 0.52 * r);
-      const wsum = idxs.reduce((x, i) => x + ds[i], 0) || 1;
-      let acc = -hs;
+      const Rr = R1 * (1 + 0.42 * r);
       idxs.forEach((i) => {
-        const share = (2 * hs) * (ds[i] / wsum);
-        const ang = dir + acc + share / 2 + jitter(kids[i].id, 0.06);
-        const rr = Lr + jitter(kids[i].id + "r", step * 0.22);
+        const [s0, s1] = slices[i];
+        const ang = (s0 + s1) / 2 + jitter(kids[i].id, Math.min(0.05, (s1 - s0) * 0.18));
+        const rr = Rr + jitter(kids[i].id + "r", step * 0.16);
         const m = byId[kids[i].id] || {};
         const kc = p.isHead ? POSTER_COLORS[i % POSTER_COLORS.length] : p.color;
         const idx = nodes.length;
@@ -2999,11 +3005,11 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
           id: kids[i].id, name: m.name || "", depth: d + 1, color: kc,
           fill: mixToWhite(kc, Math.min(0.5, d * 0.11)),
           alive: m.isAlive !== false, r: rs[i], fs: FS(d + 1),
-          x: p.x + Math.cos(ang) * rr, y: p.y + Math.sin(ang) * rr,
+          x: Math.cos(ang) * rr, y: Math.sin(ang) * rr,
+          a0: s0, a1: s1,
         });
         links.push({ from: pIdx, to: idx });
         parentIdxOf[idx] = pIdx;
-        acc += share;
       });
     });
   };
@@ -3013,11 +3019,13 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   nodes.push({
     id: headId, name: headM.name || "", depth: 0, color: null, fill: null,
     alive: headM.isAlive !== false, r: headR, fs: FS(0), x: 0, y: 0, isHead: true,
+    a0: A0, a1: A0 + ARC,
   });
-  // نبني جيلًا بعد جيل حتى يعرف كل أبٍ اتجاه نموّه قبل أن يوزّع أبناءه
-  for (let i = 0; i < nodes.length; i++) placeChildren(i, nodes[i].depth);
+  // جيلًا بعد جيل: كل أبٍ يوزّع أبناءه داخل قطاعه هو
+  for (let i = 0; i < nodes.length; i++) spread(i, nodes[i].depth, nodes[i].a0, nodes[i].a1);
 
-  // منع التصادم: دفعٌ متبادل بين كل دائرتين تتقاطعان، مع إبقاء الابن خارج أبيه دائمًا
+  // منع التصادم: الدفع شعاعيّ فقط (تغيير البُعد لا الزاوية) فتبقى القطاعات سليمة
+  // ولا يتولّد تقاطعٌ جديد، مع إبقاء الابن خارج أبيه دائمًا.
   const parentOf = {};
   links.forEach((l) => { parentOf[l.to] = l.from; });
   const relax = (iters) => {
@@ -3031,6 +3039,7 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
       });
       let moved = 0;
       nodes.forEach((n, i) => {
+        if (n.isHead) return;
         const gx = Math.floor(n.x / cell), gy = Math.floor(n.y / cell);
         for (let ax = -1; ax <= 1; ax++) for (let ay = -1; ay <= 1; ay++) {
           const arr = grid.get((gx + ax) + ":" + (gy + ay));
@@ -3038,37 +3047,38 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
           arr.forEach((j) => {
             if (j <= i) return;
             const m = nodes[j];
-            let dx = m.x - n.x, dy = m.y - n.y;
-            let dist = Math.hypot(dx, dy);
+            if (m.isHead) return;
+            const dist = Math.hypot(m.x - n.x, m.y - n.y);
             const min = n.r + m.r + COLLIDE_PAD;
             if (dist >= min) return;
-            if (dist < 0.01) { dx = Math.cos(i * 2.4); dy = Math.sin(i * 2.4); dist = 1; }
-            const push = (min - dist) / 2, ux = dx / dist, uy = dy / dist;
-            if (!n.isHead) { n.x -= ux * push; n.y -= uy * push; }
-            if (!m.isHead) { m.x += ux * push; m.y += uy * push; }
+            const push = (min - dist) / 2;
+            const rn = Math.hypot(n.x, n.y) || 1, rm = Math.hypot(m.x, m.y) || 1;
+            const outer = rn >= rm ? n : m, inner = rn >= rm ? m : n;
+            const ro = Math.hypot(outer.x, outer.y) || 1;
+            outer.x += (outer.x / ro) * push; outer.y += (outer.y / ro) * push;
+            const rin = Math.hypot(inner.x, inner.y) || 1;
+            const shrink = Math.min(push, rin * 0.05);
+            inner.x -= (inner.x / rin) * shrink; inner.y -= (inner.y / rin) * shrink;
             moved++;
           });
         }
       });
-      // الابن لا يقترب من أبيه أقل من الحدّ، ولا ينزل تحت خطّ الرأس فيزاحم الجذع
       nodes.forEach((n, i) => {
         if (n.isHead) return;
         const p = nodes[parentOf[i]];
-        if (p) {
-          const dx = n.x - p.x, dy = n.y - p.y;
-          const d = Math.hypot(dx, dy) || 1;
-          const need = n.r + p.r + 14;
-          if (d < need) { n.x = p.x + (dx / d) * need; n.y = p.y + (dy / d) * need; }
-        }
-        const floor = -(n.r + 6);
+        if (!p) return;
+        const dx = n.x - p.x, dy = n.y - p.y;
+        const dd = Math.hypot(dx, dy) || 1;
+        const need = n.r + p.r + 12;
+        if (dd < need) { n.x = p.x + (dx / dd) * need; n.y = p.y + (dy / dd) * need; }
+        const floor = -(n.r + 4);
         if (n.y > floor) n.y = floor;
       });
       if (!moved) break;
     }
   };
-  relax(90);
+  relax(70);
 
-  // سلسلة النسب تنزل من تحت الرأس مباشرة كجذعٍ واحد
   // دوائر تتصاغر صعودًا: تركي أكبرها في الأسفل، وأصل الفرع أصغرها ملاصقًا للتاج
   const nAnc = ancestors.length;
   const lineNodes = [];
