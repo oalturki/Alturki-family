@@ -2956,10 +2956,13 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   const spread = (parentIdx, id, d, a0, a1, parentR, color) => {
     const kids = kidsOf(id, d);
     if (kids.length === 0) return;
-    const ds = kids.map((k) => demand(k.id, d + 1));
+    const ds = kids.map((k) => demand(k.id, d + 1));          // لقسمة الزوايا
+    const own = kids.map((k) => 2 * radiusFor((byId[k.id] || {}).name, d + 1) + PAD); // لتحديد البُعد
     const sum = ds.reduce((x, y) => x + y, 0) || 1;
+    const sumOwn = own.reduce((x, y) => x + y, 0);
     const wedge = Math.max(0.12, a1 - a0);
-    const baseR = Math.max(parentR + STEP(d + 1), sum * 1.04 / wedge);
+    // البُعد يكفي لأقطار الأبناء أنفسهم فقط، لا لذرّيتهم — فذرّيتهم تتّسع حين تصل دورها
+    const baseR = Math.max(parentR + STEP(d + 1), sumOwn * 1.05 / wedge);
     let acc = a0;
     kids.forEach((k, i) => {
       const share = wedge * (ds[i] / sum);
