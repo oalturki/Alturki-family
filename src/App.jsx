@@ -2898,11 +2898,13 @@ function FanChartModal({ centerId, members, onClose }) {
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
 const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#F3A3B8", "#7FC4C4", "#D9C27E", "#A8C686", "#C49BD4"];
 
-// تخطيط بالقوى: الأب يجذب أبناءه فتقصر الوصلات ويلتفّون حوله،
-// وكل الدوائر تتنافر فلا تتراكب، وضغطٌ عام نحو المركز يملأ الفراغ
+// تخطيط بالبقع: لكل ابن «بقعة» حرّة حول أبيه بقدر ذرّيته — في أي جهة، لا في قوس منتظم.
+// إن ضاق ما حول الأب دُفعت البقعة إلى فراغ أبعد، ويلتفّ غصنها حول عنقود الأخ لا فوقه.
 function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
   let hidden = 0;
   const nodeR = (d) => (d === 0 ? 23 : d === 1 ? 20 : d === 2 ? 18 : d === 3 ? 16 : 14);
+  let sd = seed * 9301 + 49297;
+  const rnd = () => { sd = (sd * 9301 + 49297) % 233280; return sd / 233280; };
 
   const trunk = [];
   let cur = rootId;
@@ -2913,130 +2915,108 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
   }
   const crownRootId = trunk[trunk.length - 1];
 
-  // عشوائية ثابتة لكل إعادة توزيع
-  let sd = seed * 9301 + 49297;
-  const rnd = () => { sd = (sd * 9301 + 49297) % 233280; return sd / 233280; };
-
-  const nodes = [], links = [];
-  const sectorOf = [];   // شريحة كل فرد (يرثها من أبيه ويقسّمها على أبنائه)
-
-  // عدد أفراد الشجرة الفرعية — لتقسيم الشريحة بقدر الذرّية
   const sizeOf = (id, d) => {
     let n = 1;
     if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((k) => { n += sizeOf(k.id, d + 1); });
     return n;
   };
+  // نصف قطر البقعة: مساحةٌ تكفي ذرّية الفرد كلها
+  const blobR = (id, d) => {
+    const n = sizeOf(id, d);
+    return Math.max(nodeR(d) + 6, Math.sqrt(n) * 26);
+  };
 
-  const build = (id, depth, color, parentIdx, a0, a1) => {
+  const nodes = [], links = [], blobs = [];   // blobs: دوائر محجوزة تمنع التداخل
+  const freeSpot = (cx, cy, want, prefer) => {
+    // نبحث عن أقرب موضع فارغ حول (cx,cy) بادئين بالاتجاه المفضّل ثم نتوسّع
+    for (let ring = 0; ring < 40; ring++) {
+      const dist = want + 30 + ring * (want * 0.35 + 18);
+      const steps = 10 + ring * 4;
+      let best = null;
+      for (let t = 0; t < steps; t++) {
+        const a = prefer + (t % 2 === 0 ? 1 : -1) * Math.ceil(t / 2) * (2 * Math.PI / steps);
+        const x = cx + Math.cos(a) * dist, y = cy + Math.sin(a) * dist;
+        if (y > -110) continue;                       // يبقى فوق الجذع
+        const clash = blobs.some((b) => Math.hypot(b.x - x, b.y - y) < b.r + want + 8);
+        if (clash) continue;
+        const score = Math.abs(a - prefer) + dist * 0.004;
+        if (!best || score < best.score) best = { x, y, score };
+      }
+      if (best) return best;
+    }
+    return { x: cx + want * 2, y: cy - want * 2 };
+  };
+
+  const place = (id, depth, color, parentIdx, cx, cy, prefer) => {
     const m = byId[id] || {};
-    const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
-    if (depth >= maxGen) hidden += sonsOf(id, childrenMap, byId).length;
     const idx = nodes.length;
-    const mid = (a0 + a1) / 2;
-    const dist = 300 + depth * 92 + rnd() * 30;
-    nodes.push({
-      id, name: m.name || "", depth, color, alive: m.isAlive !== false, r: nodeR(depth),
-      x: Math.cos(mid) * dist, y: Math.sin(mid) * dist,
-    });
-    sectorOf.push([a0, a1]);
+    nodes.push({ id, name: m.name || "", depth, color, alive: m.isAlive !== false, r: nodeR(depth), x: cx, y: cy });
+    blobs.push({ x: cx, y: cy, r: nodeR(depth) + 4 });
     if (parentIdx >= -1) links.push({ from: parentIdx, to: idx, trunk: parentIdx === -1 });
 
-    if (kids.length) {
-      const w = kids.map((k) => sizeOf(k.id, depth + 1));
-      const sum = w.reduce((x, y) => x + y, 0) || 1;
-      let a = a0;
-      kids.forEach((k, i) => {
-        const b = a + (a1 - a0) * (w[i] / sum);
-        build(k.id, depth + 1, color, idx, a, b);
-        a = b;
-      });
-    }
+    if (depth >= maxGen) { hidden += sonsOf(id, childrenMap, byId).length; return idx; }
+    const kids = sonsOf(id, childrenMap, byId);
+    if (!kids.length) return idx;
+
+    // الأبناء يوزَّعون حول الأب في أي جهة: نبدأ من اتجاه الأب ثم نلفّ حوله
+    const order = kids.map((k, i) => ({ k, i, w: blobR(k.id, depth + 1) })).sort((a, b) => b.w - a.w);
+    order.forEach((o, j) => {
+      const dir = prefer + (j % 2 === 0 ? 1 : -1) * (0.55 + 0.42 * Math.floor(j / 2)) + (rnd() - 0.5) * 0.25;
+      const spot = freeSpot(cx, cy, o.w, dir);
+      blobs.push({ x: spot.x, y: spot.y, r: o.w });     // حجز البقعة كاملة
+      const childPrefer = Math.atan2(spot.y - cy, spot.x - cx);
+      place(o.k.id, depth + 1, color, idx, spot.x, spot.y, childPrefer);
+    });
     return idx;
   };
 
   const crownKids = sonsOf(crownRootId, childrenMap, byId);
-  // وزن كل فرع بعدد أفراده، ليأخذ قطاعًا («شريحة كيكة») بقدر حجمه
-  const branchWeight = crownKids.map((k) => {
-    let n = 0;
-    const walk = (id, d) => { n++; if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((c) => walk(c.id, d + 1)); };
-    walk(k.id, 0);
-    return n;
-  });
-  const wSum = branchWeight.reduce((a, b) => a + b, 0) || 1;
-  const SEC0 = -Math.PI * 0.99, SEC1 = -Math.PI * 0.01, PAD = 0.012;
-  let acc = SEC0;
+  const weights = crownKids.map((k) => blobR(k.id, 0));
+  const totalW = weights.reduce((a, b) => a + b, 0) || 1;
+  let accA = -Math.PI * 0.95;
   crownKids.forEach((k, i) => {
-    const w = (SEC1 - SEC0) * (branchWeight[i] / wSum);
-    build(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, acc + PAD, acc + w - PAD);
-    acc += w;
+    const share = (Math.PI * 0.9) * (weights[i] / totalW);
+    const dir = accA + share / 2;
+    const spot = freeSpot(0, -170, weights[i], dir);
+    blobs.push({ x: spot.x, y: spot.y, r: weights[i] });
+    place(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, spot.x, spot.y, dir);
+    accA += share;
   });
 
-  // ===== محاكاة القوى =====
-  const N = nodes.length;
-  const childrenIdx = nodes.map(() => []);
-  links.forEach((l) => { if (l.from >= 0) childrenIdx[l.from].push(l.to); });
-  const ITER = N > 600 ? 260 : 420;
-  const CELL = 60;
-  for (let it = 0; it < ITER; it++) {
-    const k = 1 - it / ITER;                     // تبريد تدريجي
-    // تجاذب الأب وأبنائه: طول الوصلة المرغوب
+  // شدّ لطيف: تقصير الوصلات وفكّ أي تلامس بقي، دون كسر البقع
+  for (let it = 0; it < 90; it++) {
+    const k = 1 - it / 90;
     links.forEach((l) => {
       if (l.from < 0) return;
       const a = nodes[l.from], b = nodes[l.to];
-      const want = a.r + b.r + 26;
-      let dx = b.x - a.x, dy = b.y - a.y;
-      let d = Math.hypot(dx, dy) || 0.01;
-      const f = ((d - want) / d) * 0.14 * k;
-      a.x += dx * f; a.y += dy * f;
+      const want = a.r + b.r + 34;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.hypot(dx, dy) || 0.01;
+      if (d <= want) return;
+      const f = ((d - want) / d) * 0.05 * k;
       b.x -= dx * f; b.y -= dy * f;
     });
-    // ضغط نحو مركز الفرع (يملأ الفراغ ويجمع الكتلة)
-    nodes.forEach((n) => { n.x *= 1 - 0.0035 * k; n.y = n.y * (1 - 0.0035 * k); });
-    // تنافر: لا تتراكب دائرتان
-    const grid = new Map();
-    nodes.forEach((n, i) => {
-      const key = Math.floor(n.x / CELL) + "," + Math.floor(n.y / CELL);
-      if (!grid.has(key)) grid.set(key, []);
-      grid.get(key).push(i);
-    });
-    nodes.forEach((n, i) => {
-      const gx = Math.floor(n.x / CELL), gy = Math.floor(n.y / CELL);
-      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
-        const list = grid.get((gx + dx) + "," + (gy + dy));
-        if (!list) continue;
-        for (const j of list) {
-          if (j <= i) continue;
-          const m = nodes[j];
-          let ddx = m.x - n.x, ddy = m.y - n.y;
-          let d = Math.hypot(ddx, ddy);
-          const min = n.r + m.r + 7;
-          if (d >= min) continue;
-          if (d < 0.01) { ddx = rnd() - 0.5; ddy = rnd() - 0.5; d = 0.5; }
-          const push = (min - d) / 2, ux = ddx / d, uy = ddy / d;
-          n.x -= ux * push; n.y -= uy * push;
-          m.x += ux * push; m.y += uy * push;
-        }
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const n = nodes[i], m2 = nodes[j];
+        let dx = m2.x - n.x, dy = m2.y - n.y;
+        let d = Math.hypot(dx, dy);
+        const min = n.r + m2.r + 7;
+        if (d >= min) continue;
+        if (d < 0.01) { dx = rnd() - 0.5; dy = rnd() - 0.5; d = 0.5; }
+        const p = (min - d) / 2;
+        n.x -= (dx / d) * p; n.y -= (dy / d) * p;
+        m2.x += (dx / d) * p; m2.y += (dy / d) * p;
       }
-    });
-    // حصر كل فرد في شريحته الموروثة من أبيه — فلا يعبر غصنٌ شريحة غيره
-    nodes.forEach((n, ni) => {
-      const sec = sectorOf[ni];
-      if (!sec) return;
-      const d = Math.hypot(n.x, n.y) || 1;
-      let a = Math.atan2(n.y, n.x);
-      if (a > 0) a = a > Math.PI / 2 ? -Math.PI + 0.05 : -0.05;   // منع النزول تحت الأفق
-      const [a0, a1] = sec;
-      if (a < a0) a = a0; else if (a > a1) a = a1;
-      n.x = Math.cos(a) * d; n.y = Math.sin(a) * d;
-      if (n.y > -90) n.y = -90;
-    });
+    }
+    nodes.forEach((n) => { if (n.y > -100) n.y = -100; });
   }
 
-  const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
-  const midX = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const xs0 = nodes.map((n) => n.x);
+  const midX = (Math.min(...xs0) + Math.max(...xs0)) / 2;
   nodes.forEach((n) => { n.x -= midX; });
-  const xs2 = nodes.map((n) => n.x);
-  const minX = Math.min(-170, ...xs2) - 80, maxX = Math.max(170, ...xs2) + 80;
+  const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
+  const minX = Math.min(-170, ...xs) - 80, maxX = Math.max(170, ...xs) + 80;
   const minY = Math.min(-170, ...ys) - 90;
   const trunkH = 120 + trunk.length * 76;
   return {
@@ -3183,12 +3163,28 @@ function PosterTreeModal({ members, meId, onClose }) {
               </g>
             ))}
             {L.links.map((l, i) => {
-              const f = l.from < 0 ? { x: 0, y: 0 } : L.nodes[l.from];
+              const f = l.from < 0 ? { x: 0, y: 0, r: 0 } : L.nodes[l.from];
               const t = L.nodes[l.to];
               if (!t) return null;
-              const my = (f.y + t.y) / 2;
-              return <path key={"l" + i} d={`M ${f.x} ${f.y} C ${f.x} ${my}, ${t.x} ${my}, ${t.x} ${t.y}`}
-                stroke={l.trunk ? "#7A552F" : "#9C8465"} strokeWidth={l.trunk ? 5 : Math.max(1, 3 - t.depth * 0.5)} fill="none" strokeLinecap="round" opacity={0.8} />;
+              // الغصن يلتفّ حول ما يعترضه من دوائر بدل المرور فوقها
+              const mx0 = (f.x + t.x) / 2, my0 = (f.y + t.y) / 2;
+              const dx = t.x - f.x, dy = t.y - f.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const nx = -dy / len, ny = dx / len;      // العمودي على مسار الغصن
+              let push = 0;
+              for (const o of L.nodes) {
+                if (o === f || o === t) continue;
+                const rel = ((o.x - f.x) * dx + (o.y - f.y) * dy) / (len * len);
+                if (rel < 0.12 || rel > 0.88) continue;
+                const side = (o.x - f.x) * nx + (o.y - f.y) * ny;
+                if (Math.abs(side) > o.r + 12) continue;
+                const need = (o.r + 12 - Math.abs(side)) * (side >= 0 ? -1 : 1);
+                if (Math.abs(need) > Math.abs(push)) push = need;
+              }
+              push = Math.max(-70, Math.min(70, push));
+              const cx = mx0 + nx * push, cy = my0 + ny * push;
+              return <path key={"l" + i} d={`M ${f.x} ${f.y} Q ${cx} ${cy} ${t.x} ${t.y}`}
+                stroke={l.trunk ? "#7A552F" : "#9C8465"} strokeWidth={l.trunk ? 5 : Math.max(1.2, 3.4 - t.depth * 0.5)} fill="none" strokeLinecap="round" opacity={0.85} />;
             })}
 
             {/* الأفراد */}
