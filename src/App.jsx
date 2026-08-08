@@ -2920,9 +2920,13 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   };
 
   const total = sizeOf(headId, 0);
-  const CELL = 46;
-  const R_MAX = Math.max(340, Math.sqrt((total * CELL * CELL) / Math.PI) * 1.75);
-  const R_MIN = Math.max(64, R_MAX * 0.07);
+  // اتساعٌ يكفي كل فرد فعلًا: المساحة تتناسب مع العدد، ولا تقلّ عن مسافة بين الأجيال
+  const CELL = 64;
+  let maxD = 0;
+  const depthScan = (id, d) => { maxD = Math.max(maxD, d); if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((k) => depthScan(k.id, d + 1)); };
+  depthScan(headId, 0);
+  const R_MAX = Math.max(420, Math.sqrt((total * CELL * CELL) / Math.PI) * 2.1, (maxD + 1) * 86);
+  const R_MIN = Math.max(70, R_MAX * 0.06);
   const A0 = -Math.PI * 0.995, A1 = -Math.PI * 0.005;
 
   const nodes = [], links = [];
@@ -2937,7 +2941,7 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
     nodes.push({ id, name: m.name || "", depth, color, alive: m.isAlive !== false, r, x: Math.cos(mid) * rr, y: Math.sin(mid) * rr });
     links.push({ from: parentIdx, to: idx, trunk: parentIdx < 0 });
     if (!kids.length) return idx;
-    const cr0 = Math.min(r1 - 8, rr + r + 16);
+    const cr0 = Math.min(r1 - 8, rr + r + 30);
     const w = kids.map((k) => sizeOf(k.id, depth + 1));
     const sum = w.reduce((a, b) => a + b, 0) || 1;
     let acc = a0;
@@ -3002,16 +3006,39 @@ function PosterTreeModal({ members, meId, onClose }) {
   const { byId, childrenMap } = useMemo(() => treeMaps(members), [members]);
   const rootMember = useMemo(() => members.find((m) => !m.fatherId), [members]);
   // رؤوس الفروع: من له ذرّية ممتدة فقط — والفروع المنقطعة لا تُعرض في القائمة
-  // رؤوس الفروع: أبناء الفروع الرئيسية (أبناء عبدالرحمن وعثمان وناصر ومحمد…)
+  // رؤوس الفروع: أبناء الفروع الرئيسية، ومعهم أبناء أي جدٍّ كبير في العمق
+  // (كأبناء عبدالكريم بن محمد بن ناصر). والفروع المنقطعة — بلا ذرّية — تُستبعد
   const branchHeads = useMemo(() => {
     if (!rootMember) return [];
     let c = rootMember, kids = sonsOf(c.id, childrenMap, byId), pathNames = [c.name];
     while (kids.length === 1) { c = kids[0]; pathNames.unshift(c.name); kids = sonsOf(c.id, childrenMap, byId); }
     const out = [];
+    const nasabOf = (m) => {
+      const parts = [];
+      let x = m;
+      while (x) { parts.push(x.name); x = x.fatherId ? byId[x.fatherId] : null; }
+      return parts.join(" بن ");
+    };
     kids.forEach((main) => {
+      const group = `فرع ${main.name}`;
+      // أبناء الفرع الرئيسي
       sonsOf(main.id, childrenMap, byId).forEach((k) => {
-        out.push({ m: k, main: main.name, label: `${k.name} بن ${main.name}`, count: sonsOf(k.id, childrenMap, byId).length });
+        if (sonsOf(k.id, childrenMap, byId).length === 0) return;   // فرع منقطع
+        out.push({ m: k, group, label: nasabOf(k) });
       });
+      // ومن كان له خمسة أبناء فأكثر في العمق، يُفتح أبناؤه فروعًا أيضًا
+      const deep = (m, d) => {
+        if (d > 6) return;
+        const ks = sonsOf(m.id, childrenMap, byId);
+        if (d >= 2 && ks.length >= 5) {
+          ks.forEach((k) => {
+            if (sonsOf(k.id, childrenMap, byId).length === 0) return;
+            if (!out.some((o) => o.m.id === k.id)) out.push({ m: k, group: `فروع ${m.name}`, label: nasabOf(k) });
+          });
+        }
+        ks.forEach((k) => deep(k, d + 1));
+      };
+      deep(main, 1);
     });
     return out;
   }, [rootMember, childrenMap, byId]);
@@ -3070,9 +3097,9 @@ function PosterTreeModal({ members, meId, onClose }) {
       <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 12, marginBottom: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 7 }}>اختر الفرع</div>
         <select value={rootId || ""} onChange={(e) => setRootId(e.target.value)} style={{ ...inputStyle, appearance: "auto" }}>
-          {Array.from(new Set(branchHeads.map((b) => b.main))).map((mainName) => (
-            <optgroup key={mainName} label={`فرع ${mainName}`}>
-              {branchHeads.filter((b) => b.main === mainName).map(({ m, label }) => (
+          {Array.from(new Set(branchHeads.map((b) => b.group))).map((g) => (
+            <optgroup key={g} label={g}>
+              {branchHeads.filter((b) => b.group === g).map(({ m, label }) => (
                 <option key={m.id} value={m.id}>{label}</option>
               ))}
             </optgroup>
