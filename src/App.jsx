@@ -2952,34 +2952,59 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   };
 
   const nodes = [], links = [];
-  // أبناء العقدة على قوسٍ بُعده من أبيهم بقدر ما يتّسع لمطالبهم وحدهم
-  const spread = (parentIdx, id, d, a0, a1, parentR, color) => {
-    const kids = kidsOf(id, d);
+  const parentIdxOf = {};
+  // مروحة محلّية حول كل أب: أبناؤه يلتفّون حوله في اتجاه نموّه، على صفٍّ أو أكثر إن كثروا.
+  // فلا يُدفع أحدٌ إلى الحافة، ولا يُمَطّ غصنٌ ليصل ابنه.
+  const HS = (d) => (d === 1 ? 1.02 : d === 2 ? 0.9 : 0.78);   // نصف اتساع المروحة
+  const placeChildren = (pIdx, d) => {
+    const p = nodes[pIdx];
+    const kids = kidsOf(p.id, d);
     if (kids.length === 0) return;
-    const ds = kids.map((k) => demand(k.id, d + 1));          // لقسمة الزوايا
-    const own = kids.map((k) => 2 * radiusFor((byId[k.id] || {}).name, d + 1) + PAD); // لتحديد البُعد
-    const sum = ds.reduce((x, y) => x + y, 0) || 1;
+    const rs = kids.map((k) => radiusFor((byId[k.id] || {}).name, d + 1));
+    const own = kids.map((r) => 2 * r + PAD);
+    const ds = kids.map((k) => demand(k.id, d + 1));
     const sumOwn = own.reduce((x, y) => x + y, 0);
-    const wedge = Math.max(0.12, a1 - a0);
-    // البُعد يكفي لأقطار الأبناء أنفسهم فقط، لا لذرّيتهم — فذرّيتهم تتّسع حين تصل دورها
-    const baseR = Math.max(parentR + STEP(d + 1), sumOwn * 1.05 / wedge);
-    let acc = a0;
+
+    const gp = nodes[parentIdxOf[pIdx]];
+    const dir = p.isHead ? -Math.PI / 2 : Math.atan2(p.y - gp.y, p.x - gp.x);
+    const hs = p.isHead ? ARC / 2 : HS(d);
+    const step = STEP(d + 1);
+    // بُعد الصفّ: بقدر ما يتّسع للأبناء، وبسقفٍ لا يتجاوزه فلا تطول الأغصان
+    const L = Math.max(step, Math.min(sumOwn / (2 * hs), step * 1.9));
+    const rows = Math.max(1, Math.ceil(sumOwn / (2 * hs * L)));
+
+    // توزيع الأبناء على الصفوف بالترتيب، بحيث يتقارب حمل كل صفّ
+    const perRow = sumOwn / rows;
+    const buckets = Array.from({ length: rows }, () => []);
+    let ri = 0, load = 0;
     kids.forEach((k, i) => {
-      const share = wedge * (ds[i] / sum);
-      const mid = acc + share / 2;
-      const r = baseR + jitter(k.id, STEP(d + 1) * 0.26);
-      const idx = nodes.length;
-      const kc = d === 0 ? POSTER_COLORS[i % POSTER_COLORS.length] : color;
-      const m = byId[k.id] || {};
-      nodes.push({
-        id: k.id, name: m.name || "", depth: d + 1, color: kc,
-        fill: mixToWhite(kc, Math.min(0.5, d * 0.11)),
-        alive: m.isAlive !== false, r: radiusFor(m.name, d + 1), fs: FS(d + 1),
-        x: Math.cos(mid) * r, y: Math.sin(mid) * r,
+      if (load > perRow && ri < rows - 1) { ri++; load = 0; }
+      buckets[ri].push(i);
+      load += own[i];
+    });
+
+    buckets.forEach((idxs, r) => {
+      if (!idxs.length) return;
+      const Lr = L * (1 + 0.52 * r);
+      const wsum = idxs.reduce((x, i) => x + ds[i], 0) || 1;
+      let acc = -hs;
+      idxs.forEach((i) => {
+        const share = (2 * hs) * (ds[i] / wsum);
+        const ang = dir + acc + share / 2 + jitter(kids[i].id, 0.06);
+        const rr = Lr + jitter(kids[i].id + "r", step * 0.22);
+        const m = byId[kids[i].id] || {};
+        const kc = p.isHead ? POSTER_COLORS[i % POSTER_COLORS.length] : p.color;
+        const idx = nodes.length;
+        nodes.push({
+          id: kids[i].id, name: m.name || "", depth: d + 1, color: kc,
+          fill: mixToWhite(kc, Math.min(0.5, d * 0.11)),
+          alive: m.isAlive !== false, r: rs[i], fs: FS(d + 1),
+          x: p.x + Math.cos(ang) * rr, y: p.y + Math.sin(ang) * rr,
+        });
+        links.push({ from: pIdx, to: idx });
+        parentIdxOf[idx] = pIdx;
+        acc += share;
       });
-      links.push({ from: parentIdx, to: idx });
-      spread(idx, k.id, d + 1, acc, acc + share, r, kc);
-      acc += share;
     });
   };
 
@@ -2989,7 +3014,8 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
     id: headId, name: headM.name || "", depth: 0, color: null, fill: null,
     alive: headM.isAlive !== false, r: headR, fs: FS(0), x: 0, y: 0, isHead: true,
   });
-  spread(0, headId, 0, A0, A0 + ARC, headR, null);
+  // نبني جيلًا بعد جيل حتى يعرف كل أبٍ اتجاه نموّه قبل أن يوزّع أبناءه
+  for (let i = 0; i < nodes.length; i++) placeChildren(i, nodes[i].depth);
 
   // منع التصادم: دفعٌ متبادل بين كل دائرتين تتقاطعان، مع إبقاء الابن خارج أبيه دائمًا
   const parentOf = {};
@@ -3043,11 +3069,19 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   relax(90);
 
   // سلسلة النسب تنزل من تحت الرأس مباشرة كجذعٍ واحد
-  const stemStart = headR + 64;
-  const lineNodes = ancestors.map((a, i) => ({
-    id: a.id, name: a.name, y: stemStart + i * 82,
-    r: Math.max(24, radiusFor(a.name, 1)), alive: a.isAlive !== false,
-  }));
+  // دوائر تتصاغر صعودًا: تركي أكبرها في الأسفل، وأصل الفرع أصغرها ملاصقًا للتاج
+  const nAnc = ancestors.length;
+  const lineNodes = [];
+  let yCur = headR + 34;
+  ancestors.forEach((a, i) => {
+    const grow = 1 + (i / Math.max(1, nAnc - 1)) * 0.85;      // يكبر كلما نزلنا نحو تركي
+    const fs = 10.5 * grow;
+    const r = Math.max(22 * grow, (a.name || "").length * fs * 0.52 / 2 + 7);
+    yCur += r + 30;
+    lineNodes.push({ id: a.id, name: a.name, y: yCur, r, fs, alive: a.isAlive !== false });
+    yCur += r;
+  });
+  const stemStart = headR + 34;
 
   const xs = nodes.map((n) => n.x - n.r).concat(nodes.map((n) => n.x + n.r));
   const ys = nodes.map((n) => n.y - n.r).concat(nodes.map((n) => n.y + n.r));
@@ -3177,12 +3211,12 @@ function PosterTreeModal({ members, meId, onClose }) {
           <g transform={`translate(${ox}, ${oy})`}>
             {/* سلسلة النسب إلى تركي: دوائر متسلسلة بلا جذع مرسوم */}
             {L.lineNodes.length > 0 && (
-              <path d={`M 0 ${L.stemStart - 62} L 0 ${L.lineNodes[L.lineNodes.length - 1].y}`} stroke="#A98A63" strokeWidth={9} strokeLinecap="round" />
+              <path d={`M 0 ${L.stemStart} L 0 ${L.lineNodes[L.lineNodes.length - 1].y}`} stroke="#A98A63" strokeWidth={9} strokeLinecap="round" />
             )}
             {L.lineNodes.map((t) => (
               <g key={"ln" + t.id}>
                 <circle cx={0} cy={t.y} r={t.r} fill="#FFFDF6" stroke="#8A6A46" strokeWidth={2} />
-                <text x={0} y={t.y} textAnchor="middle" dominantBaseline="middle" fontSize={11} fontWeight={800} fill="#5E3F27" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{t.name}</text>
+                <text x={0} y={t.y} textAnchor="middle" dominantBaseline="middle" fontSize={t.fs || 11} fontWeight={800} fill="#5E3F27" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{t.name}</text>
               </g>
             ))}
 
