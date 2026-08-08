@@ -2898,22 +2898,21 @@ function FanChartModal({ centerId, members, onClose }) {
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
 const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#F3A3B8", "#7FC4C4", "#D9C27E", "#A8C686", "#C49BD4"];
 
-// تخطيط رأسيّ مرتّب كالشجرة التفاعلية: رأس الفرع أسفل التاج، والذرّية تصعد جيلًا فوق جيل.
-// كل شجرة فرعية تحجز نطاقًا أفقيًا مستقلًا لا يتجاوزه، فلا تراكب ولا تقاطع في أيّ صفّ.
-// وتحت رأس الفرع سلسلة نسبه إلى تركي دوائرَ متتابعة، بلا جذع مرسوم.
+// تاجٌ مستدير كالشجرة الأصلية: رأس الفرع في القلب، وذرّيته تنتشر حوله في كل الجهات،
+// لكل فرعٍ قطاعٌ بقدر كتلته فلا يعبره غصنُ غيره. وتحت القلب سلسلة النسب إلى تركي.
 function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   let hidden = 0;
-  const FS = (d) => (d === 0 ? 12.5 : d === 1 ? 11 : d === 2 ? 10 : 9.5);
-  // نصف قطر يتّسع للاسم كاملًا (عرض الحرف ≈ ٠٫٥٢ من حجم الخط)
+  const FS = (d) => (d === 0 ? 12.5 : d === 1 ? 11 : d === 2 ? 10 : d === 3 ? 9.5 : 9);
   const radiusFor = (name, d) => {
     const fs = FS(d);
     const w = (name || "").length * fs * 0.52;
-    return Math.max(d === 0 ? 30 : 19, w / 2 + 7);
+    return Math.max(d === 0 ? 30 : d === 1 ? 22 : 18, w / 2 + 6);
   };
-  const GAP_X = 16;        // فاصل أفقي بين الأشقاء
-  const ROW = 80;          // ارتفاع الجيل داخل التاج
-  const ROW_HEAD = 98;     // من رأس الفرع إلى أبنائه
-  const ROW_LIN = 92;      // بين حلقات سلسلة النسب أسفل الرأس
+  const PAD = 10;              // فراغ بين الأسماء المتجاورة على الحلقة
+  const RING_MIN = 74;         // أقل مسافة بين حلقتين
+  const GAP_A = 0.42;          // فتحة أسفل التاج ينزل منها خطّ النسب
+  const A0 = Math.PI / 2 + GAP_A / 2;
+  const ARC = 2 * Math.PI - GAP_A;
 
   const chain = [];
   let c = byId[headId];
@@ -2922,76 +2921,100 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
 
   const kidsOf = (id, d) => (d >= maxGen ? [] : sonsOf(id, childrenMap, byId));
 
-  // عرض الشجرة الفرعية = الأكبر بين قطر العقدة ومجموع عروض أبنائها
+  // وزن الفرع = عدد أطرافه (لا عدد أفراده) فتتوزّع الزوايا بعدل ولا يبتلع فرعٌ جاره
   const wCache = {};
-  const widthOf = (id, d) => {
+  const leavesOf = (id, d) => {
     const key = id + "|" + d;
     if (wCache[key] != null) return wCache[key];
-    const m = byId[id] || {};
-    const own = 2 * radiusFor(m.name, d) + GAP_X;
     const kids = kidsOf(id, d);
-    if (kids.length === 0) { wCache[key] = own; return own; }
-    const sum = kids.reduce((a, k) => a + widthOf(k.id, d + 1), 0);
-    const v = Math.max(own, sum);
+    const v = kids.length === 0 ? 1 : kids.reduce((a, k) => a + leavesOf(k.id, d + 1), 0);
     wCache[key] = v;
     return v;
   };
-  widthOf(headId, 0);
-  const countHidden = (id, d) => {
-    const kids = sonsOf(id, childrenMap, byId);
-    if (d >= maxGen) { hidden += kids.length; return; }
-    kids.forEach((k) => countHidden(k.id, d + 1));
-  };
-  countHidden(headId, 0);
+  leavesOf(headId, 0);
 
-  const yOf = (d) => (d === 0 ? 0 : -(ROW_HEAD + (d - 1) * ROW));
+  // اتساع كل حلقة: يكفي مجموع أقطار أسمائها، فلا تتلاصق ولا تتباعد بلا داعٍ
+  const perDepth = {};
+  const scan = (id, d) => {
+    const m = byId[id] || {};
+    if (d > 0) perDepth[d] = (perDepth[d] || 0) + 2 * radiusFor(m.name, d) + PAD;
+    const kids = kidsOf(id, d);
+    if (kids.length === 0) hidden += sonsOf(id, childrenMap, byId).length;
+    kids.forEach((k) => scan(k.id, d + 1));
+  };
+  scan(headId, 0);
+  const maxD = Math.max(1, ...Object.keys(perDepth).map(Number));
+  const R = [0, 0];
+  for (let d = 1; d <= maxD; d++) {
+    const need = (perDepth[d] || 0) * 1.12 / ARC;
+    R[d] = Math.max((d === 1 ? 118 : R[d - 1] + RING_MIN), need);
+  }
+
+  // إزاحة شعاعية خفيفة تكسر انتظام الحلقة فتبدو الشجرة طبيعية لا هندسية
+  const jitter = (id) => {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 1000;
+    return (h / 1000 - 0.5) * 0.34 * RING_MIN;
+  };
 
   const nodes = [], links = [];
-  const place = (id, d, x0, x1, color, parentIdx) => {
+  const place = (id, d, a0, a1, color, parentIdx) => {
     const m = byId[id] || {};
-    const cx = (x0 + x1) / 2;
+    const mid = (a0 + a1) / 2;
+    const rad = R[d] + (d >= 2 ? jitter(id) : 0);
     const idx = nodes.length;
     nodes.push({
       id, name: m.name || "", depth: d, color,
+      fill: d === 0 ? null : mixToWhite(color, Math.min(0.55, (d - 1) * 0.12)),
       alive: m.isAlive !== false, r: radiusFor(m.name, d), fs: FS(d),
-      x: cx, y: yOf(d), isHead: d === 0,
+      x: Math.cos(mid) * rad, y: Math.sin(mid) * rad,
     });
     if (parentIdx >= 0) links.push({ from: parentIdx, to: idx });
     const kids = kidsOf(id, d);
     if (kids.length === 0) return idx;
-    const ws = kids.map((k) => widthOf(k.id, d + 1));
-    const total = ws.reduce((a, b) => a + b, 0);
-    let acc = cx - total / 2;
+    const ws = kids.map((k) => leavesOf(k.id, d + 1));
+    const sum = ws.reduce((a, b) => a + b, 0) || 1;
+    let acc = a0;
     kids.forEach((k, i) => {
-      const kc = (d === 0) ? POSTER_COLORS[i % POSTER_COLORS.length] : color;
-      place(k.id, d + 1, acc, acc + ws[i], kc, idx);
-      acc += ws[i];
+      const share = (a1 - a0) * (ws[i] / sum);
+      place(k.id, d + 1, acc, acc + share, d === 0 ? POSTER_COLORS[i % POSTER_COLORS.length] : color, idx);
+      acc += share;
     });
     return idx;
   };
-  const headW = widthOf(headId, 0);
-  place(headId, 0, -headW / 2, headW / 2, null, -1);
 
-  // تدرّج اللون بحسب الجيل (الفرع الواحد بلون واحد يفتحّ كلما ارتفع)
-  nodes.forEach((n) => {
-    if (n.isHead || !n.color) return;
-    n.fill = mixToWhite(n.color, Math.min(0.6, (n.depth - 1) * 0.13));
+  const headM = byId[headId] || {};
+  const headIdx = nodes.length;
+  nodes.push({
+    id: headId, name: headM.name || "", depth: 0, color: null, fill: null,
+    alive: headM.isAlive !== false, r: radiusFor(headM.name, 0), fs: FS(0),
+    x: 0, y: 0, isHead: true,
+  });
+  const kids0 = sonsOf(headId, childrenMap, byId);
+  const w0 = kids0.map((k) => leavesOf(k.id, 1));
+  const sum0 = w0.reduce((a, b) => a + b, 0) || 1;
+  let acc = A0;
+  kids0.forEach((k, i) => {
+    const share = ARC * (w0[i] / sum0);
+    place(k.id, 1, acc, acc + share, POSTER_COLORS[i % POSTER_COLORS.length], headIdx);
+    acc += share;
   });
 
-  // سلسلة النسب أسفل رأس الفرع
+  // سلسلة النسب أسفل التاج: تبدأ من خارج آخر حلقة حتى لا تعبر الأسماء
+  const stemStart = R[maxD] + 60;
   const lineNodes = ancestors.map((a, i) => ({
-    id: a.id, name: a.name, y: (i + 1) * ROW_LIN,
-    r: Math.max(25, radiusFor(a.name, 1)), alive: a.isAlive !== false,
+    id: a.id, name: a.name, y: stemStart + i * 84,
+    r: Math.max(24, radiusFor(a.name, 1)), alive: a.isAlive !== false,
   }));
 
   const xs = nodes.map((n) => n.x - n.r).concat(nodes.map((n) => n.x + n.r));
-  const topY = Math.min(...nodes.map((n) => n.y - n.r));
-  const botY = lineNodes.length ? lineNodes[lineNodes.length - 1].y + lineNodes[lineNodes.length - 1].r : 40;
+  const ys = nodes.map((n) => n.y - n.r).concat(nodes.map((n) => n.y + n.r));
+  const botY = lineNodes.length ? lineNodes[lineNodes.length - 1].y + lineNodes[lineNodes.length - 1].r : Math.max(...ys);
   return {
-    nodes, links, lineNodes,
+    nodes, links, lineNodes, stemStart,
     lineage: chain.map((m) => m.name).join(" بن "),
     minX: Math.min(-140, ...xs) - 40, maxX: Math.max(140, ...xs) + 40,
-    minY: topY - 30,
+    minY: Math.min(...ys) - 30,
     maxY: botY + 40,
     hidden, total: nodes.length + lineNodes.length,
   };
@@ -3112,7 +3135,7 @@ function PosterTreeModal({ members, meId, onClose }) {
           <g transform={`translate(${ox}, ${oy})`}>
             {/* سلسلة النسب إلى تركي: دوائر متسلسلة بلا جذع مرسوم */}
             {L.lineNodes.length > 0 && (
-              <path d={`M 0 0 L 0 ${L.lineNodes[L.lineNodes.length - 1].y}`} stroke="#A98A63" strokeWidth={9} strokeLinecap="round" />
+              <path d={`M 0 ${L.stemStart - 48} L 0 ${L.lineNodes[L.lineNodes.length - 1].y}`} stroke="#A98A63" strokeWidth={9} strokeLinecap="round" />
             )}
             {L.lineNodes.map((t) => (
               <g key={"ln" + t.id}>
@@ -3125,9 +3148,10 @@ function PosterTreeModal({ members, meId, onClose }) {
             {L.links.map((l, i) => {
               const f = L.nodes[l.from], t = L.nodes[l.to];
               if (!f || !t) return null;
-              const my = (f.y + t.y) / 2;
-              return <path key={"l" + i} d={`M ${f.x} ${f.y} C ${f.x} ${my}, ${t.x} ${my}, ${t.x} ${t.y}`}
-                stroke="#9C8465" strokeWidth={Math.max(1.4, 4 - t.depth * 0.6)} fill="none" strokeLinecap="round" opacity={0.9} />;
+              const mx = (f.x + t.x) / 2, my = (f.y + t.y) / 2;
+              const k = 0.35;
+              return <path key={"l" + i} d={`M ${f.x} ${f.y} Q ${mx + (t.y - f.y) * k * 0.18} ${my - (t.x - f.x) * k * 0.18}, ${t.x} ${t.y}`}
+                stroke="#9C8465" strokeWidth={Math.max(1.3, 5.2 - t.depth * 0.85)} fill="none" strokeLinecap="round" opacity={0.92} />;
             })}
 
             {/* الأفراد */}
