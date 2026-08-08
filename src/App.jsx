@@ -2918,20 +2918,39 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
   const rnd = () => { sd = (sd * 9301 + 49297) % 233280; return sd / 233280; };
 
   const nodes = [], links = [];
-  let branchNo = 0;
-  const build = (id, depth, color, parentIdx, px, py) => {
+  const sectorOf = [];   // شريحة كل فرد (يرثها من أبيه ويقسّمها على أبنائه)
+
+  // عدد أفراد الشجرة الفرعية — لتقسيم الشريحة بقدر الذرّية
+  const sizeOf = (id, d) => {
+    let n = 1;
+    if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((k) => { n += sizeOf(k.id, d + 1); });
+    return n;
+  };
+
+  const build = (id, depth, color, parentIdx, a0, a1) => {
     const m = byId[id] || {};
     const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
     if (depth >= maxGen) hidden += sonsOf(id, childrenMap, byId).length;
     const idx = nodes.length;
-    const ang = -Math.PI / 2 + (rnd() - 0.5) * 2.2;
-    const dist = 70 + depth * 12;
+    const mid = (a0 + a1) / 2;
+    const dist = 300 + depth * 92 + rnd() * 30;
     nodes.push({
-      id, name: m.name || "", depth, color, alive: m.isAlive !== false, r: nodeR(depth), branch: branchNo,
-      x: px + Math.cos(ang) * dist, y: py + Math.sin(ang) * dist,
+      id, name: m.name || "", depth, color, alive: m.isAlive !== false, r: nodeR(depth),
+      x: Math.cos(mid) * dist, y: Math.sin(mid) * dist,
     });
+    sectorOf.push([a0, a1]);
     if (parentIdx >= -1) links.push({ from: parentIdx, to: idx, trunk: parentIdx === -1 });
-    kids.forEach((k, i) => build(k.id, depth + 1, color || POSTER_COLORS[i % POSTER_COLORS.length], idx, nodes[idx].x, nodes[idx].y));
+
+    if (kids.length) {
+      const w = kids.map((k) => sizeOf(k.id, depth + 1));
+      const sum = w.reduce((x, y) => x + y, 0) || 1;
+      let a = a0;
+      kids.forEach((k, i) => {
+        const b = a + (a1 - a0) * (w[i] / sum);
+        build(k.id, depth + 1, color, idx, a, b);
+        a = b;
+      });
+    }
     return idx;
   };
 
@@ -2944,15 +2963,11 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
     return n;
   });
   const wSum = branchWeight.reduce((a, b) => a + b, 0) || 1;
-  const SEC0 = -Math.PI * 0.99, SEC1 = -Math.PI * 0.01, PAD = 0.02;
-  const sectors = [];
+  const SEC0 = -Math.PI * 0.99, SEC1 = -Math.PI * 0.01, PAD = 0.012;
   let acc = SEC0;
   crownKids.forEach((k, i) => {
     const w = (SEC1 - SEC0) * (branchWeight[i] / wSum);
-    sectors.push([acc + PAD, acc + w - PAD]);
-    const mid = acc + w / 2;
-    branchNo = i;
-    build(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, Math.cos(mid) * 320, Math.sin(mid) * 320);
+    build(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, acc + PAD, acc + w - PAD);
     acc += w;
   });
 
@@ -2976,7 +2991,7 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
       b.x -= dx * f; b.y -= dy * f;
     });
     // ضغط نحو مركز الفرع (يملأ الفراغ ويجمع الكتلة)
-    nodes.forEach((n) => { n.x *= 1 - 0.006 * k; n.y = n.y * (1 - 0.006 * k) - 0.35 * k; });
+    nodes.forEach((n) => { n.x *= 1 - 0.0035 * k; n.y = n.y * (1 - 0.0035 * k); });
     // تنافر: لا تتراكب دائرتان
     const grid = new Map();
     nodes.forEach((n, i) => {
@@ -3003,9 +3018,9 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
         }
       }
     });
-    // حصر كل فرع في قطاعه (شريحة الكيكة) فلا تتداخل الفروع ولا تتقاطع أغصانها
-    nodes.forEach((n) => {
-      const sec = sectors[n.branch];
+    // حصر كل فرد في شريحته الموروثة من أبيه — فلا يعبر غصنٌ شريحة غيره
+    nodes.forEach((n, ni) => {
+      const sec = sectorOf[ni];
       if (!sec) return;
       const d = Math.hypot(n.x, n.y) || 1;
       let a = Math.atan2(n.y, n.x);
