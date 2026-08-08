@@ -2951,6 +2951,39 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
     return (h / 997 - 0.5) * amp;
   };
 
+  // حصر التفرعات أولًا: لكل فرعٍ قطاعٌ زاويّ خاصّ من مركز الرأس بقدر حجمه، لا يدخله غيره.
+  // الأبناء يوزَّعون كما هم (مروحة قصيرة حول أبيهم) ثم يُحصَر موضع كلٍّ داخل قطاعه،
+  // فيبقى التاج ممتلئًا وتنقطع التقاطعات العرضية بين الفروع.
+  const terr = {};
+  const assignTerr = (id, d, t0, t1) => {
+    terr[id] = [t0, t1];
+    const kids = kidsOf(id, d);
+    if (!kids.length) return;
+    const ds = kids.map((k) => demand(k.id, d + 1));
+    const sum = ds.reduce((x, y) => x + y, 0) || 1;
+    let acc = t0;
+    kids.forEach((k, i) => {
+      const share = (t1 - t0) * (ds[i] / sum);
+      assignTerr(k.id, d + 1, acc, acc + share);
+      acc += share;
+    });
+  };
+  assignTerr(headId, 0, A0, A0 + ARC);
+
+  // يُبقي النقطة داخل قطاعها بتدوير الزاوية وحدها، دون المساس ببُعدها عن المركز
+  const clampToTerr = (id, x, y, r) => {
+    const t = terr[id];
+    if (!t) return [x, y];
+    const R = Math.hypot(x, y) || 1;
+    let g = Math.atan2(y, x);
+    while (g < t[0] - Math.PI) g += 2 * Math.PI;
+    while (g > t[0] + Math.PI) g -= 2 * Math.PI;
+    const m = Math.min((t[1] - t[0]) / 2, Math.asin(Math.min(0.95, (r + 5) / R)));
+    const lo = t[0] + m, hi = t[1] - m;
+    if (g < lo) g = lo; else if (g > hi) g = hi;
+    return [Math.cos(g) * R, Math.sin(g) * R];
+  };
+
   const nodes = [], links = [];
   const parentIdxOf = {};
   // مروحة محلّية حول كل أب في اتجاه نموّه: أبناؤه يلتفّون حوله لا حول المركز،
@@ -2997,8 +3030,10 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
           id: kids[i].id, name: m.name || "", depth: d + 1, color: kc,
           fill: mixToWhite(kc, Math.min(0.5, d * 0.11)),
           alive: m.isAlive !== false, r: rs[i], fs: FS(d + 1),
-          x: p.x + Math.cos(ang) * rr, y: p.y + Math.sin(ang) * rr,
+          x: 0, y: 0,
         });
+        const [cx2, cy2] = clampToTerr(kids[i].id, p.x + Math.cos(ang) * rr, p.y + Math.sin(ang) * rr, rs[i]);
+        nodes[idx].x = cx2; nodes[idx].y = cy2;
         links.push({ from: pIdx, to: idx });
         parentIdxOf[idx] = pIdx;
         acc += share;
@@ -3058,6 +3093,8 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
         }
         const floor = -(n.r + 6);
         if (n.y > floor) n.y = floor;
+        const [qx, qy] = clampToTerr(n.id, n.x, n.y, n.r);
+        n.x = qx; n.y = qy;
       });
       if (!moved) break;
     }
