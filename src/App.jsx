@@ -2898,119 +2898,84 @@ function FanChartModal({ centerId, members, onClose }) {
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
 const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#F3A3B8", "#7FC4C4", "#D9C27E", "#A8C686", "#C49BD4"];
 
-// الجذع أسفل الورقة (نسب رأس الفرع صاعدًا)، وفوقه تاجٌ نصف دائري
-// يُقسَّم قطاعاتٍ مرنة بقدر كتلة كل ابن، وقطاع كل أب يُقسَّم بين أبنائه
+// سلسلة النسب دوائرَ صاعدة (بلا جذع مرسوم)، وفوق رأس الفرع تاجٌ يحتوي ذرّيته:
+// الأطراف تُرصف متجاورة، والأب يتوسّط أبناءه، والمسافات محسوبة فلا تراكب ولا تقاطع
 function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   let hidden = 0;
-  const nodeR = (d) => (d === 0 ? 25 : d === 1 ? 21 : d === 2 ? 18 : d === 3 ? 16 : 14);
+  const nodeR = (d) => (d === 0 ? 26 : d === 1 ? 22 : d === 2 ? 19 : d === 3 ? 17 : 15);
+  const ROW = 118, GAPX = 18;
 
+  // سلسلة النسب من رأس الفرع إلى تركي
   const chain = [];
   let c = byId[headId];
   while (c) { chain.push(c); c = c.fatherId ? byId[c.fatherId] : null; }
-  const ancestors = chain.slice(1).reverse();
+  const ancestors = chain.slice(1);            // الأب فالجد … حتى تركي
 
+  const nodes = [], links = [];
+  let cursorX = 0;
+
+  // ترتيب الأبناء: الأكثر ذرّيةً في الوسط ليتوازن التاج
+  const orderKids = (ks, depth) => {
+    const withSize = ks.map((k) => ({ k, n: countAll(k.id, depth + 1) }));
+    withSize.sort((a, b) => b.n - a.n);
+    const out = [];
+    withSize.forEach((x, i) => (i % 2 === 0 ? out.push(x.k) : out.unshift(x.k)));
+    return out;
+  };
   const sizeCache = {};
-  const sizeOf = (id, d) => {
+  function countAll(id, d) {
     const key = id + "|" + d;
     if (sizeCache[key] != null) return sizeCache[key];
     let n = 1;
-    if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((k) => { n += sizeOf(k.id, d + 1); });
+    if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((k) => { n += countAll(k.id, d + 1); });
     sizeCache[key] = n;
     return n;
-  };
+  }
 
-  const total = sizeOf(headId, 0);
-
-  // عدد الأفراد في كل جيل، لتحديد اتساع الحلقة الأوسع بلا تقدير
-  const perDepth = {};
-  let maxD = 0;
-  const scan = (id, d) => {
-    perDepth[d] = (perDepth[d] || 0) + 1;
-    maxD = Math.max(maxD, d);
-    if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((k) => scan(k.id, d + 1));
-  };
-  scan(headId, 0);
-
-  const A0 = -Math.PI * 0.995, A1 = -Math.PI * 0.005;
-  const ARC = A1 - A0;
-  const RING = 108;                                  // مسافة ثابتة بين جيل وجيل
-  // نصف قطر يضمن أن محيط كل حلقة يسع أفرادها بلا تراكب
-  let R_MIN = 70;
-  Object.keys(perDepth).forEach((d) => {
-    const n = perDepth[d], dd = Number(d);
-    if (dd === 0) return;
-    const slot = 2 * nodeR(dd) + 16;
-    const needR = (n * slot) / ARC;                  // نصف القطر اللازم لهذه الحلقة
-    R_MIN = Math.max(R_MIN, needR - (dd - 1) * RING);
-  });
-  const R_MAX = R_MIN + maxD * RING;
-
-  const nodes = [], links = [];
-  const layout = (id, depth, color, parentIdx, a0, a1) => {
+  const walk = (id, depth, color, parentIdx) => {
     const m = byId[id] || {};
     const r = nodeR(depth);
-    const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
+    const kids = depth >= maxGen ? [] : orderKids(sonsOf(id, childrenMap, byId), depth);
     if (depth >= maxGen) hidden += sonsOf(id, childrenMap, byId).length;
-    const mid = (a0 + a1) / 2;
-    const rr = R_MIN + (depth - 1) * RING;
     const idx = nodes.length;
-    nodes.push({ id, name: m.name || "", depth, color, alive: m.isAlive !== false, r, x: Math.cos(mid) * rr, y: Math.sin(mid) * rr });
-    links.push({ from: parentIdx, to: idx, trunk: parentIdx < 0 });
-    if (!kids.length) return idx;
-    const w = kids.map((k) => sizeOf(k.id, depth + 1));
-    const sum = w.reduce((a, b) => a + b, 0) || 1;
-    let acc = a0;
-    kids.forEach((k, i) => {
-      const share = (a1 - a0) * (w[i] / sum);
-      layout(k.id, depth + 1, color, idx, acc, acc + share);
-      acc += share;
-    });
+    nodes.push({ id, name: m.name || "", depth, color, alive: m.isAlive !== false, r, x: 0, y: -depth * ROW });
+    if (parentIdx >= 0) links.push({ from: parentIdx, to: idx });
+    if (!kids.length) {
+      cursorX += 2 * r + GAPX;
+      nodes[idx].x = cursorX;
+      return idx;
+    }
+    const kidIdx = kids.map((k, i) => walk(k.id, depth + 1, color || POSTER_COLORS[i % POSTER_COLORS.length], idx));
+    const xs = kidIdx.map((i) => nodes[i].x);
+    nodes[idx].x = (Math.min(...xs) + Math.max(...xs)) / 2;
     return idx;
   };
 
-  const kids0 = sonsOf(headId, childrenMap, byId);
-  const w0 = kids0.map((k) => sizeOf(k.id, 1));
-  const sum0 = w0.reduce((a, b) => a + b, 0) || 1;
-  let acc = A0;
-  kids0.forEach((k, i) => {
-    const share = ARC * (w0[i] / sum0);
-    layout(k.id, 1, POSTER_COLORS[i % POSTER_COLORS.length], -1, acc, acc + share);
-    acc += share;
-  });
-
-  const home = nodes.map((n) => ({ x: n.x, y: n.y }));
-  for (let it = 0; it < 70; it++) {
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i], b = nodes[j];
-        let dx = b.x - a.x, dy = b.y - a.y;
-        let d = Math.hypot(dx, dy);
-        const min = a.r + b.r + 6;
-        if (d >= min) continue;
-        if (d < 0.01) { dx = 0.6; dy = 0.4; d = 0.72; }
-        const p = (min - d) / 2;
-        a.x -= (dx / d) * p; a.y -= (dy / d) * p;
-        b.x += (dx / d) * p; b.y += (dy / d) * p;
-      }
-    }
-    nodes.forEach((n, i) => {
-      n.x += (home[i].x - n.x) * 0.07;
-      n.y += (home[i].y - n.y) * 0.07;
-      if (n.y > -60) n.y = -60;
-    });
-  }
-
-  // رأس الفرع: دائرة واحدة في الأسفل (بلا جذع)، والنسب يُكتب نصًّا أعلى الورقة
   const headM = byId[headId] || {};
-  nodes.push({ id: headId, name: headM.name || "", depth: 0, color: null, alive: headM.isAlive !== false, r: 30, x: 0, y: 0, isHead: true });
+  const headIdx = nodes.length;
+  nodes.push({ id: headId, name: headM.name || "", depth: 0, color: null, alive: headM.isAlive !== false, r: nodeR(0), x: 0, y: 0, isHead: true });
+  const kids0 = orderKids(sonsOf(headId, childrenMap, byId), 0);
+  const tops = kids0.map((k, i) => walk(k.id, 1, POSTER_COLORS[i % POSTER_COLORS.length], headIdx));
+  if (tops.length) {
+    const xs = tops.map((i) => nodes[i].x);
+    nodes[headIdx].x = (Math.min(...xs) + Math.max(...xs)) / 2;
+  }
+  const shift = nodes[headIdx].x;
+  nodes.forEach((n) => { n.x -= shift; });
+
+  // سلسلة النسب: دوائر متسلسلة أسفل رأس الفرع (كالشجرة التفاعلية، بلا جذع مرسوم)
+  const lineNodes = ancestors.map((a, i) => ({
+    id: a.id, name: a.name, x: 0, y: (i + 1) * 96, r: 20, alive: a.isAlive !== false,
+  }));
 
   const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
   return {
-    nodes, links, trunkNodes: [], trunkH: 60,
+    nodes, links, lineNodes,
     lineage: chain.map((m) => m.name).join(" بن "),
-    minX: Math.min(-190, ...xs) - 70, maxX: Math.max(190, ...xs) + 70,
-    minY: Math.min(...ys) - 80, maxY: Math.max(...ys) + 80,
-    hidden, total: nodes.length,
+    minX: Math.min(-150, ...xs) - 70, maxX: Math.max(150, ...xs) + 70,
+    minY: Math.min(...ys) - 80,
+    maxY: (ancestors.length + 1) * 96 + 40,
+    hidden, total: nodes.length + lineNodes.length,
   };
 }
 
@@ -3127,10 +3092,21 @@ function PosterTreeModal({ members, meId, onClose }) {
           </text>
 
           <g transform={`translate(${ox}, ${oy})`}>
+            {/* سلسلة النسب إلى تركي: دوائر متسلسلة بلا جذع مرسوم */}
+            {L.lineNodes.map((t, i) => {
+              const prevY = i === 0 ? 0 : L.lineNodes[i - 1].y;
+              return (
+                <g key={"ln" + t.id}>
+                  <path d={`M 0 ${prevY} L 0 ${t.y}`} stroke="#B9A488" strokeWidth={3} strokeLinecap="round" />
+                  <circle cx={0} cy={t.y} r={t.r} fill="#EFE7D8" stroke="#8A6A46" strokeWidth={1.4} />
+                  <text x={0} y={t.y} textAnchor="middle" dominantBaseline="middle" fontSize={9.5} fontWeight={700} fill="#5E3F27" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{t.name.length > 8 ? t.name.slice(0, 7) + "…" : t.name}</text>
+                </g>
+              );
+            })}
+
             {/* الأغصان */}
             {L.links.map((l, i) => {
-              const f = l.trunk ? { x: 0, y: 0, depth: 0 } : L.nodes[l.from];
-              const t = L.nodes[l.to];
+              const f = L.nodes[l.from], t = L.nodes[l.to];
               if (!f || !t) return null;
               const my = (f.y + t.y) / 2;
               return <path key={"l" + i} d={`M ${f.x} ${f.y} C ${f.x} ${my}, ${t.x} ${my}, ${t.x} ${t.y}`}
