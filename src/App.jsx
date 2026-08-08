@@ -2898,22 +2898,28 @@ function FanChartModal({ centerId, members, onClose }) {
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
 const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#E89BB0", "#7FC4C4", "#D4B483", "#A8C686", "#C49BD4"];
 
-// تخطيط الهالة: كل فرع في قطاعٍ زاويّ خاص به (فلا تتقاطع الأغصان أبدًا)،
-// والأطراف تُحزَم عناقيدَ حول آبائها صفًّا بعد صف فتمتلئ المساحة ككتلة خضرية
+// تخطيط مكانيّ: لكل فرع رئيسي حيّزٌ عرضيّ خاص به، وداخله تُرصَف الأجيال صفوفًا
+// صاعدة والأطراف عناقيدَ فوق آبائها — فتتلاصق الكتل بلا تداخل وتخرج هيئة شجرة
 function buildPosterLayout(rootId, byId, childrenMap, maxGen) {
   const nodes = [], links = [];
   let hidden = 0;
 
-  const leafCount = {};
-  const countLeaves = (id, depth) => {
+  const nodeR = (d) => (d === 0 ? 23 : d === 1 ? 20 : d === 2 ? 17 : d === 3 ? 15 : 13);
+  const ROW = 96;          // ارتفاع الجيل الواحد
+  const GAPX = 9;          // فاصل أفقي بين الدوائر
+
+  // عرض الشجرة الفرعية: الأطراف تُرصّ في عناقيد فتأخذ عرضًا أقلّ
+  const widthOf = (id, depth) => {
     const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
-    if (kids.length === 0) { leafCount[id] = 1; return 1; }
-    let s = 0;
-    kids.forEach((k) => { s += countLeaves(k.id, depth + 1); });
-    leafCount[id] = s;
-    return s;
+    const selfW = 2 * nodeR(depth) + GAPX;
+    if (kids.length === 0) return selfW;
+    if (kids.every((k) => sonsOf(k.id, childrenMap, byId).length === 0)) {
+      const kw = 2 * nodeR(depth + 1) + GAPX;
+      const cols = Math.max(1, Math.ceil(Math.sqrt(kids.length * 1.6)));
+      return Math.max(selfW, cols * kw);
+    }
+    return Math.max(selfW, kids.reduce((sum, k) => sum + widthOf(k.id, depth + 1), 0));
   };
-  countLeaves(rootId, 0);
 
   const trunk = [];
   let cur = rootId;
@@ -2924,66 +2930,59 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen) {
   }
   const crownRootId = trunk[trunk.length - 1];
 
-  const A0 = Math.PI * 1.02, A1 = Math.PI * 1.98;
-  const R0 = 190, GAP = 7;
-  const nodeR = (d) => (d === 0 ? 24 : d === 1 ? 20 : d === 2 ? 17 : d === 3 ? 15 : 13);
-  const add = (id, name, ang, r, depth, color, alive) => {
-    nodes.push({ id, name, x: Math.cos(ang) * r, y: Math.sin(ang) * r, r: nodeR(depth), depth, color, alive, ang, rad: r });
-    return nodes.length - 1;
-  };
-
-  const place = (id, a0, a1, depth, color, parentIdx, parentR) => {
+  // يرسم فرعًا داخل حيّزه [x0..x1] ابتداءً من الارتفاع y
+  const place = (id, x0, x1, depth, y, color, parentIdx) => {
     const m = byId[id] || {};
-    const rc = nodeR(depth);
-    const wedge = a1 - a0;
-    // نصف قطر يضمن بقاء الدائرة داخل قطاعها (فلا تتراكب مع الفروع المجاورة)
-    const needed = (2 * rc + GAP) / Math.max(wedge, 0.0005);
-    const r = Math.min(Math.max(R0 + depth * 30, needed, parentR + nodeR(depth - 1 < 0 ? 0 : depth - 1) + rc + 14), parentR + 460);
-    const ang = (a0 + a1) / 2;
-    const idx = add(id, m.name || "", ang, r, depth, color, m.isAlive !== false);
+    const cx = (x0 + x1) / 2;
+    const idx = nodes.length;
+    nodes.push({ id, name: m.name || "", x: cx, y, r: nodeR(depth), depth, color, alive: m.isAlive !== false });
     if (parentIdx >= -1) links.push({ from: parentIdx, to: idx, trunk: parentIdx === -1 });
 
-    if (depth + 1 > maxGen) { hidden += (leafCount[id] || 1) - 1; return idx; }
+    if (depth + 1 > maxGen) { hidden += Math.max(0, (sonsOf(id, childrenMap, byId) || []).length); return idx; }
     const kids = sonsOf(id, childrenMap, byId);
     if (kids.length === 0) return idx;
 
-    // كل الأبناء أطراف: عنقودٌ مرصوص فوق الأب، صفًّا بعد صف
+    // كل الأبناء أطراف: عنقود مرصوص فوق الأب (صفوف قصيرة متراصّة)
     if (kids.every((k) => sonsOf(k.id, childrenMap, byId).length === 0)) {
-      const kr = nodeR(depth + 1), step = 2 * kr + GAP;
-      let placed = 0, rr = r + rc + kr + 12;
-      while (placed < kids.length) {
-        const perRow = Math.max(1, Math.floor((wedge * rr) / step));
-        const take = Math.min(perRow, kids.length - placed);
-        const span = (take * step) / rr;
-        const start = ang - span / 2;
-        for (let t = 0; t < take; t++) {
-          const k = kids[placed + t];
-          const ka = start + ((t + 0.5) * step) / rr;
-          const ki = add(k.id, k.name || "", ka, rr, depth + 1, color, k.isAlive !== false);
-          links.push({ from: idx, to: ki });
-        }
-        placed += take; rr += step + 2;
-      }
+      const kr = nodeR(depth + 1), stepX = 2 * kr + GAPX, stepY = 2 * kr + 7;
+      const cols = Math.max(1, Math.min(kids.length, Math.floor((x1 - x0) / stepX) || 1));
+      kids.forEach((k, i) => {
+        const row = Math.floor(i / cols), col = i % cols;
+        const inRow = Math.min(cols, kids.length - row * cols);
+        const startX = cx - ((inRow - 1) * stepX) / 2;
+        const ki = nodes.length;
+        nodes.push({ id: k.id, name: k.name || "", x: startX + col * stepX, y: y - ROW * 0.62 - row * stepY, r: kr, depth: depth + 1, color, alive: k.isAlive !== false });
+        links.push({ from: idx, to: ki });
+      });
       return idx;
     }
 
-    let a = a0;
-    const total = kids.reduce((sum, k) => sum + (leafCount[k.id] || 1), 0) || 1;
+    const widths = kids.map((k) => widthOf(k.id, depth + 1));
+    const totalW = widths.reduce((a, b) => a + b, 0) || 1;
+    const span = Math.max(totalW, x1 - x0);
+    let cx0 = cx - span / 2;
     kids.forEach((k, i) => {
-      const b = a + wedge * ((leafCount[k.id] || 1) / total);
-      place(k.id, a, b, depth + 1, color || POSTER_COLORS[i % POSTER_COLORS.length], idx, r);
-      a = b;
+      const w = (widths[i] / totalW) * span;
+      place(k.id, cx0, cx0 + w, depth + 1, y - ROW, color || POSTER_COLORS[i % POSTER_COLORS.length], idx);
+      cx0 += w;
     });
     return idx;
   };
 
   const crownKids = sonsOf(crownRootId, childrenMap, byId);
-  const crownTotal = crownKids.reduce((s, k) => s + (leafCount[k.id] || 1), 0) || 1;
-  let a = A0;
+  const cw = crownKids.map((k) => widthOf(k.id, 0));
+  const totalW = cw.reduce((a, b) => a + b, 0) || 1;
+  let x = -totalW / 2;
   crownKids.forEach((k, i) => {
-    const b = a + (A1 - A0) * ((leafCount[k.id] || 1) / crownTotal);
-    place(k.id, a, b, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, 0);
-    a = b;
+    place(k.id, x, x + cw[i], 0, -140, POSTER_COLORS[i % POSTER_COLORS.length], -1);
+    x += cw[i];
+  });
+
+  // انحناء التاج: الفروع الطرفية تنزل قليلًا فيستدير المجموع كتاج الشجرة
+  const halfW = Math.max(1, totalW / 2);
+  nodes.forEach((n) => {
+    const t = Math.min(1, Math.abs(n.x) / halfW);
+    n.y += t * t * 190;
   });
 
   const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
@@ -3111,8 +3110,8 @@ function PosterTreeModal({ members, meId, onClose }) {
               const f = l.from < 0 ? { x: 0, y: 0 } : L.nodes[l.from];
               const t = L.nodes[l.to];
               if (!t) return null;
-              const mx = (f.x + t.x) / 2 * 1.04, my = (f.y + t.y) / 2 * 1.04;
-              return <path key={"l" + i} d={`M ${f.x} ${f.y} Q ${mx} ${my} ${t.x} ${t.y}`}
+              const my = (f.y + t.y) / 2;
+              return <path key={"l" + i} d={`M ${f.x} ${f.y} C ${f.x} ${my}, ${t.x} ${my}, ${t.x} ${t.y}`}
                 stroke={l.trunk ? "#7A552F" : "#9C8465"} strokeWidth={l.trunk ? 5 : Math.max(1, 3 - t.depth * 0.5)} fill="none" strokeLinecap="round" opacity={0.8} />;
             })}
 
