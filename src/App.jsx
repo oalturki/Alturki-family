@@ -3002,22 +3002,18 @@ function PosterTreeModal({ members, meId, onClose }) {
   const { byId, childrenMap } = useMemo(() => treeMaps(members), [members]);
   const rootMember = useMemo(() => members.find((m) => !m.fatherId), [members]);
   // رؤوس الفروع: من له ذرّية ممتدة فقط — والفروع المنقطعة لا تُعرض في القائمة
-  // رؤوس الفروع: من له حفيدٌ فأكثر — أيًّا كان جيله. ومن لا ذرّية ممتدة له لا يظهر
+  // رؤوس الفروع: أبناء الفروع الرئيسية (أبناء عبدالرحمن وعثمان وناصر ومحمد…)
   const branchHeads = useMemo(() => {
     if (!rootMember) return [];
-    const out = [];
-    const walk = (m, path) => {
-      const kids = sonsOf(m.id, childrenMap, byId);
-      const hasGrand = kids.some((k) => sonsOf(k.id, childrenMap, byId).length > 0);
-      const nasab = path.length ? `${m.name} بن ${path.join(" بن ")}` : m.name;
-      if (hasGrand && path.length >= 1) out.push({ m, label: nasab, depth: Math.min(path.length - 1, 3) });
-      kids.forEach((k) => walk(k, [m.name, ...path]));
-    };
-    // نبدأ من أول جدٍّ تعدّد أبناؤه، فلا تُعرض سلسلة الجذع نفسها
     let c = rootMember, kids = sonsOf(c.id, childrenMap, byId), pathNames = [c.name];
     while (kids.length === 1) { c = kids[0]; pathNames.unshift(c.name); kids = sonsOf(c.id, childrenMap, byId); }
-    kids.forEach((k) => walk(k, pathNames));
-    return out.sort((a, b) => a.depth - b.depth || a.label.localeCompare(b.label, "ar")).slice(0, 400);
+    const out = [];
+    kids.forEach((main) => {
+      sonsOf(main.id, childrenMap, byId).forEach((k) => {
+        out.push({ m: k, main: main.name, label: `${k.name} بن ${main.name}`, count: sonsOf(k.id, childrenMap, byId).length });
+      });
+    });
+    return out;
   }, [rootMember, childrenMap, byId]);
 
   const [rootId, setRootId] = useState(null);
@@ -3074,8 +3070,12 @@ function PosterTreeModal({ members, meId, onClose }) {
       <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 12, marginBottom: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 7 }}>اختر الفرع</div>
         <select value={rootId || ""} onChange={(e) => setRootId(e.target.value)} style={{ ...inputStyle, appearance: "auto" }}>
-          {branchHeads.map(({ m, label }) => (
-            <option key={m.id} value={m.id}>{label}</option>
+          {Array.from(new Set(branchHeads.map((b) => b.main))).map((mainName) => (
+            <optgroup key={mainName} label={`فرع ${mainName}`}>
+              {branchHeads.filter((b) => b.main === mainName).map(({ m, label }) => (
+                <option key={m.id} value={m.id}>{label}</option>
+              ))}
+            </optgroup>
           ))}
           {meId && byId[meId] && <option value={meId}>فرعي أنا — {byId[meId].name}</option>}
         </select>
