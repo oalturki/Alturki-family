@@ -2896,7 +2896,7 @@ function FanChartModal({ centerId, members, onClose }) {
 }
 
 /* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
-const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#E89BB0", "#7FC4C4", "#D4B483", "#A8C686", "#C49BD4"];
+const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#F3A3B8", "#7FC4C4", "#D9C27E", "#A8C686", "#C49BD4"];
 
 // تخطيط بالقوى: الأب يجذب أبناءه فتقصر الوصلات ويلتفّون حوله،
 // وكل الدوائر تتنافر فلا تتراكب، وضغطٌ عام نحو المركز يملأ الفراغ
@@ -2918,6 +2918,7 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
   const rnd = () => { sd = (sd * 9301 + 49297) % 233280; return sd / 233280; };
 
   const nodes = [], links = [];
+  let branchNo = 0;
   const build = (id, depth, color, parentIdx, px, py) => {
     const m = byId[id] || {};
     const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
@@ -2926,7 +2927,7 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
     const ang = -Math.PI / 2 + (rnd() - 0.5) * 2.2;
     const dist = 70 + depth * 12;
     nodes.push({
-      id, name: m.name || "", depth, color, alive: m.isAlive !== false, r: nodeR(depth),
+      id, name: m.name || "", depth, color, alive: m.isAlive !== false, r: nodeR(depth), branch: branchNo,
       x: px + Math.cos(ang) * dist, y: py + Math.sin(ang) * dist,
     });
     if (parentIdx >= -1) links.push({ from: parentIdx, to: idx, trunk: parentIdx === -1 });
@@ -2935,10 +2936,24 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
   };
 
   const crownKids = sonsOf(crownRootId, childrenMap, byId);
-  const spreadW = Math.max(300, crownKids.length * 220);
+  // وزن كل فرع بعدد أفراده، ليأخذ قطاعًا («شريحة كيكة») بقدر حجمه
+  const branchWeight = crownKids.map((k) => {
+    let n = 0;
+    const walk = (id, d) => { n++; if (d < maxGen) sonsOf(id, childrenMap, byId).forEach((c) => walk(c.id, d + 1)); };
+    walk(k.id, 0);
+    return n;
+  });
+  const wSum = branchWeight.reduce((a, b) => a + b, 0) || 1;
+  const SEC0 = -Math.PI * 0.99, SEC1 = -Math.PI * 0.01, PAD = 0.02;
+  const sectors = [];
+  let acc = SEC0;
   crownKids.forEach((k, i) => {
-    const x0 = -spreadW / 2 + (spreadW * (i + 0.5)) / crownKids.length;
-    build(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, x0, -260);
+    const w = (SEC1 - SEC0) * (branchWeight[i] / wSum);
+    sectors.push([acc + PAD, acc + w - PAD]);
+    const mid = acc + w / 2;
+    branchNo = i;
+    build(k.id, 0, POSTER_COLORS[i % POSTER_COLORS.length], -1, Math.cos(mid) * 320, Math.sin(mid) * 320);
+    acc += w;
   });
 
   // ===== محاكاة القوى =====
@@ -2988,8 +3003,18 @@ function buildPosterLayout(rootId, byId, childrenMap, maxGen, seed = 1) {
         }
       }
     });
-    // تبقى الهالة فوق الجذع
-    nodes.forEach((n) => { if (n.y > -90) n.y = -90; });
+    // حصر كل فرع في قطاعه (شريحة الكيكة) فلا تتداخل الفروع ولا تتقاطع أغصانها
+    nodes.forEach((n) => {
+      const sec = sectors[n.branch];
+      if (!sec) return;
+      const d = Math.hypot(n.x, n.y) || 1;
+      let a = Math.atan2(n.y, n.x);
+      if (a > 0) a = a > Math.PI / 2 ? -Math.PI + 0.05 : -0.05;   // منع النزول تحت الأفق
+      const [a0, a1] = sec;
+      if (a < a0) a = a0; else if (a > a1) a = a1;
+      n.x = Math.cos(a) * d; n.y = Math.sin(a) * d;
+      if (n.y > -90) n.y = -90;
+    });
   }
 
   const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
