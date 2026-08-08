@@ -2895,6 +2895,213 @@ function FanChartModal({ centerId, members, onClose }) {
   ), extra);
 }
 
+/* ============ الشجرة المولّدة (على هيئة الشجرة المطبوعة) ============ */
+const POSTER_COLORS = ["#E8A87C", "#8FBF8F", "#9B9BD4", "#E89BB0", "#7FC4C4", "#D4B483", "#A8C686", "#C49BD4"];
+
+// تخطيط شعاعي على هيئة هالة الشجرة: الجذع لأسفل والفروع تتوزّع في قوس علوي
+function buildPosterLayout(rootId, byId, childrenMap, maxGen) {
+  const nodes = [], links = [];
+  let hidden = 0;
+
+  const leafCount = {};
+  const countLeaves = (id, depth) => {
+    const kids = depth >= maxGen ? [] : sonsOf(id, childrenMap, byId);
+    if (kids.length === 0) { leafCount[id] = 1; return 1; }
+    let s = 0;
+    kids.forEach((k) => { s += countLeaves(k.id, depth + 1); });
+    leafCount[id] = s;
+    return s;
+  };
+  countLeaves(rootId, 0);
+
+  const trunk = [];
+  let cur = rootId;
+  while (true) {
+    const kids = sonsOf(cur, childrenMap, byId);
+    trunk.push(cur);
+    if (kids.length === 1) { cur = kids[0].id; } else break;
+  }
+  const crownRootId = trunk[trunk.length - 1];
+
+  const A0 = Math.PI * 1.06, A1 = Math.PI * 1.94;   // قوس الهالة (أعلى الصفحة)
+  const R0 = 150, RSTEP = 92;
+
+  const place = (id, a0, a1, depth, color) => {
+    const ang = (a0 + a1) / 2;
+    const r = R0 + depth * RSTEP;
+    const x = Math.cos(ang) * r, y = Math.sin(ang) * r;
+    nodes.push({ id, name: (byId[id] || {}).name || "", x, y, depth, color, alive: (byId[id] || {}).isAlive !== false });
+    const kids = depth + 1 > maxGen ? [] : sonsOf(id, childrenMap, byId);
+    if (depth + 1 > maxGen) hidden += (leafCount[id] || 1) - 1;
+    let a = a0;
+    const total = kids.reduce((s, k) => s + (leafCount[k.id] || 1), 0) || 1;
+    kids.forEach((k, i) => {
+      const b = a + (a1 - a0) * ((leafCount[k.id] || 1) / total);
+      const child = place(k.id, a, b, depth + 1, color || POSTER_COLORS[i % POSTER_COLORS.length]);
+      links.push({ from: { x, y }, to: child });
+      a = b;
+    });
+    return { x, y };
+  };
+
+  const crownKids = sonsOf(crownRootId, childrenMap, byId);
+  const crownTotal = crownKids.reduce((s, k) => s + (leafCount[k.id] || 1), 0) || 1;
+  let a = A0;
+  const crownAt = { x: 0, y: 0 };
+  crownKids.forEach((k, i) => {
+    const b = a + (A1 - A0) * ((leafCount[k.id] || 1) / crownTotal);
+    const child = place(k.id, a, b, 0, POSTER_COLORS[i % POSTER_COLORS.length]);
+    links.push({ from: crownAt, to: child, trunk: true });
+    a = b;
+  });
+
+  const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
+  const minX = Math.min(-120, ...xs) - 60, maxX = Math.max(120, ...xs) + 60;
+  const minY = Math.min(-120, ...ys) - 60;
+  const trunkH = 120 + trunk.length * 76;
+  return { nodes, links, trunk: trunk.map((id) => (byId[id] || {}).name || ""), minX, maxX, minY, trunkH, hidden, total: nodes.length + trunk.length };
+}
+
+function PosterTreeModal({ members, meId, onClose }) {
+  const { byId, childrenMap } = useMemo(() => treeMaps(members), [members]);
+  const rootMember = useMemo(() => members.find((m) => !m.fatherId), [members]);
+  const [rootId, setRootId] = useState(rootMember ? rootMember.id : null);
+  const [maxGen, setMaxGen] = useState(4);
+  const [q, setQ] = useState("");
+  const [saving, setSaving] = useState(false);
+  const svgRef = useRef(null);
+  useEffect(() => { if (!rootId && rootMember) setRootId(rootMember.id); }, [rootMember]);
+
+  const normA = (x) => normalizeArabicLetters(x || "").split(/\s+/).filter((w) => w && w !== "بن").join(" ").trim();
+  const matches = q.trim().length < 2 ? [] : members.filter((m) => m.gender !== "female" && normA(m.nasab || m.name).includes(normA(q))).slice(0, 6);
+
+  const L = useMemo(() => (rootId ? buildPosterLayout(rootId, byId, childrenMap, maxGen) : null), [rootId, byId, childrenMap, maxGen]);
+  const root = rootId ? byId[rootId] : null;
+
+  if (!L || !root) return null;
+  const W = Math.max(700, L.maxX - L.minX);
+  const H = Math.max(600, -L.minY + L.trunkH + 120);
+  const ox = -L.minX, oy = -L.minY;   // نقل الأصل إلى أعلى يسار اللوحة
+
+  const exportPdf = async () => {
+    const svg = svgRef.current; if (!svg || saving) return;
+    setSaving(true);
+    try {
+      const xml = new XMLSerializer().serializeToString(svg);
+      const url = "data:image/svg+xml;charset=utf-8;base64," + btoa(unescape(encodeURIComponent(xml)));
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+      const scale = Math.min(2.4, 2600 / W);
+      const c = document.createElement("canvas");
+      c.width = Math.round(W * scale); c.height = Math.round(H * scale);
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#EAF3F8"; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      const png = c.toDataURL("image/png");
+      const j = await ensureJsPdf();
+      const pdf = new j.jsPDF({ orientation: W > H ? "l" : "p", unit: "pt", format: [W, H] });
+      pdf.addImage(png, "PNG", 0, 0, W, H);
+      pdf.save(`شجرة_${root.name}.pdf`);
+    } catch (e) { console.error(e); }
+    setSaving(false);
+  };
+
+  const nodeR = (d) => (d === 0 ? 26 : d === 1 ? 21 : d === 2 ? 18 : 15);
+  const fsFor = (d) => (d === 0 ? 11 : d === 1 ? 9.5 : d === 2 ? 8.5 : 7.5);
+
+  const extra = (
+    <button onClick={exportPdf} disabled={saving} style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8, padding: "6px 10px", color: "#fff", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
+      {saving ? <Loader2 size={14} style={{ animation: "rosette-spin 1s linear infinite" }} /> : <Download size={14} />} PDF
+    </button>
+  );
+
+  return modalShell("الشجرة المولّدة", <GitBranch size={17} color={TT.gold400} />, onClose, (
+    <div>
+      {/* اختيار الفرع وعدد الأجيال */}
+      <div style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 14, padding: 12, marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 7 }}>الفرع المعروض</div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+          <button onClick={() => { setRootId(rootMember.id); setQ(""); }} style={{ background: rootId === (rootMember || {}).id ? T.ink : T.card, color: rootId === (rootMember || {}).id ? T.sand : T.ink, border: `1px solid ${T.line}`, borderRadius: 999, padding: "6px 13px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>كل العائلة</button>
+          {meId && byId[meId] && (
+            <button onClick={() => { setRootId(meId); setQ(""); }} style={{ background: rootId === meId ? T.ink : T.card, color: rootId === meId ? T.sand : T.ink, border: `1px solid ${T.line}`, borderRadius: 999, padding: "6px 13px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>فرعي أنا</button>
+          )}
+        </div>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="أو ابحث عن جدٍّ لتبدأ الشجرة منه…" style={inputStyle} />
+        {matches.length > 0 && (
+          <div style={{ border: `1px solid ${T.line}`, borderRadius: 10, marginTop: 6, maxHeight: 180, overflow: "auto" }}>
+            {matches.map((m) => (
+              <div key={m.id} onClick={() => { setRootId(m.id); setQ(""); }} style={{ padding: "8px 11px", borderBottom: `1px solid ${T.line}`, cursor: "pointer", fontSize: 12, color: T.text }}>{m.nasab || m.name}</div>
+            ))}
+          </div>
+        )}
+        <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, margin: "12px 0 7px" }}>عدد الأجيال المعروضة</div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[[3, "٣ أجيال"], [4, "٤ أجيال"], [6, "٦ أجيال"], [99, "الكل"]].map(([g, lbl]) => (
+            <button key={g} onClick={() => setMaxGen(g)} style={{ flex: 1, background: maxGen === g ? T.sandDark : T.card, color: T.ink, border: `1.5px solid ${maxGen === g ? T.gold : T.line}`, borderRadius: 10, padding: "8px 4px", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>{lbl}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ fontSize: 11.5, color: T.muted, textAlign: "center", marginBottom: 8, lineHeight: 1.8 }}>
+        شجرة {root.name} — {L.total} اسمًا معروضًا{L.hidden > 0 ? ` (و${L.hidden} في أجيال أعمق لم تُعرض)` : ""}. للطباعة استخدم زر «PDF».
+      </div>
+
+      <div style={{ overflow: "auto", border: `1px solid ${T.line}`, borderRadius: 12, background: "#EAF3F8", maxHeight: "62vh" }}>
+        <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+          <defs>
+            <linearGradient id="poster-sky" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#DCEBF5" /><stop offset="100%" stopColor="#F2F6E9" />
+            </linearGradient>
+            <linearGradient id="poster-trunk" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#6B4A2F" /><stop offset="45%" stopColor="#9A6C42" /><stop offset="100%" stopColor="#5E3F27" />
+            </linearGradient>
+          </defs>
+          <rect x={0} y={0} width={W} height={H} fill="url(#poster-sky)" />
+          <rect x={0} y={H - 70} width={W} height={70} fill="#CFE0B4" />
+
+          <g transform={`translate(${ox}, ${oy})`}>
+            {/* الجذع */}
+            <path d={`M ${-46} ${L.trunkH} L ${-24} 0 L 24 0 L 46 ${L.trunkH} Z`} fill="url(#poster-trunk)" />
+            {L.trunk.map((nm, i) => {
+              const y = L.trunkH - 60 - i * 76;
+              const rx = 30 - i * 2.5, ry = 21 - i * 1.6;
+              return (
+                <g key={"tr" + i}>
+                  <ellipse cx={0} cy={y} rx={Math.max(18, rx)} ry={Math.max(13, ry)} fill="#FFFDF8" stroke="#7A552F" strokeWidth={1.2} />
+                  <text x={0} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={Math.max(9, 13 - i)} fontWeight={800} fill="#5E3F27" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{nm}</text>
+                </g>
+              );
+            })}
+
+            {/* الأغصان */}
+            {L.links.map((l, i) => (
+              <path key={"l" + i} d={`M ${l.from.x} ${l.from.y} C ${l.from.x} ${(l.from.y + l.to.y) / 2}, ${l.to.x} ${(l.from.y + l.to.y) / 2}, ${l.to.x} ${l.to.y}`}
+                stroke={l.trunk ? "#7A552F" : "#9C8465"} strokeWidth={l.trunk ? 5 : 1.6} fill="none" strokeLinecap="round" opacity={0.85} />
+            ))}
+
+            {/* الأفراد */}
+            {L.nodes.map((n) => {
+              const r = nodeR(n.depth), fs = fsFor(n.depth);
+              const maxCh = Math.max(3, Math.floor((r * 2) / (fs * 0.55)));
+              const nm = n.name.length > maxCh ? n.name.slice(0, maxCh - 1) + "…" : n.name;
+              return (
+                <g key={n.id}>
+                  <circle cx={n.x} cy={n.y} r={r} fill={n.color} stroke={n.alive ? "#5E3F27" : "#A24936"} strokeWidth={1.1} strokeDasharray={n.alive ? "" : "3 2"} />
+                  <text x={n.x} y={n.y} textAnchor="middle" dominantBaseline="middle" fontSize={fs} fontWeight={600} fill="#22312C" style={{ fontFamily: "'Readex Pro', sans-serif" }}>{nm}</text>
+                </g>
+              );
+            })}
+          </g>
+
+          <text x={W / 2} y={H - 28} textAnchor="middle" fontSize={16} fontWeight={800} fill="#4A3A22" style={{ fontFamily: "'Aref Ruqaa', serif" }}>
+            شجرة أنساب عائلة آل تركي — فرع {root.name}
+          </text>
+        </svg>
+      </div>
+    </div>
+  ), extra);
+}
+
 // ===== حاسبة القرابة =====
 function chainIds(id, byId) {
   const s = []; let c = id; const seen = new Set();
@@ -3122,6 +3329,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
   const [groupGameOpen, setGroupGameOpen] = useState(false);
   useEffect(() => { if (gameInvite) setGroupGameOpen(true); }, [gameInvite]);
   const [fanOpen, setFanOpen] = useState(false);
+  const [posterOpen, setPosterOpen] = useState(false);
   const centeredRef = useRef(false);
   const [expandedResults, setExpandedResults] = useState(() => new Set());
   const [treeView, setTreeView] = useState("interactive"); // interactive | pictorial
@@ -3499,6 +3707,7 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
                 ["الإحصاءات", <Newspaper size={16} color={T.gold} />, () => setStatsOpen(true)],
                 ["الشعاعي", <Sun size={16} color={T.gold} />, () => setFanOpen(true)],
                 ["دليل الهاتف", <Phone size={16} color={T.gold} />, () => setPhoneDirOpen(true)],
+                ["الشجرة المولّدة", <GitBranch size={16} color={T.gold} />, () => setPosterOpen(true)],
               ].map(([lbl, icn, fn], i) => (
                 <button key={i} onClick={fn} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, padding: "8px 3px", minHeight: 48, background: T.card, color: T.ink, border: `1px solid ${T.line}`, borderRadius: 10, fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
                   {icn}
@@ -3688,6 +3897,9 @@ function TreeTab({ members, setMembers, profilesMap, canManageTree, meId, gameIn
       )}
       {fanOpen && rootId && (
         <FanChartModal centerId={rootId} members={members} onClose={() => setFanOpen(false)} />
+      )}
+      {posterOpen && (
+        <PosterTreeModal members={members} meId={meId} onClose={() => setPosterOpen(false)} />
       )}
     </div>
   );
