@@ -2909,7 +2909,7 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
     return Math.max(d === 0 ? 30 : d === 1 ? 22 : 18, w / 2 + 6);
   };
   const PAD = 11;                                        // فراغ بين الأشقاء على قوسهم
-  const STEP = (d) => (d === 1 ? 122 : Math.max(56, 104 - d * 8)); // طول الغصن، يقصر بالارتفاع
+  const STEP = (d) => (d === 1 ? 108 : Math.max(50, 92 - d * 7)); // طول الغصن، يقصر بالارتفاع
   const GAP_A = 0.42;                                    // فتحة أسفل التاج ينزل منها الجذع
   const A0 = Math.PI / 2 + GAP_A / 2;
   const ARC = 2 * Math.PI - GAP_A;
@@ -2921,17 +2921,20 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
 
   const kidsOf = (id, d) => (d >= maxGen ? [] : sonsOf(id, childrenMap, byId));
 
-  // وزن الفرع = عدد أطرافه، فتتوزّع الزوايا بعدل ولا يبتلع فرعٌ حيّز جاره
-  const wCache = {};
-  const leavesOf = (id, d) => {
+  // مطلب الفرع بطول القوس (لا بعدد أفراده): الأكبر بين قطر الاسم ومجموع مطالب أبنائه.
+  // به تُقسَّم الزوايا، فلا يُخنق طرفٌ وحيد بين إخوةٍ كبار ولا يتراكب اسمان أبدًا.
+  const dCache = {};
+  const demand = (id, d) => {
     const key = id + "|" + d;
-    if (wCache[key] != null) return wCache[key];
+    if (dCache[key] != null) return dCache[key];
+    const m = byId[id] || {};
+    const own = 2 * radiusFor(m.name, d) + PAD;
     const kids = kidsOf(id, d);
-    const v = kids.length === 0 ? 1 : kids.reduce((a, k) => a + leavesOf(k.id, d + 1), 0);
-    wCache[key] = v;
+    const v = kids.length === 0 ? own : Math.max(own, kids.reduce((a, k) => a + demand(k.id, d + 1), 0));
+    dCache[key] = v;
     return v;
   };
-  leavesOf(headId, 0);
+  demand(headId, 0);
 
   const countHidden = (id, d) => {
     const kids = sonsOf(id, childrenMap, byId);
@@ -2948,27 +2951,26 @@ function buildBranchLayout(headId, byId, childrenMap, maxGen) {
   };
 
   const nodes = [], links = [];
-  // يضع أبناء عقدةٍ على قوسٍ بُعده من أبيهم بقدر ما يتّسع لهم وحدهم
+  // أبناء العقدة على قوسٍ بُعده من أبيهم بقدر ما يتّسع لمطالبهم وحدهم
   const spread = (parentIdx, id, d, a0, a1, parentR, color) => {
     const kids = kidsOf(id, d);
     if (kids.length === 0) return;
-    const rs = kids.map((k) => radiusFor((byId[k.id] || {}).name, d + 1));
-    const need = rs.reduce((a, r) => a + 2 * r + PAD, 0) * 1.08 / Math.max(0.12, a1 - a0);
-    const baseR = Math.max(parentR + STEP(d + 1), need);
-    const ws = kids.map((k) => leavesOf(k.id, d + 1));
-    const sum = ws.reduce((a, b) => a + b, 0) || 1;
+    const ds = kids.map((k) => demand(k.id, d + 1));
+    const sum = ds.reduce((x, y) => x + y, 0) || 1;
+    const wedge = Math.max(0.12, a1 - a0);
+    const baseR = Math.max(parentR + STEP(d + 1), sum * 1.04 / wedge);
     let acc = a0;
     kids.forEach((k, i) => {
-      const share = (a1 - a0) * (ws[i] / sum);
+      const share = wedge * (ds[i] / sum);
       const mid = acc + share / 2;
-      const r = baseR + jitter(k.id, STEP(d + 1) * 0.3);
+      const r = baseR + jitter(k.id, STEP(d + 1) * 0.26);
       const idx = nodes.length;
       const kc = d === 0 ? POSTER_COLORS[i % POSTER_COLORS.length] : color;
       const m = byId[k.id] || {};
       nodes.push({
         id: k.id, name: m.name || "", depth: d + 1, color: kc,
-        fill: mixToWhite(kc, Math.min(0.55, d * 0.12)),
-        alive: m.isAlive !== false, r: rs[i], fs: FS(d + 1),
+        fill: mixToWhite(kc, Math.min(0.5, d * 0.11)),
+        alive: m.isAlive !== false, r: radiusFor(m.name, d + 1), fs: FS(d + 1),
         x: Math.cos(mid) * r, y: Math.sin(mid) * r,
       });
       links.push({ from: parentIdx, to: idx });
